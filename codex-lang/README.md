@@ -127,6 +127,16 @@ cc -O3 build/mini_source.generated.c -o build/mini_source.generated
 ./build/mini_source.generated
 ```
 
+A wider self-hosted scalar example:
+
+```sh
+cd codex-lang
+./bin/codexc selfhost/mini_compiler.noe build/mini_compiler
+./build/mini_compiler examples/series.noe build/series.selfhost.generated.c
+cc -O3 build/series.selfhost.generated.c -o build/series.selfhost
+./build/series.selfhost
+```
+
 ## Compilation Strategy
 
 For now, `Noema` compiles to generated C source and then uses the host C compiler to produce an optimized native binary.
@@ -147,9 +157,21 @@ There is now also an experimental `native-arm64` backend for `arm64-apple-darwin
 There is also now a first self-hosting bridge:
 
 - `selfhost/mini_compiler.noe` is a compiler written in Noema
-- it tokenizes, builds a small AST, parses a strict `i64` subset, and emits C
+- it tokenizes, builds a small AST, parses a scalar `i64` subset, and emits C
 - that means Noema is now compiling Noema, even though Rust still provides the outer bootstrap compiler
 - the next job is widening that Noema-written compiler until the Rust compiler becomes optional
+
+Current self-hosted subset:
+
+- multiple `@fn(...) -> i64 { ... }` functions
+- `i64` parameters
+- `:=` bindings and `=` assignment
+- `!` and `^`
+- `?` / `|` and `~`
+- function calls
+- integer arithmetic and scalar comparisons
+
+That subset is already large enough for the Noema-written compiler to compile [series.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/series.noe) end to end and produce the correct output of `55` and `55`.
 
 ## Intent
 

@@ -173,19 +173,23 @@ Current scope of that compiler:
 
 - tokenizes source text itself
 - builds a small AST for expressions and statements
-- parses a strict `i64`-only subset
+- parses a scalar `i64`-only subset
 - emits portable C
 
 Current accepted subset:
 
-- a single `@main() -> i64 { ... }` function
+- multiple `@name(...) -> i64 { ... }` functions
+- `i64` parameters
 - `name := expr;`
 - `name = expr;`
 - `! expr;`
 - `^ expr;`
-- expressions using integer literals, names, `()`, `+`, `-`, `*`, `/`
+- `? (condition) { ... } | { ... }`
+- `~ (condition) { ... }`
+- function-call expressions
+- expressions using integer literals, names, `()`, `+`, `-`, `*`, `/`, `<`, `<=`, `>`, `>=`, `==`, `!=`
 
-This is intentionally narrow, but it is a real self-hosting bridge rather than a string-rewrite trick. The long-term plan is to widen this Noema-written compiler until the Rust compiler is just a bootstrap artifact.
+This is still intentionally narrow relative to full Noema, but it is now large enough to compile `examples/series.noe` through the Noema-written compiler itself. The long-term plan is to keep widening this compiler until the Rust compiler is just a bootstrap artifact.
 
 ## Networking
 

@@ -10,22 +10,31 @@
     op: text;
     left: i64;
     right: i64;
+    args: list<i64>;
 }
 
 %Stmt {
     tag: text;
     name: text;
     expr: i64;
+    body: list<i64>;
+    alt: list<i64>;
 }
 
-%ParseState {
+%Function {
+    name: text;
+    params: list<text>;
+    body: list<i64>;
+}
+
+%State {
     tokens: list<Token>;
     pos: i64;
     exprs: list<Expr>;
     stmts: list<Stmt>;
+    funcs: list<Function>;
     ok: bool;
     err: text;
-    fn_name: text;
 }
 
 %TokenizeResult {
@@ -35,19 +44,29 @@
 }
 
 %ExprResult {
-    state: ParseState;
+    state: State;
     index: i64;
 }
 
 %StmtResult {
-    state: ParseState;
-    stmt: Stmt;
+    state: State;
+    index: i64;
+}
+
+%BlockResult {
+    state: State;
+    items: list<i64>;
+}
+
+%ParamResult {
+    state: State;
+    names: list<text>;
 }
 
 %Program {
-    fn_name: text;
     exprs: list<Expr>;
     stmts: list<Stmt>;
+    funcs: list<Function>;
 }
 
 %ProgramResult {
@@ -72,18 +91,66 @@
     ^ find("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_", ch) >= 0;
 }
 
-@empty_expr() -> Expr {
-    ^ Expr { tag: "int", value: 0, name: "", op: "", left: -1, right: -1 };
+@empty_i64s() -> list<i64> {
+    xs :: list<i64> := [];
+    ^ xs;
 }
 
-@empty_stmt() -> Stmt {
-    ^ Stmt { tag: "emit", name: "", expr: 0 };
+@empty_texts() -> list<text> {
+    xs :: list<text> := [];
+    ^ xs;
 }
 
-@empty_program() -> Program {
-    exprs :: list<Expr> := [];
-    stmts :: list<Stmt> := [];
-    ^ Program { fn_name: "", exprs: exprs, stmts: stmts };
+@empty_exprs() -> list<Expr> {
+    xs :: list<Expr> := [];
+    ^ xs;
+}
+
+@empty_stmts() -> list<Stmt> {
+    xs :: list<Stmt> := [];
+    ^ xs;
+}
+
+@empty_funcs() -> list<Function> {
+    xs :: list<Function> := [];
+    ^ xs;
+}
+
+@token(kind: text, lex: text) -> Token {
+    ^ Token { kind: kind, lex: lex };
+}
+
+@expr_int(value: i64) -> Expr {
+    args := empty_i64s();
+    ^ Expr { tag: "int", value: value, name: "", op: "", left: -1, right: -1, args: args };
+}
+
+@expr_name(name: text) -> Expr {
+    args := empty_i64s();
+    ^ Expr { tag: "name", value: 0, name: name, op: "", left: -1, right: -1, args: args };
+}
+
+@expr_bin(op: text, left: i64, right: i64) -> Expr {
+    args := empty_i64s();
+    ^ Expr { tag: "bin", value: 0, name: "", op: op, left: left, right: right, args: args };
+}
+
+@expr_call(name: text, args: list<i64>) -> Expr {
+    ^ Expr { tag: "call", value: 0, name: name, op: "", left: -1, right: -1, args: args };
+}
+
+@stmt_simple(tag: text, name: text, expr: i64) -> Stmt {
+    body := empty_i64s();
+    alt := empty_i64s();
+    ^ Stmt { tag: tag, name: name, expr: expr, body: body, alt: alt };
+}
+
+@stmt_branch(tag: text, expr: i64, body: list<i64>, alt: list<i64>) -> Stmt {
+    ^ Stmt { tag: tag, name: "", expr: expr, body: body, alt: alt };
+}
+
+@func_decl(name: text, params: list<text>, body: list<i64>) -> Function {
+    ^ Function { name: name, params: params, body: body };
 }
 
 @ok_tokens(tokens: list<Token>) -> TokenizeResult {
@@ -94,47 +161,43 @@
     ^ TokenizeResult { tokens: tokens, ok: false, err: err };
 }
 
-@make_state(tokens: list<Token>) -> ParseState {
-    exprs :: list<Expr> := [];
-    stmts :: list<Stmt> := [];
-    ^ ParseState { tokens: tokens, pos: 0, exprs: exprs, stmts: stmts, ok: true, err: "", fn_name: "" };
+@make_state(tokens: list<Token>) -> State {
+    exprs := empty_exprs();
+    stmts := empty_stmts();
+    funcs := empty_funcs();
+    ^ State { tokens: tokens, pos: 0, exprs: exprs, stmts: stmts, funcs: funcs, ok: true, err: "" };
 }
 
-@copy_state(state: ParseState, pos: i64, exprs: list<Expr>, stmts: list<Stmt>, ok: bool, err: text, fn_name: text) -> ParseState {
-    ^ ParseState { tokens: state.tokens, pos: pos, exprs: exprs, stmts: stmts, ok: ok, err: err, fn_name: fn_name };
+@copy_state(state: State, pos: i64, exprs: list<Expr>, stmts: list<Stmt>, funcs: list<Function>, ok: bool, err: text) -> State {
+    ^ State { tokens: state.tokens, pos: pos, exprs: exprs, stmts: stmts, funcs: funcs, ok: ok, err: err };
 }
 
-@fail_state(state: ParseState, err: text) -> ParseState {
-    ^ copy_state(state, state.pos, state.exprs, state.stmts, false, err, state.fn_name);
+@fail_state(state: State, err: text) -> State {
+    ^ copy_state(state, state.pos, state.exprs, state.stmts, state.funcs, false, err);
 }
 
-@token(kind: text, lex: text) -> Token {
-    ^ Token { kind: kind, lex: lex };
+@advance_state(state: State) -> State {
+    ^ copy_state(state, state.pos + 1, state.exprs, state.stmts, state.funcs, state.ok, state.err);
 }
 
-@append_token(tokens: list<Token>, kind: text, lex: text) -> list<Token> {
-    ^ append(tokens, token(kind, lex));
-}
-
-@append_expr(state: ParseState, expr: Expr) -> ExprResult {
+@append_expr(state: State, expr: Expr) -> ExprResult {
     exprs := append(state.exprs, expr);
-    next := copy_state(state, state.pos, exprs, state.stmts, state.ok, state.err, state.fn_name);
+    next := copy_state(state, state.pos, exprs, state.stmts, state.funcs, state.ok, state.err);
     ^ ExprResult { state: next, index: count(exprs) - 1 };
 }
 
-@advance_state(state: ParseState) -> ParseState {
-    ^ copy_state(state, state.pos + 1, state.exprs, state.stmts, state.ok, state.err, state.fn_name);
+@append_stmt(state: State, stmt: Stmt) -> StmtResult {
+    stmts := append(state.stmts, stmt);
+    next := copy_state(state, state.pos, state.exprs, stmts, state.funcs, state.ok, state.err);
+    ^ StmtResult { state: next, index: count(stmts) - 1 };
 }
 
-@set_fn_name(state: ParseState, fn_name: text) -> ParseState {
-    ^ copy_state(state, state.pos, state.exprs, state.stmts, state.ok, state.err, fn_name);
+@append_func(state: State, func: Function) -> State {
+    funcs := append(state.funcs, func);
+    ^ copy_state(state, state.pos, state.exprs, state.stmts, funcs, state.ok, state.err);
 }
 
-@set_stmts(state: ParseState, stmts: list<Stmt>) -> ParseState {
-    ^ copy_state(state, state.pos, state.exprs, stmts, state.ok, state.err, state.fn_name);
-}
-
-@current_token(state: ParseState) -> Token {
+@current_token(state: State) -> Token {
     ? (state.pos >= count(state.tokens)) {
         ^ token("eof", "");
     }
@@ -142,7 +205,7 @@
     ^ tokens[state.pos];
 }
 
-@peek_kind(state: ParseState, delta: i64) -> text {
+@peek_kind(state: State, delta: i64) -> text {
     idx := state.pos + delta;
     ? (idx >= count(state.tokens)) {
         ^ "eof";
@@ -152,7 +215,7 @@
     ^ tok.kind;
 }
 
-@expect_kind(state: ParseState, kind: text) -> ParseState {
+@expect_kind(state: State, kind: text) -> State {
     ? (not state.ok) {
         ^ state;
     }
@@ -163,7 +226,7 @@
     ^ fail_state(state, "expected " + kind + ", got " + cur.kind + " '" + cur.lex + "'");
 }
 
-@expect_name_value(state: ParseState, value: text) -> ParseState {
+@expect_name_value(state: State, value: text) -> State {
     ? (not state.ok) {
         ^ state;
     }
@@ -172,6 +235,10 @@
         ^ advance_state(state);
     }
     ^ fail_state(state, "expected name '" + value + "', got " + cur.kind + " '" + cur.lex + "'");
+}
+
+@append_token(tokens: list<Token>, kind: text, lex: text) -> list<Token> {
+    ^ append(tokens, token(kind, lex));
 }
 
 @tokenize(src: text) -> TokenizeResult {
@@ -220,72 +287,138 @@
                             pos = pos + 2;
                         }
                         | {
-                            ? (ch == "@") {
-                                tokens = append_token(tokens, "at", ch);
-                                pos = pos + 1;
+                            ? (ch == "<" and next == "=") {
+                                tokens = append_token(tokens, "le", ch + next);
+                                pos = pos + 2;
                             }
                             | {
-                                ? (ch == "(") {
-                                    tokens = append_token(tokens, "lparen", ch);
-                                    pos = pos + 1;
+                                ? (ch == ">" and next == "=") {
+                                    tokens = append_token(tokens, "ge", ch + next);
+                                    pos = pos + 2;
                                 }
                                 | {
-                                    ? (ch == ")") {
-                                        tokens = append_token(tokens, "rparen", ch);
-                                        pos = pos + 1;
+                                    ? (ch == "=" and next == "=") {
+                                        tokens = append_token(tokens, "eqeq", ch + next);
+                                        pos = pos + 2;
                                     }
                                     | {
-                                        ? (ch == "{") {
-                                            tokens = append_token(tokens, "lbrace", ch);
-                                            pos = pos + 1;
+                                        ? (ch == "!" and next == "=") {
+                                            tokens = append_token(tokens, "neq", ch + next);
+                                            pos = pos + 2;
                                         }
                                         | {
-                                            ? (ch == "}") {
-                                                tokens = append_token(tokens, "rbrace", ch);
+                                            ? (ch == "@") {
+                                                tokens = append_token(tokens, "at", ch);
                                                 pos = pos + 1;
                                             }
                                             | {
-                                                ? (ch == ";") {
-                                                    tokens = append_token(tokens, "semi", ch);
+                                                ? (ch == "(") {
+                                                    tokens = append_token(tokens, "lparen", ch);
                                                     pos = pos + 1;
                                                 }
                                                 | {
-                                                    ? (ch == "!") {
-                                                        tokens = append_token(tokens, "emit", ch);
+                                                    ? (ch == ")") {
+                                                        tokens = append_token(tokens, "rparen", ch);
                                                         pos = pos + 1;
                                                     }
                                                     | {
-                                                        ? (ch == "^") {
-                                                            tokens = append_token(tokens, "ret", ch);
+                                                        ? (ch == "{") {
+                                                            tokens = append_token(tokens, "lbrace", ch);
                                                             pos = pos + 1;
                                                         }
                                                         | {
-                                                            ? (ch == "+") {
-                                                                tokens = append_token(tokens, "plus", ch);
+                                                            ? (ch == "}") {
+                                                                tokens = append_token(tokens, "rbrace", ch);
                                                                 pos = pos + 1;
                                                             }
                                                             | {
-                                                                ? (ch == "-") {
-                                                                    tokens = append_token(tokens, "minus", ch);
+                                                                ? (ch == ";") {
+                                                                    tokens = append_token(tokens, "semi", ch);
                                                                     pos = pos + 1;
                                                                 }
                                                                 | {
-                                                                    ? (ch == "*") {
-                                                                        tokens = append_token(tokens, "star", ch);
+                                                                    ? (ch == ",") {
+                                                                        tokens = append_token(tokens, "comma", ch);
                                                                         pos = pos + 1;
                                                                     }
                                                                     | {
-                                                                        ? (ch == "/") {
-                                                                            tokens = append_token(tokens, "slash", ch);
+                                                                        ? (ch == ":") {
+                                                                            tokens = append_token(tokens, "colon", ch);
                                                                             pos = pos + 1;
                                                                         }
                                                                         | {
-                                                                            ? (ch == "=") {
-                                                                                tokens = append_token(tokens, "assign", ch);
+                                                                            ? (ch == "?") {
+                                                                                tokens = append_token(tokens, "if", ch);
                                                                                 pos = pos + 1;
                                                                             }
                                                                             | {
-                                                                                ^ fail_tokens(tokens, "unsupported character '" + ch + "'");
+                                                                                ? (ch == "|") {
+                                                                                    tokens = append_token(tokens, "else", ch);
+                                                                                    pos = pos + 1;
+                                                                                }
+                                                                                | {
+                                                                                    ? (ch == "~") {
+                                                                                        tokens = append_token(tokens, "while", ch);
+                                                                                        pos = pos + 1;
+                                                                                    }
+                                                                                    | {
+                                                                                        ? (ch == "!") {
+                                                                                            tokens = append_token(tokens, "emit", ch);
+                                                                                            pos = pos + 1;
+                                                                                        }
+                                                                                        | {
+                                                                                            ? (ch == "^") {
+                                                                                                tokens = append_token(tokens, "ret", ch);
+                                                                                                pos = pos + 1;
+                                                                                            }
+                                                                                            | {
+                                                                                                ? (ch == "+") {
+                                                                                                    tokens = append_token(tokens, "plus", ch);
+                                                                                                    pos = pos + 1;
+                                                                                                }
+                                                                                                | {
+                                                                                                    ? (ch == "-") {
+                                                                                                        tokens = append_token(tokens, "minus", ch);
+                                                                                                        pos = pos + 1;
+                                                                                                    }
+                                                                                                    | {
+                                                                                                        ? (ch == "*") {
+                                                                                                            tokens = append_token(tokens, "star", ch);
+                                                                                                            pos = pos + 1;
+                                                                                                        }
+                                                                                                        | {
+                                                                                                            ? (ch == "/") {
+                                                                                                                tokens = append_token(tokens, "slash", ch);
+                                                                                                                pos = pos + 1;
+                                                                                                            }
+                                                                                                            | {
+                                                                                                                ? (ch == "<") {
+                                                                                                                    tokens = append_token(tokens, "lt", ch);
+                                                                                                                    pos = pos + 1;
+                                                                                                                }
+                                                                                                                | {
+                                                                                                                    ? (ch == ">") {
+                                                                                                                        tokens = append_token(tokens, "gt", ch);
+                                                                                                                        pos = pos + 1;
+                                                                                                                    }
+                                                                                                                    | {
+                                                                                                                        ? (ch == "=") {
+                                                                                                                            tokens = append_token(tokens, "assign", ch);
+                                                                                                                            pos = pos + 1;
+                                                                                                                        }
+                                                                                                                        | {
+                                                                                                                            ^ fail_tokens(tokens, "unsupported character '" + ch + "'");
+                                                                                                                        }
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            }
+                                                                                                        }
+                                                                                                    }
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
                                                                             }
                                                                         }
                                                                     }
@@ -310,7 +443,30 @@
     ^ ok_tokens(tokens);
 }
 
-@parse_primary(state: ParseState) -> ExprResult {
+@parse_args(state: State) -> BlockResult {
+    args := empty_i64s();
+    cur := current_token(state);
+    ? (cur.kind == "rparen") {
+        ^ BlockResult { state: state, items: args };
+    }
+
+    ~ (state.ok) {
+        item := parse_cmp(state);
+        args = append(args, item.index);
+        state = item.state;
+        cur = current_token(state);
+        ? (cur.kind == "comma") {
+            state = advance_state(state);
+        }
+        | {
+            ^ BlockResult { state: state, items: args };
+        }
+    }
+
+    ^ BlockResult { state: state, items: args };
+}
+
+@parse_primary(state: State) -> ExprResult {
     ? (not state.ok) {
         ^ ExprResult { state: state, index: 0 };
     }
@@ -319,18 +475,24 @@
 
     ? (cur.kind == "int") {
         next := advance_state(state);
-        expr := Expr { tag: "int", value: i64_of(cur.lex), name: "", op: "", left: -1, right: -1 };
-        ^ append_expr(next, expr);
+        ^ append_expr(next, expr_int(i64_of(cur.lex)));
     }
 
     ? (cur.kind == "name") {
         next := advance_state(state);
-        expr := Expr { tag: "name", value: 0, name: cur.lex, op: "", left: -1, right: -1 };
-        ^ append_expr(next, expr);
+        next_cur := current_token(next);
+        ? (next_cur.kind == "lparen") {
+            after_lparen := advance_state(next);
+            args_res := parse_args(after_lparen);
+            closed := expect_kind(args_res.state, "rparen");
+            expr := expr_call(cur.lex, args_res.items);
+            ^ append_expr(closed, expr);
+        }
+        ^ append_expr(next, expr_name(cur.lex));
     }
 
     ? (cur.kind == "lparen") {
-        inner := parse_add(advance_state(state));
+        inner := parse_cmp(advance_state(state));
         closed := expect_kind(inner.state, "rparen");
         ^ ExprResult { state: closed, index: inner.index };
     }
@@ -339,17 +501,16 @@
     ^ ExprResult { state: bad, index: 0 };
 }
 
-@parse_mul(state: ParseState) -> ExprResult {
+@parse_mul(state: State) -> ExprResult {
     left := parse_primary(state);
-
     loop_state := left.state;
     loop_token := current_token(loop_state);
+
     ~ (loop_state.ok and (loop_token.kind == "star" or loop_token.kind == "slash")) {
-        op_token := loop_token;
+        op := loop_token.lex;
         after_op := advance_state(loop_state);
         right := parse_primary(after_op);
-        expr := Expr { tag: "bin", value: 0, name: "", op: op_token.lex, left: left.index, right: right.index };
-        left = append_expr(right.state, expr);
+        left = append_expr(right.state, expr_bin(op, left.index, right.index));
         loop_state = left.state;
         loop_token = current_token(loop_state);
     }
@@ -357,17 +518,16 @@
     ^ left;
 }
 
-@parse_add(state: ParseState) -> ExprResult {
+@parse_add(state: State) -> ExprResult {
     left := parse_mul(state);
-
     loop_state := left.state;
     loop_token := current_token(loop_state);
+
     ~ (loop_state.ok and (loop_token.kind == "plus" or loop_token.kind == "minus")) {
-        op_token := loop_token;
+        op := loop_token.lex;
         after_op := advance_state(loop_state);
         right := parse_mul(after_op);
-        expr := Expr { tag: "bin", value: 0, name: "", op: op_token.lex, left: left.index, right: right.index };
-        left = append_expr(right.state, expr);
+        left = append_expr(right.state, expr_bin(op, left.index, right.index));
         loop_state = left.state;
         loop_token = current_token(loop_state);
     }
@@ -375,82 +535,212 @@
     ^ left;
 }
 
-@parse_stmt(state: ParseState) -> StmtResult {
-    cur := current_token(state);
-
-    ? (cur.kind == "emit") {
-        expr := parse_add(advance_state(state));
-        next := expect_kind(expr.state, "semi");
-        ^ StmtResult { state: next, stmt: Stmt { tag: "emit", name: "", expr: expr.index } };
-    }
-
-    ? (cur.kind == "ret") {
-        expr := parse_add(advance_state(state));
-        next := expect_kind(expr.state, "semi");
-        ^ StmtResult { state: next, stmt: Stmt { tag: "ret", name: "", expr: expr.index } };
-    }
-
-    ? (cur.kind == "name" and peek_kind(state, 1) == "bind") {
-        name := cur.lex;
-        after_name := advance_state(state);
-        after_bind := expect_kind(after_name, "bind");
-        expr := parse_add(after_bind);
-        next := expect_kind(expr.state, "semi");
-        ^ StmtResult { state: next, stmt: Stmt { tag: "let", name: name, expr: expr.index } };
-    }
-
-    ? (cur.kind == "name" and peek_kind(state, 1) == "assign") {
-        name := cur.lex;
-        after_name := advance_state(state);
-        after_assign := expect_kind(after_name, "assign");
-        expr := parse_add(after_assign);
-        next := expect_kind(expr.state, "semi");
-        ^ StmtResult { state: next, stmt: Stmt { tag: "assign", name: name, expr: expr.index } };
-    }
-
-    bad := fail_state(state, "unsupported statement starting with " + cur.kind + " '" + cur.lex + "'");
-    ^ StmtResult { state: bad, stmt: empty_stmt() };
+@is_cmp(kind: text) -> bool {
+    ^ kind == "le" or kind == "ge" or kind == "lt" or kind == "gt" or kind == "eqeq" or kind == "neq";
 }
 
-@parse_program(tokens: list<Token>) -> ProgramResult {
-    state := make_state(tokens);
-    state = expect_kind(state, "at");
-    ? (not state.ok) {
-        ^ ProgramResult { program: empty_program(), ok: false, err: state.err };
+@parse_cmp(state: State) -> ExprResult {
+    left := parse_add(state);
+    loop_state := left.state;
+    loop_token := current_token(loop_state);
+
+    ~ (loop_state.ok and is_cmp(loop_token.kind)) {
+        op := loop_token.lex;
+        after_op := advance_state(loop_state);
+        right := parse_add(after_op);
+        left = append_expr(right.state, expr_bin(op, left.index, right.index));
+        loop_state = left.state;
+        loop_token = current_token(loop_state);
     }
 
-    fn_token := current_token(state);
-    state = expect_kind(state, "name");
-    state = set_fn_name(state, fn_token.lex);
-    state = expect_kind(state, "lparen");
-    state = expect_kind(state, "rparen");
-    state = expect_kind(state, "arrow");
-    state = expect_name_value(state, "i64");
-    state = expect_kind(state, "lbrace");
+    ^ left;
+}
 
+@parse_block(state: State) -> BlockResult {
+    items := empty_i64s();
     cur := current_token(state);
+
     ~ (state.ok and cur.kind != "rbrace" and cur.kind != "eof") {
         stmt_res := parse_stmt(state);
-        stmt_state := stmt_res.state;
-        stmt := stmt_res.stmt;
-        stmts := append(stmt_state.stmts, stmt);
-        state = set_stmts(stmt_state, stmts);
+        items = append(items, stmt_res.index);
+        state = stmt_res.state;
         cur = current_token(state);
     }
 
     state = expect_kind(state, "rbrace");
-    state = expect_kind(state, "eof");
+    ^ BlockResult { state: state, items: items };
+}
+
+@parse_stmt(state: State) -> StmtResult {
+    cur := current_token(state);
+
+    ? (cur.kind == "emit") {
+        expr := parse_cmp(advance_state(state));
+        next := expect_kind(expr.state, "semi");
+        ^ append_stmt(next, stmt_simple("emit", "", expr.index));
+    }
+
+    ? (cur.kind == "ret") {
+        expr := parse_cmp(advance_state(state));
+        next := expect_kind(expr.state, "semi");
+        ^ append_stmt(next, stmt_simple("ret", "", expr.index));
+    }
+
+    ? (cur.kind == "if") {
+        next := expect_kind(advance_state(state), "lparen");
+        cond := parse_cmp(next);
+        next = expect_kind(cond.state, "rparen");
+        next = expect_kind(next, "lbrace");
+        body_res := parse_block(next);
+        alt := empty_i64s();
+        state = body_res.state;
+        cur = current_token(state);
+        ? (cur.kind == "else") {
+            state = expect_kind(advance_state(state), "lbrace");
+            alt_res := parse_block(state);
+            alt = alt_res.items;
+            state = alt_res.state;
+        }
+        ^ append_stmt(state, stmt_branch("if", cond.index, body_res.items, alt));
+    }
+
+    ? (cur.kind == "while") {
+        next := expect_kind(advance_state(state), "lparen");
+        cond := parse_cmp(next);
+        next = expect_kind(cond.state, "rparen");
+        next = expect_kind(next, "lbrace");
+        body_res := parse_block(next);
+        ^ append_stmt(body_res.state, stmt_branch("while", cond.index, body_res.items, empty_i64s()));
+    }
+
+    ? (cur.kind == "name" and peek_kind(state, 1) == "bind") {
+        name := cur.lex;
+        next := advance_state(state);
+        next = expect_kind(next, "bind");
+        expr := parse_cmp(next);
+        next = expect_kind(expr.state, "semi");
+        ^ append_stmt(next, stmt_simple("let", name, expr.index));
+    }
+
+    ? (cur.kind == "name" and peek_kind(state, 1) == "assign") {
+        name := cur.lex;
+        next := advance_state(state);
+        next = expect_kind(next, "assign");
+        expr := parse_cmp(next);
+        next = expect_kind(expr.state, "semi");
+        ^ append_stmt(next, stmt_simple("assign", name, expr.index));
+    }
+
+    bad := fail_state(state, "unsupported statement starting with " + cur.kind + " '" + cur.lex + "'");
+    ^ StmtResult { state: bad, index: 0 };
+}
+
+@parse_params(state: State) -> ParamResult {
+    params := empty_texts();
+    cur := current_token(state);
+    ? (cur.kind == "rparen") {
+        ^ ParamResult { state: state, names: params };
+    }
+    ~ (state.ok) {
+        cur = current_token(state);
+        ? (cur.kind != "name") {
+            bad := fail_state(state, "expected parameter name");
+            ^ ParamResult { state: bad, names: params };
+        }
+        params = append(params, cur.lex);
+        state = advance_state(state);
+        state = expect_kind(state, "colon");
+        state = expect_name_value(state, "i64");
+        cur = current_token(state);
+        ? (cur.kind == "comma") {
+            state = advance_state(state);
+        }
+        | {
+            ^ ParamResult { state: state, names: params };
+        }
+    }
+
+    ^ ParamResult { state: state, names: params };
+}
+
+@parse_function(state: State) -> State {
+    state = expect_kind(state, "at");
+    ? (not state.ok) {
+        ^ state;
+    }
+
+    name_tok := current_token(state);
+    state = expect_kind(state, "name");
+    state = expect_kind(state, "lparen");
+    params_res := parse_params(state);
+    state = params_res.state;
+    params := params_res.names;
+    state = expect_kind(state, "rparen");
+    state = expect_kind(state, "arrow");
+    state = expect_name_value(state, "i64");
+    state = expect_kind(state, "lbrace");
+    body_res := parse_block(state);
+    state = body_res.state;
+    func := func_decl(name_tok.lex, params, body_res.items);
+    ^ append_func(state, func);
+}
+
+@empty_program() -> Program {
+    exprs := empty_exprs();
+    stmts := empty_stmts();
+    funcs := empty_funcs();
+    ^ Program { exprs: exprs, stmts: stmts, funcs: funcs };
+}
+
+@parse_program(tokens: list<Token>) -> ProgramResult {
+    state := make_state(tokens);
+    cur := current_token(state);
+
+    ~ (state.ok and cur.kind != "eof") {
+        ? (cur.kind != "at") {
+            bad := fail_state(state, "expected function declaration");
+            ^ ProgramResult { program: empty_program(), ok: false, err: bad.err };
+        }
+        state = parse_function(state);
+        cur = current_token(state);
+    }
 
     ? (not state.ok) {
         ^ ProgramResult { program: empty_program(), ok: false, err: state.err };
     }
 
-    ? (state.fn_name != "main") {
-        ^ ProgramResult { program: empty_program(), ok: false, err: "bootstrap compiler currently requires @main" };
-    }
-
-    program := Program { fn_name: state.fn_name, exprs: state.exprs, stmts: state.stmts };
+    program := Program { exprs: state.exprs, stmts: state.stmts, funcs: state.funcs };
     ^ ProgramResult { program: program, ok: true, err: "" };
+}
+
+@pad(level: i64) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx < level) {
+        out = out + "    ";
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@c_name(name: text) -> text {
+    ? (name == "main") {
+        ^ "noema_main";
+    }
+    ^ name;
+}
+
+@emit_args(program: Program, args: list<i64>) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx < count(args)) {
+        ? (idx > 0) {
+            out = out + ", ";
+        }
+        out = out + emit_expr(program, args[idx]);
+        idx = idx + 1;
+    }
+    ^ out;
 }
 
 @emit_expr(program: Program, index: i64) -> text {
@@ -465,6 +755,10 @@
         ^ expr.name;
     }
 
+    ? (expr.tag == "call") {
+        ^ c_name(expr.name) + "(" + emit_args(program, expr.args) + ")";
+    }
+
     ? (expr.tag == "bin") {
         ^ "(" + emit_expr(program, expr.left) + " " + expr.op + " " + emit_expr(program, expr.right) + ")";
     }
@@ -472,40 +766,115 @@
     ^ "0";
 }
 
-@emit_stmt(program: Program, stmt: Stmt) -> text {
+@emit_block(program: Program, items: list<i64>, level: i64) -> text {
+    out := "";
+    idx := 0;
+    stmts := program.stmts;
+    ~ (idx < count(items)) {
+        stmt := stmts[items[idx]];
+        out = out + emit_stmt(program, stmt, level);
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@emit_stmt(program: Program, stmt: Stmt, level: i64) -> text {
+    p := pad(level);
+
     ? (stmt.tag == "let") {
-        ^ "    noema_i64 " + stmt.name + " = " + emit_expr(program, stmt.expr) + ";\n";
+        ^ p + "noema_i64 " + stmt.name + " = " + emit_expr(program, stmt.expr) + ";\n";
     }
 
     ? (stmt.tag == "assign") {
-        ^ "    " + stmt.name + " = " + emit_expr(program, stmt.expr) + ";\n";
+        ^ p + stmt.name + " = " + emit_expr(program, stmt.expr) + ";\n";
     }
 
     ? (stmt.tag == "emit") {
-        ^ "    printf(\"%lld\\n\", (long long)(" + emit_expr(program, stmt.expr) + "));\n";
+        ^ p + "printf(\"%lld\\n\", (long long)(" + emit_expr(program, stmt.expr) + "));\n";
     }
 
     ? (stmt.tag == "ret") {
-        ^ "    return (int)(" + emit_expr(program, stmt.expr) + ");\n";
+        ^ p + "return " + emit_expr(program, stmt.expr) + ";\n";
+    }
+
+    ? (stmt.tag == "while") {
+        out := p + "while (" + emit_expr(program, stmt.expr) + ") {\n";
+        out = out + emit_block(program, stmt.body, level + 1);
+        out = out + p + "}\n";
+        ^ out;
+    }
+
+    ? (stmt.tag == "if") {
+        out := p + "if (" + emit_expr(program, stmt.expr) + ") {\n";
+        out = out + emit_block(program, stmt.body, level + 1);
+        out = out + p + "}";
+        ? (count(stmt.alt) > 0) {
+            out = out + " else {\n";
+            out = out + emit_block(program, stmt.alt, level + 1);
+            out = out + p + "}\n";
+        }
+        | {
+            out = out + "\n";
+        }
+        ^ out;
     }
 
     ^ "";
+}
+
+@emit_params(params: list<text>) -> text {
+    ? (count(params) == 0) {
+        ^ "void";
+    }
+    out := "";
+    idx := 0;
+    ~ (idx < count(params)) {
+        ? (idx > 0) {
+            out = out + ", ";
+        }
+        out = out + "noema_i64 " + params[idx];
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@emit_prototypes(program: Program) -> text {
+    out := "";
+    idx := 0;
+    funcs := program.funcs;
+    ~ (idx < count(funcs)) {
+        fn := funcs[idx];
+        out = out + "static noema_i64 " + c_name(fn.name) + "(" + emit_params(fn.params) + ");\n";
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@emit_functions(program: Program) -> text {
+    out := "";
+    idx := 0;
+    funcs := program.funcs;
+    ~ (idx < count(funcs)) {
+        fn := funcs[idx];
+        out = out + "static noema_i64 " + c_name(fn.name) + "(" + emit_params(fn.params) + ") {\n";
+        out = out + emit_block(program, fn.body, 1);
+        out = out + "    return 0;\n";
+        out = out + "}\n\n";
+        idx = idx + 1;
+    }
+    ^ out;
 }
 
 @emit_program(program: Program) -> text {
     out := "typedef long long noema_i64;\n";
     out = out + "extern int printf(const char *, ...);\n";
     out = out + "\n";
+    out = out + emit_prototypes(program);
+    out = out + "\n";
+    out = out + emit_functions(program);
     out = out + "int main(void) {\n";
-    idx := 0;
-    stmts := program.stmts;
-
-    ~ (idx < count(stmts)) {
-        out = out + emit_stmt(program, stmts[idx]);
-        idx = idx + 1;
-    }
-
-    out = out + "    return 0;\n}\n";
+    out = out + "    return (int)noema_main();\n";
+    out = out + "}\n";
     ^ out;
 }
 
@@ -517,24 +886,18 @@
 
     source := read_text(arg(1));
     tokenized := tokenize(source);
-    token_ok := tokenized.ok;
-    token_err := tokenized.err;
-    ? (not token_ok) {
-        ! "tokenize: " + token_err;
+    ? (not tokenized.ok) {
+        ! "tokenize: " + tokenized.err;
         ^ 1;
     }
 
-    tokens := tokenized.tokens;
-    parsed := parse_program(tokens);
-    parse_ok := parsed.ok;
-    parse_err := parsed.err;
-    ? (not parse_ok) {
-        ! "parse: " + parse_err;
+    parsed := parse_program(tokenized.tokens);
+    ? (not parsed.ok) {
+        ! "parse: " + parsed.err;
         ^ 1;
     }
 
-    program := parsed.program;
-    generated := emit_program(program);
+    generated := emit_program(parsed.program);
     wrote := write_text(arg(2), generated);
     ? (not wrote) {
         ! "write failed";
