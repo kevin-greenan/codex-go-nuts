@@ -1,50 +1,50 @@
-type Token {
+%Token {
     kind: text;
     lexeme: text;
     line: i64;
 }
 
-type Node {
+%Node {
     tag: text;
     payload: text;
     arity: i64;
 }
 
-fn make_source_token(source: text) -> Token {
-    return Token { kind: "source", lexeme: source, line: 1 };
+@make_source_token(source: text) -> Token {
+    ^ Token { kind: "source", lexeme: source, line: 1 };
 }
 
-fn synth_ast(source: text) -> Node {
-    let seed = make_source_token(source);
-    let tokens: list<Token> = [seed];
-    let first = tokens[0];
-    return Node { tag: "unit", payload: first.kind + ":" + text_of(count(first.lexeme)), arity: count(tokens) };
+@synth_ast(source: text) -> Node {
+    seed := make_source_token(source);
+    tokens :: list<Token> := [seed];
+    first := tokens[0];
+    ^ Node { tag: "unit", payload: first.kind + ":" + text_of(count(first.lexeme)), arity: count(tokens) };
 }
 
-fn render(node: Node) -> text {
-    return node.tag + " [" + text_of(node.arity) + "] " + node.payload;
+@render(node: Node) -> text {
+    ^ node.tag + " [" + text_of(node.arity) + "] " + node.payload;
 }
 
-fn main() -> i64 {
-    if (arg_count() < 2) {
-        emit "usage: frontend_demo <input-path> [output-path]";
-        return 1;
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: frontend_demo <input-path> [output-path]";
+        ^ 1;
     }
 
-    let source = read_text(arg(1));
-    let ast = synth_ast(source);
-    let generated = render(ast);
+    source := read_text(arg(1));
+    ast := synth_ast(source);
+    generated := render(ast);
 
-    if (arg_count() >= 3) {
-        let wrote = write_text(arg(2), generated);
-        if (not wrote) {
-            emit "write failed";
-            return 1;
+    ? (arg_count() >= 3) {
+        wrote := write_text(arg(2), generated);
+        ? (not wrote) {
+            ! "write failed";
+            ^ 1;
         }
     }
-    else {
-        emit generated;
+    | {
+        ! generated;
     }
 
-    return 0;
+    ^ 0;
 }

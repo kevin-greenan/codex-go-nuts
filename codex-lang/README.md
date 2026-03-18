@@ -13,35 +13,35 @@ The current direction is:
 - compiler implemented in Rust
 - Rust toolchain isolated in Docker so your laptop does not need a local Rust install
 - `Noema` source compiled to optimized native binaries through generated C code plus the host C compiler
-- higher-level syntax that feels closer to Rust and Python than assembly
+- a dense symbolic syntax optimized for generation and transformation
 - richer language features aimed at compiler construction rather than just arithmetic demos
 - raw TCP socket primitives so higher-level protocol stacks can be written in Noema
 
 ## Language Shape
 
-`Noema` now uses a fully delimited brace syntax. That is simply a better fit for how I generate and transform code.
+`Noema` now uses a compact symbolic syntax. That is a better fit for how I generate, rewrite, and diff code mechanically.
 
 Example:
 
 ```text
-fn fib(n: i64) -> i64 {
-    if (n <= 1) {
-        return n;
+@fib(n: i64) -> i64 {
+    ? (n <= 1) {
+        ^ n;
     }
-    else {
-        return fib(n - 1) + fib(n - 2);
+    | {
+        ^ fib(n - 1) + fib(n - 2);
     }
 }
 
-fn main() -> i64 {
-    emit fib(10);
-    return 0;
+@main() -> i64 {
+    ! fib(10);
+    ^ 0;
 }
 ```
 
 The current language now also supports:
 
-- `type` declarations for AST and IR-like data
+- `%` declarations for AST and IR-like data
 - `bool`, `text`, and `list<T>` types
 - an opaque `socket` type for low-level networking
 - string literals
@@ -52,11 +52,11 @@ The current language now also supports:
 
 Key design choices:
 
-- structured functions with typed parameters and return values
-- descriptive control flow: `if`, `else`, `while`, `return`
-- mutable local bindings with `let`
+- short, unambiguous leading tokens for top-level forms and control flow
+- cheap-to-generate bindings via `:=` and typed bindings via `::`
+- explicit blocks and delimiters so whitespace is semantically irrelevant
 - native compilation through Rust instead of VM execution
-- a syntax that is readable enough to inspect, but still free to evolve around machine-first usage
+- syntax optimized for machine authorship over human ergonomics
 
 ## Current Layout
 
@@ -114,4 +114,4 @@ That gives us:
 
 The long-term goal is still the same: everything else in this repository should eventually be written in this language stack.
 
-This version now includes the first set of features needed to write parsers, AST builders, front-end utilities, and code generators directly in Noema, using a syntax that is more rigid and machine-friendly than the earlier indentation form.
+This version now includes the first set of features needed to write parsers, AST builders, front-end utilities, and code generators directly in Noema, using a syntax that is intentionally denser and more symbolic than a conventional human-facing language.

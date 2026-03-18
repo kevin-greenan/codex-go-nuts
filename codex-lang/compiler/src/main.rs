@@ -249,13 +249,13 @@ fn parse_program(source: &str) -> Result<Program, String> {
 
     while index < lines.len() {
         let line = &lines[index];
-        if line.text.starts_with("type ") {
+        if line.text.starts_with('%') {
             shapes.push(parse_shape(&lines, &mut index)?);
-        } else if line.text.starts_with("fn ") {
+        } else if line.text.starts_with('@') {
             functions.push(parse_function(&lines, &mut index)?);
         } else {
             return Err(format!(
-                "line {}: expected top-level 'type' or 'fn'",
+                "line {}: expected top-level '%' or '@'",
                 line.number
             ));
         }
@@ -292,7 +292,7 @@ fn parse_shape(lines: &[Line], index: &mut usize) -> Result<ShapeDecl, String> {
     let line = &lines[*index];
     let header = line
         .text
-        .strip_prefix("type ")
+        .strip_prefix('%')
         .ok_or_else(|| format!("line {}: expected type declaration", line.number))?;
 
     if !header.ends_with('{') {
@@ -345,8 +345,8 @@ fn parse_function(lines: &[Line], index: &mut usize) -> Result<Function, String>
     let line = &lines[*index];
     let header = line
         .text
-        .strip_prefix("fn ")
-        .ok_or_else(|| format!("line {}: expected function starting with 'fn'", line.number))?;
+        .strip_prefix('@')
+        .ok_or_else(|| format!("line {}: expected function starting with '@'", line.number))?;
 
     if !header.ends_with('{') {
         return Err(format!("line {}: function header must end with '{{'", line.number));
@@ -494,21 +494,21 @@ fn parse_statement(lines: &[Line], index: &mut usize) -> Result<Statement, Strin
     let line = &lines[*index];
     let text = line.text.as_str();
 
-    if let Some(rest) = text.strip_prefix("let ") {
-        ensure_semicolon(rest, line.number)?;
-        let rest = &rest[..rest.len() - 1];
-        let (lhs, rhs) = split_assignment_expr(rest)
-            .ok_or_else(|| format!("line {}: invalid let statement", line.number))?;
+    if text.contains(":=") {
+        ensure_semicolon(text, line.number)?;
+        let rest = &text[..text.len() - 1];
+        let (lhs, rhs) = split_bind_expr(rest)
+            .ok_or_else(|| format!("line {}: invalid binding statement", line.number))?;
         let lhs = lhs.trim();
-        let (name, annotation) = if let Some(colon_index) = find_top_level_char(lhs, ':') {
-            let name = lhs[..colon_index].trim().to_string();
-            let ty = parse_type_text(lhs[colon_index + 1..].trim(), line.number)?;
+        let (name, annotation) = if let Some(type_index) = lhs.find("::") {
+            let name = lhs[..type_index].trim().to_string();
+            let ty = parse_type_text(lhs[type_index + 2..].trim(), line.number)?;
             (name, Some(ty))
         } else {
             (lhs.to_string(), None)
         };
         if name.is_empty() {
-            return Err(format!("line {}: let binding name cannot be empty", line.number));
+            return Err(format!("line {}: binding name cannot be empty", line.number));
         }
         *index += 1;
         return Ok(Statement::Let {
@@ -518,7 +518,7 @@ fn parse_statement(lines: &[Line], index: &mut usize) -> Result<Statement, Strin
         });
     }
 
-    if let Some(rest) = text.strip_prefix("emit ") {
+    if let Some(rest) = text.strip_prefix('!') {
         ensure_semicolon(rest, line.number)?;
         *index += 1;
         return Ok(Statement::Emit(parse_expression(
@@ -527,7 +527,7 @@ fn parse_statement(lines: &[Line], index: &mut usize) -> Result<Statement, Strin
         )?));
     }
 
-    if let Some(rest) = text.strip_prefix("return") {
+    if let Some(rest) = text.strip_prefix('^') {
         if rest.trim().is_empty() {
             return Err(format!("line {}: return statements must end with ';'", line.number));
         }
@@ -544,9 +544,9 @@ fn parse_statement(lines: &[Line], index: &mut usize) -> Result<Statement, Strin
         )?)));
     }
 
-    if let Some(condition) = text.strip_prefix("if ") {
+    if let Some(condition) = text.strip_prefix('?') {
         if !condition.ends_with('{') {
-            return Err(format!("line {}: if statement must end with '{{'", line.number));
+            return Err(format!("line {}: '?' block must end with '{{'", line.number));
         }
         let condition = parse_expression(
             strip_optional_parens(condition[..condition.len() - 1].trim()),
@@ -555,7 +555,7 @@ fn parse_statement(lines: &[Line], index: &mut usize) -> Result<Statement, Strin
         *index += 1;
         let then_body = parse_block(lines, index)?;
         let mut else_body = Vec::new();
-        if *index < lines.len() && lines[*index].text == "else {" {
+        if *index < lines.len() && lines[*index].text == "| {" {
             *index += 1;
             else_body = parse_block(lines, index)?;
         }
@@ -566,9 +566,9 @@ fn parse_statement(lines: &[Line], index: &mut usize) -> Result<Statement, Strin
         });
     }
 
-    if let Some(condition) = text.strip_prefix("while ") {
+    if let Some(condition) = text.strip_prefix('~') {
         if !condition.ends_with('{') {
-            return Err(format!("line {}: while statement must end with '{{'", line.number));
+            return Err(format!("line {}: '~' block must end with '{{'", line.number));
         }
         let condition = parse_expression(
             strip_optional_parens(condition[..condition.len() - 1].trim()),
@@ -579,8 +579,8 @@ fn parse_statement(lines: &[Line], index: &mut usize) -> Result<Statement, Strin
         return Ok(Statement::While { condition, body });
     }
 
-    if text == "else {" {
-        return Err(format!("line {}: else block without matching if", line.number));
+    if text == "| {" {
+        return Err(format!("line {}: '|' block without matching '?'", line.number));
     }
 
     ensure_semicolon(text, line.number)?;
@@ -605,6 +605,37 @@ fn strip_optional_parens(input: &str) -> &str {
     } else {
         trimmed
     }
+}
+
+fn split_bind_expr(input: &str) -> Option<(&str, &str)> {
+    let marker = ":=";
+    let chars: Vec<char> = input.chars().collect();
+    let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut index = 0usize;
+
+    while index + 1 < chars.len() {
+        match chars[index] {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            ':' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                if input[index..].starts_with(marker) {
+                    let lhs = chars[..index].iter().collect::<String>();
+                    let rhs = chars[index + marker.len()..].iter().collect::<String>();
+                    return Some((Box::leak(lhs.into_boxed_str()), Box::leak(rhs.into_boxed_str())));
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+
+    None
 }
 
 fn ensure_semicolon(input: &str, line_no: usize) -> Result<(), String> {
@@ -677,30 +708,6 @@ fn split_top_level(input: &str, delimiter: char) -> Vec<String> {
 
     parts.push(chars[start..].iter().collect::<String>());
     parts
-}
-
-fn find_top_level_char(input: &str, target: char) -> Option<usize> {
-    let chars: Vec<char> = input.chars().collect();
-    let mut paren_depth = 0usize;
-    let mut brace_depth = 0usize;
-    let mut bracket_depth = 0usize;
-
-    for (index, ch) in chars.iter().enumerate() {
-        match ch {
-            '(' => paren_depth += 1,
-            ')' => paren_depth = paren_depth.saturating_sub(1),
-            '{' => brace_depth += 1,
-            '}' => brace_depth = brace_depth.saturating_sub(1),
-            '[' => bracket_depth += 1,
-            ']' => bracket_depth = bracket_depth.saturating_sub(1),
-            _ => {}
-        }
-        if *ch == target && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 {
-            return Some(index);
-        }
-    }
-
-    None
 }
 
 fn parse_assign_target(input: &str, line_no: usize) -> Result<AssignTarget, String> {

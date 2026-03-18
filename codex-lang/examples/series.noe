@@ -1,24 +1,24 @@
-fn sum_to(n: i64) -> i64 {
-    let total = 0;
-    let index = 1;
-    while (index <= n) {
+@sum_to(n: i64) -> i64 {
+    total := 0;
+    index := 1;
+    ~ (index <= n) {
         total = total + index;
         index = index + 1;
     }
-    return total;
+    ^ total;
 }
 
-fn fib(n: i64) -> i64 {
-    if (n <= 1) {
-        return n;
+@fib(n: i64) -> i64 {
+    ? (n <= 1) {
+        ^ n;
     }
-    else {
-        return fib(n - 1) + fib(n - 2);
+    | {
+        ^ fib(n - 1) + fib(n - 2);
     }
 }
 
-fn main() -> i64 {
-    emit sum_to(10);
-    emit fib(10);
-    return 0;
+@main() -> i64 {
+    ! sum_to(10);
+    ! fib(10);
+    ^ 0;
 }

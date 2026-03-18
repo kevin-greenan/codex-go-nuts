@@ -1,38 +1,43 @@
-# Noema v2
+# Noema v3
 
-`Noema` is the first native-compiled language for `codex-lang`.
+`Noema` is the native-compiled language core for `codex-lang`.
 
 ## Objectives
 
-- Use Rust as the implementation language for the compiler
+- Keep the implementation language in Rust
 - Produce optimized native binaries instead of bytecode
-- Keep the syntax structured, concise, and expressive
-- Favor implementation speed and machine efficiency over human-oriented polish
-- Add the data-modeling and text-processing features needed for a future self-hosted compiler
+- Bias the surface syntax toward machine generation, rewriting, and transformation
+- Add the data and runtime features needed for a future self-hosted compiler
 
 ## Syntax
 
-The syntax is intentionally closer to a compact compiler IR language than a hand-authored scripting language:
+The syntax is intentionally dense and symbolic:
 
-- top-level functions start with `fn`
-- top-level data declarations start with `type`
+- top-level functions start with `@`
+- top-level data declarations start with `%`
 - blocks are delimited by `{` and `}`
 - statements end with `;`
-- control-flow conditions may be wrapped in `(...)`
+- new bindings use `:=`
+- optional binding type annotations use `::`
+- `!` emits
+- `^` returns
+- `?` branches
+- `|` is the alternate branch
+- `~` loops
 
 ### Function
 
 ```text
-fn main() -> i64 {
-    emit 42;
-    return 0;
+@main() -> i64 {
+    ! 42;
+    ^ 0;
 }
 ```
 
 ### Type
 
 ```text
-type Token {
+%Token {
     kind: text;
     lexeme: text;
     line: i64;
@@ -42,22 +47,22 @@ type Token {
 ### Variables
 
 ```text
-let total = 0;
+total := 0;
 total = total + 1;
-let tokens: list<Token> = [Token { kind: "word", lexeme: "emit", line: 1 }];
+tokens :: list<Token> := [Token { kind: "word", lexeme: "emit", line: 1 }];
 ```
 
 ### Control Flow
 
 ```text
-if (value > 10) {
-    emit value;
+? (value > 10) {
+    ! value;
 }
-else {
-    emit 10;
+| {
+    ! 10;
 }
 
-while (index < 5) {
+~ (index < 5) {
     index = index + 1;
 }
 ```
@@ -69,21 +74,21 @@ while (index < 5) {
 - `text`
 - `socket`
 - `list<T>`
-- named `type` declarations
+- named `%Type` declarations
 - `void`
 
 ## Supported Statements
 
-- `let name = expr;`
-- `let name: type = expr;`
+- `name := expr;`
+- `name :: type := expr;`
 - `name = expr;`
 - `record.field = expr;`
-- `emit expr;`
-- `return expr;`
-- `return;`
-- `if (condition) { ... }`
-- `else { ... }`
-- `while (condition) { ... }`
+- `! expr;`
+- `^ expr;`
+- `^;`
+- `? (condition) { ... }`
+- `| { ... }`
+- `~ (condition) { ... }`
 - expression statement `call(...);`
 
 ## Supported Expressions
@@ -129,7 +134,7 @@ This backend is deliberately practical:
 
 ## Why This Matters
 
-With `shape`, `text`, and `list<T>`, Noema can now represent the core ingredients of a compiler:
+With `%` types, `text`, and `list<T>`, Noema can now represent the core ingredients of a compiler:
 
 - source text and token buffers
 - AST nodes and typed intermediate data
@@ -140,25 +145,25 @@ It is not self-hosting yet, but it now has the structural features needed to sta
 
 ## Networking
 
-Noema now has a first-pass low-level TCP client layer.
+Noema has a first-pass low-level TCP client layer.
 
 - The language exposes an opaque `socket` type.
 - Programs can open a TCP connection, send raw bytes, receive raw bytes, and close the connection.
-- This is intentionally lower-level than HTTP so future protocol implementations can be written in Noema on top of sockets instead of being baked into the runtime.
+- This stays below HTTP on purpose so protocol layers can be written in Noema later.
 
 Example:
 
 ```text
-fn main() -> i64 {
-    let sock = socket_open("127.0.0.1", 9001);
-    let sent = socket_send(sock, "ping");
-    let reply = socket_recv(sock, 1024);
-    emit text_of(sent);
-    emit reply;
-    let closed = socket_close(sock);
-    if (not closed) {
-        return 1;
+@main() -> i64 {
+    sock := socket_open("127.0.0.1", 9001);
+    sent := socket_send(sock, "ping");
+    reply := socket_recv(sock, 1024);
+    ! text_of(sent);
+    ! reply;
+    closed := socket_close(sock);
+    ? (not closed) {
+        ^ 1;
     }
-    return 0;
+    ^ 0;
 }
 ```
