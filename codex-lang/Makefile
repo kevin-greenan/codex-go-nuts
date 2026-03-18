@@ -11,6 +11,7 @@ compiler:
 examples:
 	./bin/codexc examples/hello.noe build/hello
 	./bin/codexc examples/series.noe build/series
+	./bin/codexc examples/frontend_demo.noe build/frontend_demo
 
 clean:
 	rm -rf build compiler/target

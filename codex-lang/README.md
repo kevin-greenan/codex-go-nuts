@@ -2,7 +2,7 @@
 
 `codex-lang` is the custom language stack for this repository, now centered on a compiled language named `Noema`.
 
-`Noema` is not designed for public consumption. It is designed to be fast to compile, fast to run, easy for me to generate, and flexible enough to grow into the default implementation language for future projects in this repo.
+`Noema` is not designed for public consumption. It is designed to be fast to compile, fast to run, easy for me to generate, and flexible enough to grow into the default implementation language for future projects in this repo, including the eventual self-hosted compiler path.
 
 ## What Changed
 
@@ -14,6 +14,7 @@ The current direction is:
 - Rust toolchain isolated in Docker so your laptop does not need a local Rust install
 - `Noema` source compiled to optimized native binaries through generated C code plus the host C compiler
 - higher-level syntax that feels closer to Rust and Python than assembly
+- richer language features aimed at compiler construction rather than just arithmetic demos
 
 ## Language Shape
 
@@ -32,6 +33,15 @@ loom main() -> i64:
     emit fib(10);
     return 0;
 ```
+
+The current language now also supports:
+
+- `shape` declarations for AST and IR-like data
+- `bool`, `text`, and `list<T>` types
+- string literals
+- field access and list indexing
+- struct literals and list literals
+- compiler-oriented builtins such as `arg`, `arg_count`, `read_text`, `write_text`, `count`, `append`, and `text_of`
 
 Key design choices:
 
@@ -66,6 +76,14 @@ cd codex-lang
 ./build/hello
 ```
 
+A more compiler-shaped example:
+
+```sh
+cd codex-lang
+./bin/codexc examples/frontend_demo.noe build/frontend_demo
+./build/frontend_demo examples/hello.noe
+```
+
 ## Compilation Strategy
 
 For now, `Noema` compiles to generated C source and then uses the host C compiler to produce an optimized native binary.
@@ -81,4 +99,4 @@ That gives us:
 
 The long-term goal is still the same: everything else in this repository should eventually be written in this language stack.
 
-This version simply starts from a better foundation for that goal.
+This version now includes the first set of features needed to write parsers, AST builders, front-end utilities, and code generators directly in Noema.

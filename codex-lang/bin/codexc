@@ -23,4 +23,4 @@ docker run --rm \
   "$IMAGE_NAME" \
   cargo run --manifest-path compiler/Cargo.toml --release -- "$1" "$2.generated.c"
 
-cc -O3 -std=c11 -Wall -Wextra -Wpedantic "$2.generated.c" -o "$2"
+cc -O3 -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-function "$2.generated.c" -o "$2"
