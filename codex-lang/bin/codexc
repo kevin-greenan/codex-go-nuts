@@ -4,6 +4,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 IMAGE_NAME=codex-lang-rust
+BACKEND=${NOEMA_BACKEND:-c}
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 <input.noe> <output-binary>" >&2
@@ -17,10 +18,30 @@ fi
 OUTPUT_DIR=$(dirname "$2")
 mkdir -p "$OUTPUT_DIR"
 
+case "$BACKEND" in
+  c)
+    GENERATED="$2.generated.c"
+    ;;
+  native-arm64)
+    GENERATED="$2.generated.s"
+    ;;
+  *)
+    echo "unsupported NOEMA_BACKEND: $BACKEND" >&2
+    exit 1
+    ;;
+esac
+
 docker run --rm \
   -v "$ROOT_DIR":/workspace \
   -w /workspace \
   "$IMAGE_NAME" \
-  cargo run --manifest-path compiler/Cargo.toml --release -- "$1" "$2.generated.c"
+  cargo run --manifest-path compiler/Cargo.toml --release -- "$1" "$GENERATED" "$BACKEND"
 
-cc -O3 -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-function "$2.generated.c" -o "$2"
+case "$BACKEND" in
+  c)
+    cc -O3 -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-function "$GENERATED" -o "$2"
+    ;;
+  native-arm64)
+    cc "$GENERATED" -o "$2"
+    ;;
+esac

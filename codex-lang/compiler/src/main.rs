@@ -189,6 +189,61 @@ struct SemanticInfo {
     list_types: HashSet<TypeName>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Backend {
+    C,
+    NativeArm64,
+}
+
+#[derive(Clone, Debug)]
+struct IrProgram {
+    functions: Vec<IrFunction>,
+}
+
+#[derive(Clone, Debug)]
+struct IrFunction {
+    name: String,
+    params: usize,
+    slots: usize,
+    stack_slots: usize,
+    body: Vec<IrInst>,
+}
+
+#[derive(Clone, Debug)]
+enum IrInst {
+    PushImm(i64),
+    Load(usize),
+    Store(usize),
+    Drop,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Not,
+    Jump(String),
+    JumpIfZero(String),
+    Call(String, usize),
+    EmitI64,
+    Label(String),
+    Return,
+}
+
+#[derive(Default)]
+struct IrFunctionBuilder {
+    slots: HashMap<String, usize>,
+    next_slot: usize,
+    depth: usize,
+    max_depth: usize,
+    label_counter: usize,
+}
+
 struct ExprParser {
     tokens: Vec<Token>,
     index: usize,
@@ -203,40 +258,43 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
-    if args.len() != 3 {
+    if args.len() != 3 && args.len() != 4 {
         return Err(format!(
-            "usage: {} <input.noe> <output-binary>",
+            "usage: {} <input.noe> <output-file> [backend]",
             args.first().map(String::as_str).unwrap_or("noema")
         ));
     }
 
     let input_path = PathBuf::from(&args[1]);
     let output_path = PathBuf::from(&args[2]);
+    let backend = match args.get(3).map(String::as_str).unwrap_or("c") {
+        "c" => Backend::C,
+        "native-arm64" => Backend::NativeArm64,
+        other => return Err(format!("unsupported backend '{other}'")),
+    };
     let mut seen = HashSet::new();
     let source = load_source(&input_path, &mut seen)?;
 
     let program = parse_program(&source)?;
     let semantic = analyze_program(&program)?;
-    let c_source = lower_to_c(&program, &semantic)?;
     let generated_dir = output_path
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let c_output = if output_path.extension().and_then(|ext| ext.to_str()) == Some("c") {
-        output_path.clone()
-    } else {
-        let generated_name = output_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(|name| format!("{name}.generated.c"))
-            .unwrap_or_else(|| "generated.noema.c".to_string());
-        generated_dir.join(generated_name)
+    let generated_output = output_path.clone();
+
+    let generated_source = match backend {
+        Backend::C => lower_to_c(&program, &semantic)?,
+        Backend::NativeArm64 => {
+            let ir = lower_to_ir(&program, &semantic)?;
+            lower_to_arm64_macos(&ir)?
+        }
     };
 
     fs::create_dir_all(&generated_dir)
         .map_err(|err| format!("failed to create {}: {err}", generated_dir.display()))?;
-    fs::write(&c_output, c_source)
-        .map_err(|err| format!("failed to write {}: {err}", c_output.display()))?;
+    fs::write(&generated_output, generated_source)
+        .map_err(|err| format!("failed to write {}: {err}", generated_output.display()))?;
 
     Ok(())
 }
@@ -1940,6 +1998,598 @@ fn infer_call_type(
             Ok(signature.return_type.clone())
         }
     }
+}
+
+fn lower_to_ir(program: &Program, semantic: &SemanticInfo) -> Result<IrProgram, String> {
+    let mut functions = Vec::new();
+    for function in &program.functions {
+        functions.push(lower_function_to_ir(function, semantic)?);
+    }
+    Ok(IrProgram { functions })
+}
+
+fn lower_function_to_ir(function: &Function, semantic: &SemanticInfo) -> Result<IrFunction, String> {
+    if function.params.len() > 8 {
+        return Err(format!(
+            "native backend currently supports at most 8 parameters, '{}' has {}",
+            function.name,
+            function.params.len()
+        ));
+    }
+    if function.return_type != TypeName::I64 {
+        return Err(format!(
+            "native backend currently requires i64 return types, '{}' returns '{}'",
+            function.name,
+            function.return_type.display()
+        ));
+    }
+    for param in &function.params {
+        if param.ty != TypeName::I64 {
+            return Err(format!(
+                "native backend currently supports only i64 parameters, '{}:{}' is '{}'",
+                function.name,
+                param.name,
+                param.ty.display()
+            ));
+        }
+    }
+
+    let mut builder = IrFunctionBuilder::default();
+    for param in &function.params {
+        builder.alloc_slot(param.name.clone());
+    }
+
+    let mut body = Vec::new();
+    lower_ir_block(&function.body, semantic, &mut builder, &mut body)?;
+
+    Ok(IrFunction {
+        name: function.name.clone(),
+        params: function.params.len(),
+        slots: builder.next_slot,
+        stack_slots: builder.max_depth,
+        body,
+    })
+}
+
+fn lower_ir_block(
+    statements: &[Statement],
+    semantic: &SemanticInfo,
+    builder: &mut IrFunctionBuilder,
+    out: &mut Vec<IrInst>,
+) -> Result<(), String> {
+    for statement in statements {
+        lower_ir_statement(statement, semantic, builder, out)?;
+    }
+    Ok(())
+}
+
+fn lower_ir_statement(
+    statement: &Statement,
+    semantic: &SemanticInfo,
+    builder: &mut IrFunctionBuilder,
+    out: &mut Vec<IrInst>,
+) -> Result<(), String> {
+    match statement {
+        Statement::Let {
+            name,
+            annotation: _,
+            expr,
+        } => {
+            ensure_native_expr(expr, semantic, builder)?;
+            lower_ir_expr(expr, semantic, builder, out)?;
+            let slot = builder.alloc_slot(name.clone());
+            out.push(IrInst::Store(slot));
+            builder.pop_depth(1)?;
+        }
+        Statement::Assign { target, expr } => {
+            let AssignTarget::Name(name) = target else {
+                return Err("native backend does not yet support field assignment".to_string());
+            };
+            let slot = builder
+                .slot_of(name)
+                .ok_or_else(|| format!("unknown native slot '{name}'"))?;
+            ensure_native_expr(expr, semantic, builder)?;
+            lower_ir_expr(expr, semantic, builder, out)?;
+            out.push(IrInst::Store(slot));
+            builder.pop_depth(1)?;
+        }
+        Statement::Emit(expr) => {
+            ensure_native_expr(expr, semantic, builder)?;
+            let expr_type = infer_expr_type(
+                expr,
+                &builder.type_env(),
+                &semantic.shapes,
+                &semantic.functions,
+                None,
+                &mut HashSet::new(),
+            )?;
+            if expr_type != TypeName::I64 {
+                return Err("native backend currently supports emitting only i64 values".to_string());
+            }
+            lower_ir_expr(expr, semantic, builder, out)?;
+            out.push(IrInst::EmitI64);
+            builder.pop_depth(1)?;
+        }
+        Statement::Return(Some(expr)) => {
+            ensure_native_expr(expr, semantic, builder)?;
+            lower_ir_expr(expr, semantic, builder, out)?;
+            out.push(IrInst::Return);
+            builder.pop_depth(1)?;
+        }
+        Statement::Return(None) => {
+            return Err("native backend does not support void returns".to_string());
+        }
+        Statement::If {
+            condition,
+            then_body,
+            else_body,
+        } => {
+            ensure_native_expr(condition, semantic, builder)?;
+            let else_label = builder.label("else");
+            let end_label = builder.label("endif");
+            lower_ir_expr(condition, semantic, builder, out)?;
+            out.push(IrInst::JumpIfZero(else_label.clone()));
+            builder.pop_depth(1)?;
+            lower_ir_block(then_body, semantic, builder, out)?;
+            out.push(IrInst::Jump(end_label.clone()));
+            out.push(IrInst::Label(else_label));
+            lower_ir_block(else_body, semantic, builder, out)?;
+            out.push(IrInst::Label(end_label));
+        }
+        Statement::While { condition, body } => {
+            ensure_native_expr(condition, semantic, builder)?;
+            let start_label = builder.label("while_start");
+            let end_label = builder.label("while_end");
+            out.push(IrInst::Label(start_label.clone()));
+            lower_ir_expr(condition, semantic, builder, out)?;
+            out.push(IrInst::JumpIfZero(end_label.clone()));
+            builder.pop_depth(1)?;
+            lower_ir_block(body, semantic, builder, out)?;
+            out.push(IrInst::Jump(start_label));
+            out.push(IrInst::Label(end_label));
+        }
+        Statement::Expr(expr) => {
+            ensure_native_expr(expr, semantic, builder)?;
+            lower_ir_expr(expr, semantic, builder, out)?;
+            out.push(IrInst::Drop);
+            builder.pop_depth(1)?;
+        }
+    }
+    Ok(())
+}
+
+fn lower_ir_expr(
+    expr: &Expr,
+    semantic: &SemanticInfo,
+    builder: &mut IrFunctionBuilder,
+    out: &mut Vec<IrInst>,
+) -> Result<(), String> {
+    match expr {
+        Expr::Int(value) => {
+            out.push(IrInst::PushImm(*value));
+            builder.push_depth(1);
+        }
+        Expr::Name(name) => {
+            let slot = builder
+                .slot_of(name)
+                .ok_or_else(|| format!("unknown native slot '{name}'"))?;
+            out.push(IrInst::Load(slot));
+            builder.push_depth(1);
+        }
+        Expr::Unary { op, expr } => {
+            lower_ir_expr(expr, semantic, builder, out)?;
+            match op {
+                UnaryOp::Neg => {
+                    out.push(IrInst::PushImm(-1));
+                    builder.push_depth(1);
+                    out.push(IrInst::Mul);
+                    builder.pop_depth(1)?;
+                }
+                UnaryOp::Not => out.push(IrInst::Not),
+            }
+        }
+        Expr::Binary { left, op, right } => {
+            lower_ir_expr(left, semantic, builder, out)?;
+            lower_ir_expr(right, semantic, builder, out)?;
+            out.push(match op {
+                BinaryOp::Add => IrInst::Add,
+                BinaryOp::Sub => IrInst::Sub,
+                BinaryOp::Mul => IrInst::Mul,
+                BinaryOp::Div => IrInst::Div,
+                BinaryOp::Mod => IrInst::Mod,
+                BinaryOp::Eq => IrInst::Eq,
+                BinaryOp::Ne => IrInst::Ne,
+                BinaryOp::Lt => IrInst::Lt,
+                BinaryOp::Le => IrInst::Le,
+                BinaryOp::Gt => IrInst::Gt,
+                BinaryOp::Ge => IrInst::Ge,
+                BinaryOp::And | BinaryOp::Or => {
+                    return Err("native backend does not yet support logical and/or".to_string())
+                }
+            });
+            builder.pop_depth(1)?;
+        }
+        Expr::Call { name, args } => {
+            if name == "socket_open"
+                || name == "socket_send"
+                || name == "socket_recv"
+                || name == "socket_recv_all"
+                || name == "socket_close"
+                || name == "read_text"
+                || name == "write_text"
+                || name == "find"
+                || name == "slice"
+                || name == "append"
+                || name == "count"
+                || name == "text_of"
+                || name == "i64_of"
+                || name == "arg"
+                || name == "arg_count"
+            {
+                return Err(format!(
+                    "native backend does not yet support builtin '{}'",
+                    name
+                ));
+            }
+            let signature = semantic
+                .functions
+                .get(name)
+                .ok_or_else(|| format!("unknown function '{}'", name))?;
+            if signature.return_type != TypeName::I64 {
+                return Err(format!(
+                    "native backend currently supports only i64-returning calls, '{}' returns '{}'",
+                    name,
+                    signature.return_type.display()
+                ));
+            }
+            for arg in args {
+                lower_ir_expr(arg, semantic, builder, out)?;
+            }
+            out.push(IrInst::Call(name.clone(), args.len()));
+            builder.pop_depth(args.len())?;
+            builder.push_depth(1);
+        }
+        Expr::Bool(_)
+        | Expr::Text(_)
+        | Expr::Field { .. }
+        | Expr::Index { .. }
+        | Expr::ListLiteral(_)
+        | Expr::StructLiteral { .. } => {
+            return Err("native backend currently supports only scalar i64 subset".to_string())
+        }
+    }
+    Ok(())
+}
+
+fn ensure_native_expr(
+    expr: &Expr,
+    semantic: &SemanticInfo,
+    builder: &IrFunctionBuilder,
+) -> Result<(), String> {
+    let expr_type = infer_expr_type(
+        expr,
+        &builder.type_env(),
+        &semantic.shapes,
+        &semantic.functions,
+        None,
+        &mut HashSet::new(),
+    )?;
+    if expr_type != TypeName::I64 && expr_type != TypeName::Bool {
+        return Err(format!(
+            "native backend currently supports only i64/bool expressions, got '{}'",
+            expr_type.display()
+        ));
+    }
+    Ok(())
+}
+
+impl IrFunctionBuilder {
+    fn alloc_slot(&mut self, name: String) -> usize {
+        let slot = self.next_slot;
+        self.slots.insert(name, slot);
+        self.next_slot += 1;
+        slot
+    }
+
+    fn slot_of(&self, name: &str) -> Option<usize> {
+        self.slots.get(name).copied()
+    }
+
+    fn push_depth(&mut self, amount: usize) {
+        self.depth += amount;
+        self.max_depth = self.max_depth.max(self.depth);
+    }
+
+    fn pop_depth(&mut self, amount: usize) -> Result<(), String> {
+        if self.depth < amount {
+            return Err("native backend stack underflow during lowering".to_string());
+        }
+        self.depth -= amount;
+        Ok(())
+    }
+
+    fn label(&mut self, prefix: &str) -> String {
+        let label = format!("{prefix}_{}", self.label_counter);
+        self.label_counter += 1;
+        label
+    }
+
+    fn type_env(&self) -> HashMap<String, TypeName> {
+        self.slots
+            .keys()
+            .map(|name| (name.clone(), TypeName::I64))
+            .collect()
+    }
+}
+
+fn lower_to_arm64_macos(program: &IrProgram) -> Result<String, String> {
+    let mut out = String::new();
+    out.push_str(".text\n");
+    out.push_str(".align 2\n");
+    out.push_str(".globl _main\n");
+    out.push_str(".extern _write\n\n");
+    out.push_str("_main:\n");
+    out.push_str("    stp x29, x30, [sp, #-16]!\n");
+    out.push_str("    mov x29, sp\n");
+    out.push_str("    bl _codex_main\n");
+    out.push_str("    ldp x29, x30, [sp], #16\n");
+    out.push_str("    ret\n\n");
+    out.push_str("_noema_emit_i64_native:\n");
+    out.push_str("    stp x29, x30, [sp, #-16]!\n");
+    out.push_str("    mov x29, sp\n");
+    out.push_str("    sub sp, sp, #80\n");
+    out.push_str("    mov x9, x0\n");
+    out.push_str("    mov x10, #0\n");
+    out.push_str("    cmp x9, #0\n");
+    out.push_str("    b.ge L_emit_abs\n");
+    out.push_str("    mov x10, #1\n");
+    out.push_str("    neg x9, x9\n");
+    out.push_str("L_emit_abs:\n");
+    out.push_str("    add x11, sp, #79\n");
+    out.push_str("    mov w12, #10\n");
+    out.push_str("    strb w12, [x11]\n");
+    out.push_str("    mov x13, #1\n");
+    out.push_str("    sub x11, x11, #1\n");
+    out.push_str("    cmp x9, #0\n");
+    out.push_str("    b.ne L_emit_loop\n");
+    out.push_str("    mov w12, #48\n");
+    out.push_str("    strb w12, [x11]\n");
+    out.push_str("    sub x11, x11, #1\n");
+    out.push_str("    add x13, x13, #1\n");
+    out.push_str("    b L_emit_sign\n");
+    out.push_str("L_emit_loop:\n");
+    out.push_str("    mov x12, #10\n");
+    out.push_str("    udiv x14, x9, x12\n");
+    out.push_str("    msub x15, x14, x12, x9\n");
+    out.push_str("    add x15, x15, #48\n");
+    out.push_str("    strb w15, [x11]\n");
+    out.push_str("    sub x11, x11, #1\n");
+    out.push_str("    add x13, x13, #1\n");
+    out.push_str("    mov x9, x14\n");
+    out.push_str("    cmp x9, #0\n");
+    out.push_str("    b.ne L_emit_loop\n");
+    out.push_str("L_emit_sign:\n");
+    out.push_str("    cmp x10, #0\n");
+    out.push_str("    b.eq L_emit_write\n");
+    out.push_str("    mov w12, #45\n");
+    out.push_str("    strb w12, [x11]\n");
+    out.push_str("    sub x11, x11, #1\n");
+    out.push_str("    add x13, x13, #1\n");
+    out.push_str("L_emit_write:\n");
+    out.push_str("    add x1, x11, #1\n");
+    out.push_str("    mov x0, #1\n");
+    out.push_str("    mov x2, x13\n");
+    out.push_str("    bl _write\n");
+    out.push_str("    add sp, sp, #80\n");
+    out.push_str("    ldp x29, x30, [sp], #16\n");
+    out.push_str("    ret\n\n");
+
+    for function in &program.functions {
+        emit_arm64_function(function, &mut out)?;
+    }
+    Ok(out)
+}
+
+fn emit_arm64_function(function: &IrFunction, out: &mut String) -> Result<(), String> {
+    let frame_bytes = align16((function.slots + function.stack_slots) * 8);
+    out.push_str(".align 2\n");
+    writeln!(out, ".globl {}", asm_function_name(&function.name)).unwrap();
+    writeln!(out, "{}:", asm_function_name(&function.name)).unwrap();
+    out.push_str("    stp x29, x30, [sp, #-16]!\n");
+    out.push_str("    mov x29, sp\n");
+    if frame_bytes > 0 {
+        writeln!(out, "    sub sp, sp, #{}", frame_bytes).unwrap();
+    }
+    for index in 0..function.params {
+        writeln!(
+            out,
+            "    str x{}, [x29, #{}]",
+            index,
+            slot_offset(index)
+        )
+        .unwrap();
+    }
+
+    let mut depth = 0usize;
+    for inst in &function.body {
+        emit_arm64_inst(inst, function, &mut depth, out)?;
+    }
+
+    if frame_bytes > 0 {
+        writeln!(out, "    add sp, sp, #{}", frame_bytes).unwrap();
+    }
+    out.push_str("    ldp x29, x30, [sp], #16\n");
+    out.push_str("    ret\n\n");
+    Ok(())
+}
+
+fn emit_arm64_inst(
+    inst: &IrInst,
+    function: &IrFunction,
+    depth: &mut usize,
+    out: &mut String,
+) -> Result<(), String> {
+    match inst {
+        IrInst::PushImm(value) => {
+            emit_mov_imm("x9", *value as u64, out)?;
+            writeln!(out, "    str x9, [x29, #{}]", stack_offset(function, *depth)).unwrap();
+            *depth += 1;
+        }
+        IrInst::Load(slot) => {
+            writeln!(out, "    ldr x9, [x29, #{}]", slot_offset(*slot)).unwrap();
+            writeln!(out, "    str x9, [x29, #{}]", stack_offset(function, *depth)).unwrap();
+            *depth += 1;
+        }
+        IrInst::Store(slot) => {
+            *depth -= 1;
+            writeln!(out, "    ldr x9, [x29, #{}]", stack_offset(function, *depth)).unwrap();
+            writeln!(out, "    str x9, [x29, #{}]", slot_offset(*slot)).unwrap();
+        }
+        IrInst::Drop => {
+            *depth -= 1;
+        }
+        IrInst::Add | IrInst::Sub | IrInst::Mul | IrInst::Div | IrInst::Mod
+        | IrInst::Eq | IrInst::Ne | IrInst::Lt | IrInst::Le | IrInst::Gt | IrInst::Ge => {
+            *depth -= 1;
+            writeln!(out, "    ldr x10, [x29, #{}]", stack_offset(function, *depth)).unwrap();
+            writeln!(out, "    ldr x9, [x29, #{}]", stack_offset(function, *depth - 1)).unwrap();
+            match inst {
+                IrInst::Add => out.push_str("    add x9, x9, x10\n"),
+                IrInst::Sub => out.push_str("    sub x9, x9, x10\n"),
+                IrInst::Mul => out.push_str("    mul x9, x9, x10\n"),
+                IrInst::Div => out.push_str("    sdiv x9, x9, x10\n"),
+                IrInst::Mod => {
+                    out.push_str("    sdiv x11, x9, x10\n");
+                    out.push_str("    msub x9, x11, x10, x9\n");
+                }
+                IrInst::Eq => {
+                    out.push_str("    cmp x9, x10\n");
+                    out.push_str("    cset x9, eq\n");
+                }
+                IrInst::Ne => {
+                    out.push_str("    cmp x9, x10\n");
+                    out.push_str("    cset x9, ne\n");
+                }
+                IrInst::Lt => {
+                    out.push_str("    cmp x9, x10\n");
+                    out.push_str("    cset x9, lt\n");
+                }
+                IrInst::Le => {
+                    out.push_str("    cmp x9, x10\n");
+                    out.push_str("    cset x9, le\n");
+                }
+                IrInst::Gt => {
+                    out.push_str("    cmp x9, x10\n");
+                    out.push_str("    cset x9, gt\n");
+                }
+                IrInst::Ge => {
+                    out.push_str("    cmp x9, x10\n");
+                    out.push_str("    cset x9, ge\n");
+                }
+                _ => unreachable!(),
+            }
+            writeln!(out, "    str x9, [x29, #{}]", stack_offset(function, *depth - 1)).unwrap();
+        }
+        IrInst::Not => {
+            writeln!(out, "    ldr x9, [x29, #{}]", stack_offset(function, *depth - 1)).unwrap();
+            out.push_str("    cmp x9, #0\n");
+            out.push_str("    cset x9, eq\n");
+            writeln!(out, "    str x9, [x29, #{}]", stack_offset(function, *depth - 1)).unwrap();
+        }
+        IrInst::Jump(label) => {
+            writeln!(out, "    b {}", asm_label(label)).unwrap();
+        }
+        IrInst::JumpIfZero(label) => {
+            writeln!(out, "    ldr x9, [x29, #{}]", stack_offset(function, *depth - 1)).unwrap();
+            out.push_str("    cmp x9, #0\n");
+            writeln!(out, "    beq {}", asm_label(label)).unwrap();
+            *depth -= 1;
+        }
+        IrInst::Call(name, argc) => {
+            for arg_index in 0..*argc {
+                let src_depth = *depth - *argc + arg_index;
+                writeln!(
+                    out,
+                    "    ldr x{}, [x29, #{}]",
+                    arg_index,
+                    stack_offset(function, src_depth)
+                )
+                .unwrap();
+            }
+            writeln!(out, "    bl {}", asm_function_name(name)).unwrap();
+            *depth -= *argc;
+            writeln!(out, "    str x0, [x29, #{}]", stack_offset(function, *depth)).unwrap();
+            *depth += 1;
+        }
+        IrInst::EmitI64 => {
+            writeln!(out, "    ldr x0, [x29, #{}]", stack_offset(function, *depth - 1)).unwrap();
+            out.push_str("    bl _noema_emit_i64_native\n");
+            *depth -= 1;
+        }
+        IrInst::Label(label) => {
+            writeln!(out, "{}:", asm_label(label)).unwrap();
+        }
+        IrInst::Return => {
+            *depth -= 1;
+            writeln!(out, "    ldr x0, [x29, #{}]", stack_offset(function, *depth)).unwrap();
+            let frame_bytes = align16((function.slots + function.stack_slots) * 8);
+            if frame_bytes > 0 {
+                writeln!(out, "    add sp, sp, #{}", frame_bytes).unwrap();
+            }
+            out.push_str("    ldp x29, x30, [sp], #16\n");
+            out.push_str("    ret\n");
+        }
+    }
+    Ok(())
+}
+
+fn emit_mov_imm(reg: &str, value: u64, out: &mut String) -> Result<(), String> {
+    let parts = [
+        (value & 0xffff) as u16,
+        ((value >> 16) & 0xffff) as u16,
+        ((value >> 32) & 0xffff) as u16,
+        ((value >> 48) & 0xffff) as u16,
+    ];
+    let mut first = true;
+    for (shift, part) in parts.into_iter().enumerate() {
+        if part == 0 && !first {
+            continue;
+        }
+        if first {
+            writeln!(out, "    movz {reg}, #{part}, lsl #{}", shift * 16).unwrap();
+            first = false;
+        } else {
+            writeln!(out, "    movk {reg}, #{part}, lsl #{}", shift * 16).unwrap();
+        }
+    }
+    if first {
+        writeln!(out, "    movz {reg}, #0").unwrap();
+    }
+    Ok(())
+}
+
+fn asm_function_name(name: &str) -> String {
+    if name == "main" {
+        "_codex_main".to_string()
+    } else {
+        format!("_{}", name)
+    }
+}
+
+fn asm_label(name: &str) -> String {
+    format!("L_{}", name)
+}
+
+fn align16(bytes: usize) -> usize {
+    (bytes + 15) & !15
+}
+
+fn slot_offset(slot: usize) -> isize {
+    -8 * (slot as isize + 1)
+}
+
+fn stack_offset(function: &IrFunction, depth: usize) -> isize {
+    -8 * ((function.slots + depth) as isize + 1)
 }
 
 fn lower_to_c(program: &Program, semantic: &SemanticInfo) -> Result<String, String> {

@@ -15,5 +15,8 @@ examples:
 	./bin/codexc examples/socket_probe.noe build/socket_probe
 	./bin/codexc examples/http_get.noe build/http_get
 
+native-example:
+	NOEMA_BACKEND=native-arm64 ./bin/codexc examples/hello.noe build/hello.native
+
 clean:
 	rm -rf build compiler/target

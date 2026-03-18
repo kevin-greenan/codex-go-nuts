@@ -145,6 +145,15 @@ This backend is deliberately practical:
 - generated binaries are efficient and portable
 - the Rust implementation stays containerized while final binaries remain host-native
 
+There is also an experimental direct native backend:
+
+- backend id: `native-arm64`
+- target: `arm64-apple-darwin`
+- output: assembly instead of C
+- current supported subset: scalar `i64` programs with locals, arithmetic, comparisons, branching, loops, calls, and `!`
+
+This is the first step toward replacing the C backend, not a full replacement yet.
+
 ## Why This Matters
 
 With `%` types, `text`, and `list<T>`, Noema can now represent the core ingredients of a compiler:

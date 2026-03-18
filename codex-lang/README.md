@@ -84,6 +84,14 @@ cd codex-lang
 ./build/hello
 ```
 
+Compile through the experimental direct native backend on this Mac:
+
+```sh
+cd codex-lang
+NOEMA_BACKEND=native-arm64 ./bin/codexc examples/hello.noe build/hello.native
+./build/hello.native
+```
+
 A more compiler-shaped example:
 
 ```sh
@@ -118,6 +126,12 @@ That gives us:
 - cross-platform compiler portability
 - a pragmatic bootstrap path
 - room to replace the C backend later if direct codegen becomes worthwhile
+
+There is now also an experimental `native-arm64` backend for `arm64-apple-darwin`.
+
+- It emits assembly directly instead of C.
+- It currently supports a narrow scalar subset: `i64` functions, locals, arithmetic, comparisons, `?`, `~`, calls, and `!` on `i64`.
+- The C backend remains the primary backend for the full language surface.
 
 ## Intent
 
