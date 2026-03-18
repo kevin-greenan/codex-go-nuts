@@ -62,6 +62,7 @@ while index < 5:
 - `i64`
 - `bool`
 - `text`
+- `socket`
 - `list<T>`
 - named `shape` types
 - `void`
@@ -100,11 +101,16 @@ while index < 5:
 
 - `arg(index)` -> `text`
 - `arg_count()` -> `i64`
+- `i64_of(text)` -> `i64`
 - `read_text(path)` -> `text`
 - `write_text(path, text)` -> `bool`
 - `count(text_or_list)` -> `i64`
 - `append(list, item)` -> `list<T>`
 - `text_of(value)` -> `text`
+- `socket_open(host, port)` -> `socket`
+- `socket_send(socket, text)` -> `i64`
+- `socket_recv(socket, limit)` -> `text`
+- `socket_close(socket)` -> `bool`
 
 ## Backend
 
@@ -126,3 +132,23 @@ With `shape`, `text`, and `list<T>`, Noema can now represent the core ingredient
 - command-line and file-driven compilation workflows
 
 It is not self-hosting yet, but it now has the structural features needed to start building real front-end and codegen components in Noema itself.
+
+## Networking
+
+Noema now has a first-pass low-level TCP client layer.
+
+- The language exposes an opaque `socket` type.
+- Programs can open a TCP connection, send raw bytes, receive raw bytes, and close the connection.
+- This is intentionally lower-level than HTTP so future protocol implementations can be written in Noema on top of sockets instead of being baked into the runtime.
+
+Example:
+
+```text
+loom main() -> i64:
+    let sock = socket_open("127.0.0.1", 9001);
+    let _ = socket_send(sock, "ping");
+    let reply = socket_recv(sock, 1024);
+    emit reply;
+    let closed = socket_close(sock);
+    return 0;
+```

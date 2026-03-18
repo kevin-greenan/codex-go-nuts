@@ -171,6 +171,7 @@ enum TypeName {
     I64,
     Bool,
     Text,
+    Socket,
     Void,
     Named(String),
     List(Box<TypeName>),
@@ -453,6 +454,7 @@ fn parse_type_inner(chars: &[char], index: &mut usize) -> Option<TypeName> {
         "i64" => TypeName::I64,
         "bool" => TypeName::Bool,
         "text" => TypeName::Text,
+        "socket" => TypeName::Socket,
         "void" => TypeName::Void,
         _ => TypeName::Named(ident),
     })
@@ -1203,7 +1205,7 @@ fn ensure_type_defined(
     shapes: &HashMap<String, ShapeDecl>,
 ) -> Result<(), String> {
     match ty {
-        TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::Void => Ok(()),
+        TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::Socket | TypeName::Void => Ok(()),
         TypeName::Named(name) => {
             if shapes.contains_key(name) {
                 Ok(())
@@ -1763,6 +1765,68 @@ fn infer_call_type(
             }
             Ok(TypeName::Text)
         }
+        "i64_of" => {
+            if args.len() != 1 {
+                return Err("i64_of(...) expects exactly one argument".to_string());
+            }
+            let value_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if value_type != TypeName::Text {
+                return Err(format!(
+                    "i64_of(...) expects text input, got '{}'",
+                    value_type.display()
+                ));
+            }
+            Ok(TypeName::I64)
+        }
+        "socket_open" => {
+            if args.len() != 2 {
+                return Err("socket_open(...) expects exactly two arguments".to_string());
+            }
+            let host_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            let port_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
+            if host_type != TypeName::Text || port_type != TypeName::I64 {
+                return Err("socket_open(...) expects (text, i64)".to_string());
+            }
+            Ok(TypeName::Socket)
+        }
+        "socket_send" => {
+            if args.len() != 2 {
+                return Err("socket_send(...) expects exactly two arguments".to_string());
+            }
+            let socket_type =
+                infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            let text_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
+            if socket_type != TypeName::Socket || text_type != TypeName::Text {
+                return Err("socket_send(...) expects (socket, text)".to_string());
+            }
+            Ok(TypeName::I64)
+        }
+        "socket_recv" => {
+            if args.len() != 2 {
+                return Err("socket_recv(...) expects exactly two arguments".to_string());
+            }
+            let socket_type =
+                infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            let limit_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
+            if socket_type != TypeName::Socket || limit_type != TypeName::I64 {
+                return Err("socket_recv(...) expects (socket, i64)".to_string());
+            }
+            Ok(TypeName::Text)
+        }
+        "socket_close" => {
+            if args.len() != 1 {
+                return Err("socket_close(...) expects exactly one argument".to_string());
+            }
+            let socket_type =
+                infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if socket_type != TypeName::Socket {
+                return Err(format!(
+                    "socket_close(...) expects socket input, got '{}'",
+                    socket_type.display()
+                ));
+            }
+            Ok(TypeName::Bool)
+        }
         _ => {
             let signature = functions
                 .get(name)
@@ -1800,12 +1864,21 @@ fn lower_to_c(program: &Program, semantic: &SemanticInfo) -> Result<String, Stri
     out.push_str("#include <stdint.h>\n");
     out.push_str("#include <stdio.h>\n");
     out.push_str("#include <stdlib.h>\n");
-    out.push_str("#include <string.h>\n\n");
+    out.push_str("#include <string.h>\n");
+    out.push_str("#include <errno.h>\n");
+    out.push_str("#include <netdb.h>\n");
+    out.push_str("#include <sys/socket.h>\n");
+    out.push_str("#include <sys/types.h>\n");
+    out.push_str("#include <unistd.h>\n\n");
 
     out.push_str("typedef struct {\n");
     out.push_str("    int64_t len;\n");
     out.push_str("    const char *data;\n");
     out.push_str("} NoemaText;\n\n");
+
+    out.push_str("typedef struct {\n");
+    out.push_str("    int fd;\n");
+    out.push_str("} NoemaSocket;\n\n");
 
     out.push_str("static int noema_argc = 0;\n");
     out.push_str("static char **noema_argv = NULL;\n\n");
@@ -1824,6 +1897,13 @@ fn lower_to_c(program: &Program, semantic: &SemanticInfo) -> Result<String, Stri
     out.push_str("    text.len = len;\n");
     out.push_str("    text.data = data;\n");
     out.push_str("    return text;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static char *noema_text_to_cstr(NoemaText text) {\n");
+    out.push_str("    char *buffer = (char *)noema_alloc((size_t)text.len + 1);\n");
+    out.push_str("    memcpy(buffer, text.data, (size_t)text.len);\n");
+    out.push_str("    buffer[text.len] = '\\0';\n");
+    out.push_str("    return buffer;\n");
     out.push_str("}\n\n");
 
     out.push_str("static int64_t noema_text_count(NoemaText text) {\n");
@@ -1851,6 +1931,17 @@ fn lower_to_c(program: &Program, semantic: &SemanticInfo) -> Result<String, Stri
     out.push_str("    char *buffer = (char *)noema_alloc((size_t)length + 1);\n");
     out.push_str("    memcpy(buffer, stack_buffer, (size_t)length + 1);\n");
     out.push_str("    return noema_text_literal(buffer, (int64_t)length);\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static int64_t noema_i64_of(NoemaText text) {\n");
+    out.push_str("    char *buffer = noema_text_to_cstr(text);\n");
+    out.push_str("    char *end = NULL;\n");
+    out.push_str("    long long value = strtoll(buffer, &end, 10);\n");
+    out.push_str("    if (end == buffer || *end != '\\0') {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: invalid integer text '%s'\\n\", buffer);\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    return (int64_t)value;\n");
     out.push_str("}\n\n");
 
     out.push_str("static NoemaText noema_text_from_bool(bool value) {\n");
@@ -1883,18 +1974,19 @@ fn lower_to_c(program: &Program, semantic: &SemanticInfo) -> Result<String, Stri
     out.push_str("}\n\n");
 
     out.push_str("static NoemaText noema_read_text(NoemaText path) {\n");
-    out.push_str("    FILE *file = fopen(path.data, \"rb\");\n");
+    out.push_str("    char *path_c = noema_text_to_cstr(path);\n");
+    out.push_str("    FILE *file = fopen(path_c, \"rb\");\n");
     out.push_str("    if (file == NULL) {\n");
-    out.push_str("        fprintf(stderr, \"noema runtime: failed to open input file %s\\n\", path.data);\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to open input file %s\\n\", path_c);\n");
     out.push_str("        exit(1);\n");
     out.push_str("    }\n");
     out.push_str("    if (fseek(file, 0, SEEK_END) != 0) {\n");
-    out.push_str("        fprintf(stderr, \"noema runtime: failed to seek input file %s\\n\", path.data);\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to seek input file %s\\n\", path_c);\n");
     out.push_str("        exit(1);\n");
     out.push_str("    }\n");
     out.push_str("    long size = ftell(file);\n");
     out.push_str("    if (size < 0) {\n");
-    out.push_str("        fprintf(stderr, \"noema runtime: failed to read size for %s\\n\", path.data);\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to read size for %s\\n\", path_c);\n");
     out.push_str("        exit(1);\n");
     out.push_str("    }\n");
     out.push_str("    rewind(file);\n");
@@ -1902,7 +1994,7 @@ fn lower_to_c(program: &Program, semantic: &SemanticInfo) -> Result<String, Stri
     out.push_str("    size_t read = fread(buffer, 1, (size_t)size, file);\n");
     out.push_str("    fclose(file);\n");
     out.push_str("    if (read != (size_t)size) {\n");
-    out.push_str("        fprintf(stderr, \"noema runtime: failed to read all bytes from %s\\n\", path.data);\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to read all bytes from %s\\n\", path_c);\n");
     out.push_str("        exit(1);\n");
     out.push_str("    }\n");
     out.push_str("    buffer[size] = '\\0';\n");
@@ -1910,13 +2002,82 @@ fn lower_to_c(program: &Program, semantic: &SemanticInfo) -> Result<String, Stri
     out.push_str("}\n\n");
 
     out.push_str("static bool noema_write_text(NoemaText path, NoemaText text) {\n");
-    out.push_str("    FILE *file = fopen(path.data, \"wb\");\n");
+    out.push_str("    char *path_c = noema_text_to_cstr(path);\n");
+    out.push_str("    FILE *file = fopen(path_c, \"wb\");\n");
     out.push_str("    if (file == NULL) {\n");
     out.push_str("        return false;\n");
     out.push_str("    }\n");
     out.push_str("    size_t written = fwrite(text.data, 1, (size_t)text.len, file);\n");
     out.push_str("    fclose(file);\n");
     out.push_str("    return written == (size_t)text.len;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaSocket noema_socket_open(NoemaText host, int64_t port) {\n");
+    out.push_str("    char *host_c = noema_text_to_cstr(host);\n");
+    out.push_str("    char port_buffer[32];\n");
+    out.push_str("    struct addrinfo hints;\n");
+    out.push_str("    struct addrinfo *result = NULL;\n");
+    out.push_str("    struct addrinfo *cursor = NULL;\n");
+    out.push_str("    int fd = -1;\n");
+    out.push_str("    NoemaSocket socket_value;\n");
+    out.push_str("    memset(&hints, 0, sizeof(hints));\n");
+    out.push_str("    hints.ai_socktype = SOCK_STREAM;\n");
+    out.push_str("    hints.ai_family = AF_UNSPEC;\n");
+    out.push_str("    snprintf(port_buffer, sizeof(port_buffer), \"%lld\", (long long)port);\n");
+    out.push_str("    if (getaddrinfo(host_c, port_buffer, &hints, &result) != 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: getaddrinfo failed for %s:%s\\n\", host_c, port_buffer);\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    for (cursor = result; cursor != NULL; cursor = cursor->ai_next) {\n");
+    out.push_str("        fd = socket(cursor->ai_family, cursor->ai_socktype, cursor->ai_protocol);\n");
+    out.push_str("        if (fd < 0) {\n");
+    out.push_str("            continue;\n");
+    out.push_str("        }\n");
+    out.push_str("        if (connect(fd, cursor->ai_addr, cursor->ai_addrlen) == 0) {\n");
+    out.push_str("            break;\n");
+    out.push_str("        }\n");
+    out.push_str("        close(fd);\n");
+    out.push_str("        fd = -1;\n");
+    out.push_str("    }\n");
+    out.push_str("    freeaddrinfo(result);\n");
+    out.push_str("    if (fd < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to connect to %s:%s\\n\", host_c, port_buffer);\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    socket_value.fd = fd;\n");
+    out.push_str("    return socket_value;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static int64_t noema_socket_send(NoemaSocket socket_value, NoemaText text) {\n");
+    out.push_str("    int64_t total = 0;\n");
+    out.push_str("    while (total < text.len) {\n");
+    out.push_str("        ssize_t wrote = send(socket_value.fd, text.data + total, (size_t)(text.len - total), 0);\n");
+    out.push_str("        if (wrote <= 0) {\n");
+    out.push_str("            fprintf(stderr, \"noema runtime: socket send failed\\n\");\n");
+    out.push_str("            exit(1);\n");
+    out.push_str("        }\n");
+    out.push_str("        total += (int64_t)wrote;\n");
+    out.push_str("    }\n");
+    out.push_str("    return total;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaText noema_socket_recv(NoemaSocket socket_value, int64_t limit) {\n");
+    out.push_str("    if (limit < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: socket_recv limit must be non-negative\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    char *buffer = (char *)noema_alloc((size_t)limit + 1);\n");
+    out.push_str("    ssize_t got = recv(socket_value.fd, buffer, (size_t)limit, 0);\n");
+    out.push_str("    if (got < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: socket recv failed\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    buffer[got] = '\\0';\n");
+    out.push_str("    return noema_text_literal(buffer, (int64_t)got);\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static bool noema_socket_close(NoemaSocket socket_value) {\n");
+    out.push_str("    return close(socket_value.fd) == 0;\n");
     out.push_str("}\n\n");
 
     for shape in &program.shapes {
@@ -2482,6 +2643,29 @@ fn lower_call(
                 _ => Err("text_of lowering only supports i64, bool, or text".to_string()),
             }
         }
+        "i64_of" => Ok(format!(
+            "noema_i64_of({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?
+        )),
+        "socket_open" => Ok(format!(
+            "noema_socket_open({}, {})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?,
+            lower_expr(&args[1], env, semantic, Some(&TypeName::I64))?
+        )),
+        "socket_send" => Ok(format!(
+            "noema_socket_send({}, {})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Socket))?,
+            lower_expr(&args[1], env, semantic, Some(&TypeName::Text))?
+        )),
+        "socket_recv" => Ok(format!(
+            "noema_socket_recv({}, {})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Socket))?,
+            lower_expr(&args[1], env, semantic, Some(&TypeName::I64))?
+        )),
+        "socket_close" => Ok(format!(
+            "noema_socket_close({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Socket))?
+        )),
         _ => {
             let signature = semantic
                 .functions
@@ -2514,6 +2698,7 @@ fn c_type_name(ty: &TypeName) -> String {
         TypeName::I64 => "int64_t".to_string(),
         TypeName::Bool => "bool".to_string(),
         TypeName::Text => "NoemaText".to_string(),
+        TypeName::Socket => "NoemaSocket".to_string(),
         TypeName::Void => "void".to_string(),
         TypeName::Named(name) => name.clone(),
         TypeName::List(inner) => list_struct_name(inner),
@@ -2550,6 +2735,7 @@ impl TypeName {
             TypeName::I64 => "i64".to_string(),
             TypeName::Bool => "bool".to_string(),
             TypeName::Text => "text".to_string(),
+            TypeName::Socket => "socket".to_string(),
             TypeName::Void => "void".to_string(),
             TypeName::Named(name) => name.clone(),
             TypeName::List(inner) => format!("list<{}>", inner.display()),
@@ -2561,6 +2747,7 @@ impl TypeName {
             TypeName::I64 => "i64".to_string(),
             TypeName::Bool => "bool".to_string(),
             TypeName::Text => "text".to_string(),
+            TypeName::Socket => "socket".to_string(),
             TypeName::Void => "void".to_string(),
             TypeName::Named(name) => name.to_lowercase(),
             TypeName::List(inner) => format!("list_{}", inner.mangle()),

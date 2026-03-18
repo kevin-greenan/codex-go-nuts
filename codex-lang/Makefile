@@ -12,6 +12,7 @@ examples:
 	./bin/codexc examples/hello.noe build/hello
 	./bin/codexc examples/series.noe build/series
 	./bin/codexc examples/frontend_demo.noe build/frontend_demo
+	./bin/codexc examples/socket_probe.noe build/socket_probe
 
 clean:
 	rm -rf build compiler/target

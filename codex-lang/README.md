@@ -15,6 +15,7 @@ The current direction is:
 - `Noema` source compiled to optimized native binaries through generated C code plus the host C compiler
 - higher-level syntax that feels closer to Rust and Python than assembly
 - richer language features aimed at compiler construction rather than just arithmetic demos
+- raw TCP socket primitives so higher-level protocol stacks can be written in Noema
 
 ## Language Shape
 
@@ -38,10 +39,12 @@ The current language now also supports:
 
 - `shape` declarations for AST and IR-like data
 - `bool`, `text`, and `list<T>` types
+- an opaque `socket` type for low-level networking
 - string literals
 - field access and list indexing
 - struct literals and list literals
-- compiler-oriented builtins such as `arg`, `arg_count`, `read_text`, `write_text`, `count`, `append`, and `text_of`
+- compiler-oriented builtins such as `arg`, `arg_count`, `read_text`, `write_text`, `count`, `append`, `text_of`, and `i64_of`
+- socket builtins such as `socket_open`, `socket_send`, `socket_recv`, and `socket_close`
 
 Key design choices:
 
@@ -82,6 +85,14 @@ A more compiler-shaped example:
 cd codex-lang
 ./bin/codexc examples/frontend_demo.noe build/frontend_demo
 ./build/frontend_demo examples/hello.noe
+```
+
+A raw socket example:
+
+```sh
+cd codex-lang
+./bin/codexc examples/socket_probe.noe build/socket_probe
+./build/socket_probe 127.0.0.1 9001 ping
 ```
 
 ## Compilation Strategy
