@@ -1,62 +1,84 @@
 # codex-lang
 
-`codex-lang` is the custom programming language stack for this repository.
+`codex-lang` is the custom language stack for this repository, now centered on a compiled language named `Noema`.
 
-The first implementation is intentionally biased toward execution efficiency and portability instead of human-friendly syntax. The language runtime is a compact bytecode virtual machine written in C, and the bytecode format is designed to be stable, binary, and cheap to load.
+`Noema` is not designed for public consumption. It is designed to be fast to compile, fast to run, easy for me to generate, and flexible enough to grow into the default implementation language for future projects in this repo.
 
-## Design Direction
+## What Changed
 
-- Fast startup and low runtime overhead
-- Portable execution across macOS, Linux, and Windows
-- Deterministic binary format with explicit opcodes
-- General-purpose control flow and arithmetic as the foundation for future higher-level language layers
-- Bootstrap-friendly tooling so the language can gradually replace its own implementation stack over time
+The earlier VM-based prototype has been retired.
+
+The current direction is:
+
+- compiler implemented in Rust
+- Rust toolchain isolated in Docker so your laptop does not need a local Rust install
+- `Noema` source compiled to optimized native binaries through generated C code plus the host C compiler
+- higher-level syntax that feels closer to Rust and Python than assembly
+
+## Language Shape
+
+`Noema` uses indentation for blocks and explicit statements for clarity.
+
+Example:
+
+```text
+loom fib(n: i64) -> i64:
+    if n <= 1:
+        return n;
+    else:
+        return fib(n - 1) + fib(n - 2);
+
+loom main() -> i64:
+    emit fib(10);
+    return 0;
+```
+
+Key design choices:
+
+- structured functions with typed parameters and return values
+- descriptive control flow: `if`, `else`, `while`, `return`
+- mutable local bindings with `let`
+- native compilation through Rust instead of VM execution
+- a syntax that is readable enough to inspect, but still free to evolve around machine-first usage
 
 ## Current Layout
 
-- `docs/spec.md`: bytecode format and instruction set
-- `src/cdxvm.c`: the reference virtual machine
-- `tools/cdxasm.py`: a bootstrap assembler that emits `.cdx` binaries
-- `examples/`: sample programs in the bootstrap assembly syntax
-- `build/`: generated binaries and build outputs
-
-## First Runtime Model
-
-The initial language kernel is called `CDX`.
-
-- Execution model: stack machine with indexed local slots
-- Value type: signed 64-bit integers
-- Program format: binary module with a small header and raw bytecode
-- Control flow: conditional and unconditional relative jumps
-- Tooling model: textual assembly for bootstrapping, binary modules for execution
-
-This is enough to support loops, branching, arithmetic, counters, accumulators, and other low-level building blocks. Higher-level syntax, richer types, functions, memory management, and a native compiler can be layered on top once the kernel stabilizes.
+- `compiler/`: Rust implementation of the `Noema` compiler
+- `container/`: Docker image definition for the Rust toolchain
+- `bin/codexc`: wrapper that runs the compiler inside Docker
+- `docs/noema.md`: language sketch and current grammar
+- `examples/`: sample `Noema` programs
+- `build/`: generated outputs
 
 ## Quick Start
 
-Build the VM:
+Build the container image:
 
 ```sh
-make -C codex-lang
+make -C codex-lang image
 ```
 
-Assemble and run the sample programs:
+Compile a `Noema` program into a native executable:
 
 ```sh
-python3 codex-lang/tools/cdxasm.py codex-lang/examples/hello.cdxasm codex-lang/build/hello.cdx
-./codex-lang/build/cdxvm codex-lang/build/hello.cdx
-
-python3 codex-lang/tools/cdxasm.py codex-lang/examples/sum_to_ten.cdxasm codex-lang/build/sum_to_ten.cdx
-./codex-lang/build/cdxvm codex-lang/build/sum_to_ten.cdx
+cd codex-lang
+./bin/codexc examples/hello.noe build/hello
+./build/hello
 ```
 
-## Why This Shape
+## Compilation Strategy
 
-Because I am the primary consumer of the language, the bytecode does not need to optimize for human readability. The important constraints are:
+For now, `Noema` compiles to generated C source and then uses the host C compiler to produce an optimized native binary.
 
-- small runtime
-- predictable execution
-- easy cross-platform compilation
-- room to grow into a fuller systems and application language
+That gives us:
 
-The bootstrap assembler exists only to let us develop the runtime before we have a self-hosted front end.
+- native performance
+- cross-platform compiler portability
+- a pragmatic bootstrap path
+- room to replace the C backend later if direct codegen becomes worthwhile
+
+## Intent
+
+The long-term goal is still the same: everything else in this repository should eventually be written in this language stack.
+
+This version simply starts from a better foundation for that goal.

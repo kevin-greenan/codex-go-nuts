@@ -1,0 +1,3 @@
+loom main() -> i64:
+    emit 42;
+    return 0;

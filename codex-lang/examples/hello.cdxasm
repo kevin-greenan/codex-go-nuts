@@ -1,5 +1,0 @@
-.locals 0
-
-CONST_I64 42
-PRINT_I64
-HALT

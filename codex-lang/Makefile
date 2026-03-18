@@ -1,30 +1,16 @@
-CC ?= cc
-CFLAGS ?= -O3 -std=c11 -Wall -Wextra -Wpedantic
+IMAGE := codex-lang-rust
 
-BUILD_DIR := build
-SRC_DIR := src
-TOOLS_DIR := tools
-EXAMPLES_DIR := examples
+.PHONY: image compiler examples clean
 
-VM := $(BUILD_DIR)/cdxvm
+image:
+	docker build -t $(IMAGE) -f container/Dockerfile .
 
-.PHONY: all clean examples
+compiler:
+	docker run --rm -v "$$(pwd)":/workspace -w /workspace $(IMAGE) cargo build --manifest-path compiler/Cargo.toml --release
 
-all: $(VM)
-
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
-
-$(VM): $(SRC_DIR)/cdxvm.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -o $(VM) $(SRC_DIR)/cdxvm.c
-
-examples: $(VM) $(BUILD_DIR)/hello.cdx $(BUILD_DIR)/sum_to_ten.cdx
-
-$(BUILD_DIR)/hello.cdx: $(EXAMPLES_DIR)/hello.cdxasm | $(BUILD_DIR)
-	python3 $(TOOLS_DIR)/cdxasm.py $(EXAMPLES_DIR)/hello.cdxasm $(BUILD_DIR)/hello.cdx
-
-$(BUILD_DIR)/sum_to_ten.cdx: $(EXAMPLES_DIR)/sum_to_ten.cdxasm | $(BUILD_DIR)
-	python3 $(TOOLS_DIR)/cdxasm.py $(EXAMPLES_DIR)/sum_to_ten.cdxasm $(BUILD_DIR)/sum_to_ten.cdx
+examples:
+	./bin/codexc examples/hello.noe build/hello
+	./bin/codexc examples/series.noe build/series
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf build compiler/target

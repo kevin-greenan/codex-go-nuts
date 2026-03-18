@@ -1,0 +1,26 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+IMAGE_NAME=codex-lang-rust
+
+if [ "$#" -ne 2 ]; then
+  echo "usage: $0 <input.noe> <output-binary>" >&2
+  exit 1
+fi
+
+if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+  docker build -t "$IMAGE_NAME" -f "$ROOT_DIR/container/Dockerfile" "$ROOT_DIR"
+fi
+
+OUTPUT_DIR=$(dirname "$2")
+mkdir -p "$OUTPUT_DIR"
+
+docker run --rm \
+  -v "$ROOT_DIR":/workspace \
+  -w /workspace \
+  "$IMAGE_NAME" \
+  cargo run --manifest-path compiler/Cargo.toml --release -- "$1" "$2.generated.c"
+
+cc -O3 -std=c11 -Wall -Wextra -Wpedantic "$2.generated.c" -o "$2"
