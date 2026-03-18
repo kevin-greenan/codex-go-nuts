@@ -14,6 +14,7 @@ examples:
 	./bin/codexc examples/frontend_demo.noe build/frontend_demo
 	./bin/codexc examples/socket_probe.noe build/socket_probe
 	./bin/codexc examples/http_get.noe build/http_get
+	./bin/codexc selfhost/mini_compiler.noe build/mini_compiler
 
 native-example:
 	NOEMA_BACKEND=native-arm64 ./bin/codexc examples/hello.noe build/hello.native

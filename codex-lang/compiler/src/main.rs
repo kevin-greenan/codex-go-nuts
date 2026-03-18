@@ -2868,8 +2868,22 @@ fn lower_to_c(program: &Program, semantic: &SemanticInfo) -> Result<String, Stri
     out.push_str("    return close(socket_value.fd) == 0;\n");
     out.push_str("}\n\n");
 
+    let mut ordered_lists: Vec<TypeName> = semantic.list_types.iter().cloned().collect();
+    ordered_lists.sort_by_key(TypeName::mangle);
+
     for shape in &program.shapes {
-        writeln!(&mut out, "typedef struct {} {{", shape.name).unwrap();
+        writeln!(&mut out, "typedef struct {} {};", shape.name, shape.name).unwrap();
+    }
+    if !program.shapes.is_empty() {
+        out.push('\n');
+    }
+
+    for list_type in &ordered_lists {
+        emit_list_struct_decl(list_type, &mut out)?;
+    }
+
+    for shape in &program.shapes {
+        writeln!(&mut out, "struct {} {{", shape.name).unwrap();
         for field in &shape.fields {
             writeln!(
                 &mut out,
@@ -2879,11 +2893,9 @@ fn lower_to_c(program: &Program, semantic: &SemanticInfo) -> Result<String, Stri
             )
             .unwrap();
         }
-        writeln!(&mut out, "}} {};\n", shape.name).unwrap();
+        writeln!(&mut out, "}};\n").unwrap();
     }
 
-    let mut ordered_lists: Vec<TypeName> = semantic.list_types.iter().cloned().collect();
-    ordered_lists.sort_by_key(TypeName::mangle);
     for list_type in &ordered_lists {
         emit_list_helpers(list_type, &mut out)?;
     }
@@ -2929,6 +2941,22 @@ fn lower_to_c(program: &Program, semantic: &SemanticInfo) -> Result<String, Stri
     Ok(out)
 }
 
+fn emit_list_struct_decl(list_type: &TypeName, out: &mut String) -> Result<(), String> {
+    let TypeName::List(inner) = list_type else {
+        return Ok(());
+    };
+
+    let struct_name = list_struct_name(inner);
+    let item_type = c_type_name(inner);
+    writeln!(out, "typedef struct {} {{", struct_name).unwrap();
+    writeln!(out, "    {} *items;", item_type).unwrap();
+    out.push_str("    int64_t len;\n");
+    out.push_str("} ");
+    out.push_str(&struct_name);
+    out.push_str(";\n\n");
+    Ok(())
+}
+
 fn emit_list_helpers(list_type: &TypeName, out: &mut String) -> Result<(), String> {
     let TypeName::List(inner) = list_type else {
         return Ok(());
@@ -2941,13 +2969,6 @@ fn emit_list_helpers(list_type: &TypeName, out: &mut String) -> Result<(), Strin
     let at_name = list_at_name(inner);
     let make_name = list_make_name(inner);
     let from_items_name = list_from_items_name(inner);
-
-    writeln!(out, "typedef struct {} {{", struct_name).unwrap();
-    writeln!(out, "    {} *items;", item_type).unwrap();
-    out.push_str("    int64_t len;\n");
-    out.push_str("} ");
-    out.push_str(&struct_name);
-    out.push_str(";\n\n");
 
     writeln!(out, "static {} {}(void) {{", struct_name, make_name).unwrap();
     writeln!(out, "    {} list;", struct_name).unwrap();

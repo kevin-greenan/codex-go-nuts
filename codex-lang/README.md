@@ -66,6 +66,7 @@ Key design choices:
 - `docs/noema.md`: language sketch and current grammar
 - `examples/`: sample `Noema` programs
 - `lib/`: reusable Noema source libraries
+- `selfhost/`: Noema-written compiler experiments and bootstrap path
 - `build/`: generated outputs
 
 ## Quick Start
@@ -116,6 +117,16 @@ cd codex-lang
 ./build/http_get http://127.0.0.1:9010/examples/hello.noe
 ```
 
+A self-hosting bootstrap example:
+
+```sh
+cd codex-lang
+./bin/codexc selfhost/mini_compiler.noe build/mini_compiler
+./build/mini_compiler examples/mini_source.noe build/mini_source.generated.c
+cc -O3 build/mini_source.generated.c -o build/mini_source.generated
+./build/mini_source.generated
+```
+
 ## Compilation Strategy
 
 For now, `Noema` compiles to generated C source and then uses the host C compiler to produce an optimized native binary.
@@ -133,8 +144,17 @@ There is now also an experimental `native-arm64` backend for `arm64-apple-darwin
 - It currently supports a narrow scalar subset: `i64` functions, locals, arithmetic, comparisons, `?`, `~`, calls, and `!` on `i64`.
 - The C backend remains the primary backend for the full language surface.
 
+There is also now a first self-hosting bridge:
+
+- `selfhost/mini_compiler.noe` is a compiler written in Noema
+- it tokenizes, builds a small AST, parses a strict `i64` subset, and emits C
+- that means Noema is now compiling Noema, even though Rust still provides the outer bootstrap compiler
+- the next job is widening that Noema-written compiler until the Rust compiler becomes optional
+
 ## Intent
 
 The long-term goal is still the same: everything else in this repository should eventually be written in this language stack.
 
 This version now includes the first set of features needed to write parsers, AST builders, front-end utilities, and code generators directly in Noema, using a syntax that is intentionally denser and more symbolic than a conventional human-facing language.
+
+The new self-hosting milestone matters because it shifts Noema from "compiler-friendly" to "already capable of implementing compiler phases itself." The language still needs a larger supported subset and eventually a native backend that can stand on its own, but the compiler logic is no longer confined to Rust.

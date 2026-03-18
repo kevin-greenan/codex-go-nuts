@@ -165,6 +165,28 @@ With `%` types, `text`, and `list<T>`, Noema can now represent the core ingredie
 
 It is not self-hosting yet, but it now has the structural features needed to start building real front-end and codegen components in Noema itself.
 
+## Self-Hosting Track
+
+`Noema` now has a bootstrap compiler written in `Noema` at `selfhost/mini_compiler.noe`.
+
+Current scope of that compiler:
+
+- tokenizes source text itself
+- builds a small AST for expressions and statements
+- parses a strict `i64`-only subset
+- emits portable C
+
+Current accepted subset:
+
+- a single `@main() -> i64 { ... }` function
+- `name := expr;`
+- `name = expr;`
+- `! expr;`
+- `^ expr;`
+- expressions using integer literals, names, `()`, `+`, `-`, `*`, `/`
+
+This is intentionally narrow, but it is a real self-hosting bridge rather than a string-rewrite trick. The long-term plan is to widen this Noema-written compiler until the Rust compiler is just a bootstrap artifact.
+
 ## Networking
 
 Noema has a first-pass low-level TCP client layer.
