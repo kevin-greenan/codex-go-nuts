@@ -1,4 +1,4 @@
-# Noema v1
+# Noema v2
 
 `Noema` is the first native-compiled language for `codex-lang`.
 
@@ -12,29 +12,31 @@
 
 ## Syntax
 
-The syntax is intentionally close to a Rust and Python hybrid:
+The syntax is intentionally closer to a compact compiler IR language than a hand-authored scripting language:
 
-- top-level functions start with `loom`
-- top-level data declarations start with `shape`
-- blocks are introduced with `:`
-- blocks are defined by indentation
-- statements end with `;` unless they open a block
+- top-level functions start with `fn`
+- top-level data declarations start with `type`
+- blocks are delimited by `{` and `}`
+- statements end with `;`
+- control-flow conditions may be wrapped in `(...)`
 
 ### Function
 
 ```text
-loom main() -> i64:
+fn main() -> i64 {
     emit 42;
     return 0;
+}
 ```
 
-### Shape
+### Type
 
 ```text
-shape Token:
-    kind: text
-    lexeme: text
-    line: i64
+type Token {
+    kind: text;
+    lexeme: text;
+    line: i64;
+}
 ```
 
 ### Variables
@@ -48,13 +50,16 @@ let tokens: list<Token> = [Token { kind: "word", lexeme: "emit", line: 1 }];
 ### Control Flow
 
 ```text
-if value > 10:
+if (value > 10) {
     emit value;
-else:
+}
+else {
     emit 10;
+}
 
-while index < 5:
+while (index < 5) {
     index = index + 1;
+}
 ```
 
 ## Supported Types
@@ -64,7 +69,7 @@ while index < 5:
 - `text`
 - `socket`
 - `list<T>`
-- named `shape` types
+- named `type` declarations
 - `void`
 
 ## Supported Statements
@@ -72,13 +77,13 @@ while index < 5:
 - `let name = expr;`
 - `let name: type = expr;`
 - `name = expr;`
-- `shape_value.field = expr;`
+- `record.field = expr;`
 - `emit expr;`
 - `return expr;`
 - `return;`
-- `if condition:`
-- `else:`
-- `while condition:`
+- `if (condition) { ... }`
+- `else { ... }`
+- `while (condition) { ... }`
 - expression statement `call(...);`
 
 ## Supported Expressions
@@ -94,7 +99,7 @@ while index < 5:
 - logical operators: `and`, `or`
 - field access: `value.field`
 - list indexing: `values[index]`
-- struct literals: `Node { tag: "root", arity: 1 }`
+- record literals: `Node { tag: "root", arity: 1 }`
 - list literals: `[1, 2, 3]`
 
 ## Builtins
@@ -144,11 +149,16 @@ Noema now has a first-pass low-level TCP client layer.
 Example:
 
 ```text
-loom main() -> i64:
+fn main() -> i64 {
     let sock = socket_open("127.0.0.1", 9001);
-    let _ = socket_send(sock, "ping");
+    let sent = socket_send(sock, "ping");
     let reply = socket_recv(sock, 1024);
+    emit text_of(sent);
     emit reply;
     let closed = socket_close(sock);
+    if (not closed) {
+        return 1;
+    }
     return 0;
+}
 ```

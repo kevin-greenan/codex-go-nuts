@@ -130,7 +130,6 @@ enum BinaryOp {
 #[derive(Clone, Debug)]
 struct Line {
     number: usize,
-    indent: usize,
     text: String,
 }
 
@@ -250,20 +249,13 @@ fn parse_program(source: &str) -> Result<Program, String> {
 
     while index < lines.len() {
         let line = &lines[index];
-        if line.indent != 0 {
-            return Err(format!(
-                "line {}: top-level items must not be indented",
-                line.number
-            ));
-        }
-
-        if line.text.starts_with("shape ") {
+        if line.text.starts_with("type ") {
             shapes.push(parse_shape(&lines, &mut index)?);
-        } else if line.text.starts_with("loom ") {
+        } else if line.text.starts_with("fn ") {
             functions.push(parse_function(&lines, &mut index)?);
         } else {
             return Err(format!(
-                "line {}: expected top-level 'shape' or 'loom'",
+                "line {}: expected top-level 'type' or 'fn'",
                 line.number
             ));
         }
@@ -286,11 +278,9 @@ fn preprocess_lines(source: &str) -> Vec<Line> {
             continue;
         }
 
-        let indent = no_comment.chars().take_while(|ch| *ch == ' ').count();
         let text = no_comment.trim().to_string();
         result.push(Line {
             number: line_no,
-            indent,
             text,
         });
     }
@@ -302,34 +292,35 @@ fn parse_shape(lines: &[Line], index: &mut usize) -> Result<ShapeDecl, String> {
     let line = &lines[*index];
     let header = line
         .text
-        .strip_prefix("shape ")
-        .ok_or_else(|| format!("line {}: expected shape declaration", line.number))?;
+        .strip_prefix("type ")
+        .ok_or_else(|| format!("line {}: expected type declaration", line.number))?;
 
-    if !header.ends_with(':') {
-        return Err(format!("line {}: shape header must end with ':'", line.number));
+    if !header.ends_with('{') {
+        return Err(format!("line {}: type header must end with '{{'", line.number));
     }
 
     let name = header[..header.len() - 1].trim().to_string();
     if name.is_empty() {
-        return Err(format!("line {}: shape name cannot be empty", line.number));
+        return Err(format!("line {}: type name cannot be empty", line.number));
     }
 
     *index += 1;
     let mut fields = Vec::new();
     while *index < lines.len() {
         let field_line = &lines[*index];
-        if field_line.indent < line.indent + 4 {
+        if field_line.text == "}" {
+            *index += 1;
             break;
         }
-        if field_line.indent > line.indent + 4 {
+        if !field_line.text.ends_with(';') {
             return Err(format!(
-                "line {}: unexpected indentation level {}",
-                field_line.number, field_line.indent
+                "line {}: type fields must end with ';'",
+                field_line.number
             ));
         }
 
-        let (field_name, field_type) = field_line
-            .text
+        let field_text = &field_line.text[..field_line.text.len() - 1];
+        let (field_name, field_type) = field_text
             .split_once(':')
             .ok_or_else(|| format!("line {}: invalid shape field", field_line.number))?;
         let field_name = field_name.trim().to_string();
@@ -344,7 +335,7 @@ fn parse_shape(lines: &[Line], index: &mut usize) -> Result<ShapeDecl, String> {
     }
 
     if fields.is_empty() {
-        return Err(format!("line {}: shape body cannot be empty", line.number));
+        return Err(format!("line {}: type body cannot be empty", line.number));
     }
 
     Ok(ShapeDecl { name, fields })
@@ -354,11 +345,11 @@ fn parse_function(lines: &[Line], index: &mut usize) -> Result<Function, String>
     let line = &lines[*index];
     let header = line
         .text
-        .strip_prefix("loom ")
-        .ok_or_else(|| format!("line {}: expected function starting with 'loom'", line.number))?;
+        .strip_prefix("fn ")
+        .ok_or_else(|| format!("line {}: expected function starting with 'fn'", line.number))?;
 
-    if !header.ends_with(':') {
-        return Err(format!("line {}: function header must end with ':'", line.number));
+    if !header.ends_with('{') {
+        return Err(format!("line {}: function header must end with '{{'", line.number));
     }
 
     let header = &header[..header.len() - 1];
@@ -386,7 +377,7 @@ fn parse_function(lines: &[Line], index: &mut usize) -> Result<Function, String>
     let params = parse_parameters(params_text, line.number)?;
 
     *index += 1;
-    let body = parse_block(lines, index, line.indent + 4)?;
+    let body = parse_block(lines, index)?;
     if body.is_empty() {
         return Err(format!("line {}: function body cannot be empty", line.number));
     }
@@ -484,27 +475,22 @@ fn parse_identifier(chars: &[char], index: &mut usize) -> Option<String> {
     Some(chars[start..*index].iter().collect())
 }
 
-fn parse_block(lines: &[Line], index: &mut usize, indent: usize) -> Result<Vec<Statement>, String> {
+fn parse_block(lines: &[Line], index: &mut usize) -> Result<Vec<Statement>, String> {
     let mut statements = Vec::new();
 
     while *index < lines.len() {
         let line = &lines[*index];
-        if line.indent < indent {
+        if line.text == "}" {
+            *index += 1;
             break;
         }
-        if line.indent > indent {
-            return Err(format!(
-                "line {}: unexpected indentation level {}",
-                line.number, line.indent
-            ));
-        }
-        statements.push(parse_statement(lines, index, indent)?);
+        statements.push(parse_statement(lines, index)?);
     }
 
     Ok(statements)
 }
 
-fn parse_statement(lines: &[Line], index: &mut usize, indent: usize) -> Result<Statement, String> {
+fn parse_statement(lines: &[Line], index: &mut usize) -> Result<Statement, String> {
     let line = &lines[*index];
     let text = line.text.as_str();
 
@@ -559,19 +545,19 @@ fn parse_statement(lines: &[Line], index: &mut usize, indent: usize) -> Result<S
     }
 
     if let Some(condition) = text.strip_prefix("if ") {
-        if !condition.ends_with(':') {
-            return Err(format!("line {}: if statement must end with ':'", line.number));
+        if !condition.ends_with('{') {
+            return Err(format!("line {}: if statement must end with '{{'", line.number));
         }
-        let condition = parse_expression(condition[..condition.len() - 1].trim(), line.number)?;
+        let condition = parse_expression(
+            strip_optional_parens(condition[..condition.len() - 1].trim()),
+            line.number,
+        )?;
         *index += 1;
-        let then_body = parse_block(lines, index, indent + 4)?;
+        let then_body = parse_block(lines, index)?;
         let mut else_body = Vec::new();
-        if *index < lines.len()
-            && lines[*index].indent == indent
-            && lines[*index].text == "else:"
-        {
+        if *index < lines.len() && lines[*index].text == "else {" {
             *index += 1;
-            else_body = parse_block(lines, index, indent + 4)?;
+            else_body = parse_block(lines, index)?;
         }
         return Ok(Statement::If {
             condition,
@@ -581,13 +567,20 @@ fn parse_statement(lines: &[Line], index: &mut usize, indent: usize) -> Result<S
     }
 
     if let Some(condition) = text.strip_prefix("while ") {
-        if !condition.ends_with(':') {
-            return Err(format!("line {}: while statement must end with ':'", line.number));
+        if !condition.ends_with('{') {
+            return Err(format!("line {}: while statement must end with '{{'", line.number));
         }
-        let condition = parse_expression(condition[..condition.len() - 1].trim(), line.number)?;
+        let condition = parse_expression(
+            strip_optional_parens(condition[..condition.len() - 1].trim()),
+            line.number,
+        )?;
         *index += 1;
-        let body = parse_block(lines, index, indent + 4)?;
+        let body = parse_block(lines, index)?;
         return Ok(Statement::While { condition, body });
+    }
+
+    if text == "else {" {
+        return Err(format!("line {}: else block without matching if", line.number));
     }
 
     ensure_semicolon(text, line.number)?;
@@ -603,6 +596,15 @@ fn parse_statement(lines: &[Line], index: &mut usize, indent: usize) -> Result<S
 
     *index += 1;
     Ok(Statement::Expr(parse_expression(content.trim(), line.number)?))
+}
+
+fn strip_optional_parens(input: &str) -> &str {
+    let trimmed = input.trim();
+    if trimmed.starts_with('(') && trimmed.ends_with(')') && trimmed.len() >= 2 {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    }
 }
 
 fn ensure_semicolon(input: &str, line_no: usize) -> Result<(), String> {

@@ -1,7 +1,8 @@
-loom main() -> i64:
-    if arg_count() < 4:
+fn main() -> i64 {
+    if (arg_count() < 4) {
         emit "usage: socket_probe <host> <port> <payload>";
         return 1;
+    }
 
     let host = arg(1);
     let port = i64_of(arg(2));
@@ -14,8 +15,10 @@ loom main() -> i64:
     emit "wrote=" + text_of(wrote);
     emit reply;
 
-    if not closed:
+    if (not closed) {
         emit "socket_close failed";
         return 1;
+    }
 
     return 0;
+}

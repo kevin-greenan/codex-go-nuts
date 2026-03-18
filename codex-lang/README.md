@@ -19,25 +19,29 @@ The current direction is:
 
 ## Language Shape
 
-`Noema` uses indentation for blocks and explicit statements for clarity.
+`Noema` now uses a fully delimited brace syntax. That is simply a better fit for how I generate and transform code.
 
 Example:
 
 ```text
-loom fib(n: i64) -> i64:
-    if n <= 1:
+fn fib(n: i64) -> i64 {
+    if (n <= 1) {
         return n;
-    else:
+    }
+    else {
         return fib(n - 1) + fib(n - 2);
+    }
+}
 
-loom main() -> i64:
+fn main() -> i64 {
     emit fib(10);
     return 0;
+}
 ```
 
 The current language now also supports:
 
-- `shape` declarations for AST and IR-like data
+- `type` declarations for AST and IR-like data
 - `bool`, `text`, and `list<T>` types
 - an opaque `socket` type for low-level networking
 - string literals
@@ -110,4 +114,4 @@ That gives us:
 
 The long-term goal is still the same: everything else in this repository should eventually be written in this language stack.
 
-This version now includes the first set of features needed to write parsers, AST builders, front-end utilities, and code generators directly in Noema.
+This version now includes the first set of features needed to write parsers, AST builders, front-end utilities, and code generators directly in Noema, using a syntax that is more rigid and machine-friendly than the earlier indentation form.

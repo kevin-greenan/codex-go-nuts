@@ -1,40 +1,50 @@
-shape Token:
-    kind: text
-    lexeme: text
-    line: i64
+type Token {
+    kind: text;
+    lexeme: text;
+    line: i64;
+}
 
-shape Node:
-    tag: text
-    payload: text
-    arity: i64
+type Node {
+    tag: text;
+    payload: text;
+    arity: i64;
+}
 
-loom make_source_token(source: text) -> Token:
+fn make_source_token(source: text) -> Token {
     return Token { kind: "source", lexeme: source, line: 1 };
+}
 
-loom synth_ast(source: text) -> Node:
+fn synth_ast(source: text) -> Node {
     let seed = make_source_token(source);
     let tokens: list<Token> = [seed];
     let first = tokens[0];
     return Node { tag: "unit", payload: first.kind + ":" + text_of(count(first.lexeme)), arity: count(tokens) };
+}
 
-loom render(node: Node) -> text:
+fn render(node: Node) -> text {
     return node.tag + " [" + text_of(node.arity) + "] " + node.payload;
+}
 
-loom main() -> i64:
-    if arg_count() < 2:
+fn main() -> i64 {
+    if (arg_count() < 2) {
         emit "usage: frontend_demo <input-path> [output-path]";
         return 1;
+    }
 
     let source = read_text(arg(1));
     let ast = synth_ast(source);
     let generated = render(ast);
 
-    if arg_count() >= 3:
+    if (arg_count() >= 3) {
         let wrote = write_text(arg(2), generated);
-        if not wrote:
+        if (not wrote) {
             emit "write failed";
             return 1;
-    else:
+        }
+    }
+    else {
         emit generated;
+    }
 
     return 0;
+}

@@ -1,18 +1,24 @@
-loom sum_to(n: i64) -> i64:
+fn sum_to(n: i64) -> i64 {
     let total = 0;
     let index = 1;
-    while index <= n:
+    while (index <= n) {
         total = total + index;
         index = index + 1;
+    }
     return total;
+}
 
-loom fib(n: i64) -> i64:
-    if n <= 1:
+fn fib(n: i64) -> i64 {
+    if (n <= 1) {
         return n;
-    else:
+    }
+    else {
         return fib(n - 1) + fib(n - 2);
+    }
+}
 
-loom main() -> i64:
+fn main() -> i64 {
     emit sum_to(10);
     emit fib(10);
     return 0;
+}
