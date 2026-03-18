@@ -212,8 +212,8 @@ fn run() -> Result<(), String> {
 
     let input_path = PathBuf::from(&args[1]);
     let output_path = PathBuf::from(&args[2]);
-    let source = fs::read_to_string(&input_path)
-        .map_err(|err| format!("failed to read {}: {err}", input_path.display()))?;
+    let mut seen = HashSet::new();
+    let source = load_source(&input_path, &mut seen)?;
 
     let program = parse_program(&source)?;
     let semantic = analyze_program(&program)?;
@@ -239,6 +239,49 @@ fn run() -> Result<(), String> {
         .map_err(|err| format!("failed to write {}: {err}", c_output.display()))?;
 
     Ok(())
+}
+
+fn load_source(path: &Path, seen: &mut HashSet<PathBuf>) -> Result<String, String> {
+    let canonical = fs::canonicalize(path)
+        .map_err(|err| format!("failed to resolve {}: {err}", path.display()))?;
+    if !seen.insert(canonical.clone()) {
+        return Ok(String::new());
+    }
+
+    let source = fs::read_to_string(&canonical)
+        .map_err(|err| format!("failed to read {}: {err}", canonical.display()))?;
+    let mut out = String::new();
+    let base_dir = canonical
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    for raw_line in source.lines() {
+        let trimmed = raw_line.trim();
+        if let Some(path_text) = parse_include_directive(trimmed) {
+            let include_path = base_dir.join(path_text);
+            out.push_str(&load_source(&include_path, seen)?);
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            continue;
+        }
+        out.push_str(raw_line);
+        out.push('\n');
+    }
+
+    Ok(out)
+}
+
+fn parse_include_directive(line: &str) -> Option<&str> {
+    if !line.starts_with('&') || !line.ends_with(';') {
+        return None;
+    }
+    let inner = line[1..line.len() - 1].trim();
+    if inner.len() < 2 || !inner.starts_with('"') || !inner.ends_with('"') {
+        return None;
+    }
+    Some(&inner[1..inner.len() - 1])
 }
 
 fn parse_program(source: &str) -> Result<Program, String> {
@@ -1689,6 +1732,29 @@ fn infer_call_type(
                 )),
             }
         }
+        "find" => {
+            if args.len() != 2 {
+                return Err("find(...) expects exactly two arguments".to_string());
+            }
+            let hay_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            let needle_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
+            if hay_type != TypeName::Text || needle_type != TypeName::Text {
+                return Err("find(...) expects (text, text)".to_string());
+            }
+            Ok(TypeName::I64)
+        }
+        "slice" => {
+            if args.len() != 3 {
+                return Err("slice(...) expects exactly three arguments".to_string());
+            }
+            let text_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            let start_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
+            let len_type = infer_expr_type(&args[2], env, shapes, functions, None, list_types)?;
+            if text_type != TypeName::Text || start_type != TypeName::I64 || len_type != TypeName::I64 {
+                return Err("slice(...) expects (text, i64, i64)".to_string());
+            }
+            Ok(TypeName::Text)
+        }
         "append" => {
             if args.len() != 2 {
                 return Err("append(...) expects exactly two arguments".to_string());
@@ -1822,6 +1888,17 @@ fn infer_call_type(
             }
             Ok(TypeName::Text)
         }
+        "socket_recv_all" => {
+            if args.len() != 1 {
+                return Err("socket_recv_all(...) expects exactly one argument".to_string());
+            }
+            let socket_type =
+                infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if socket_type != TypeName::Socket {
+                return Err("socket_recv_all(...) expects socket input".to_string());
+            }
+            Ok(TypeName::Text)
+        }
         "socket_close" => {
             if args.len() != 1 {
                 return Err("socket_close(...) expects exactly one argument".to_string());
@@ -1917,6 +1994,31 @@ fn lower_to_c(program: &Program, semantic: &SemanticInfo) -> Result<String, Stri
 
     out.push_str("static int64_t noema_text_count(NoemaText text) {\n");
     out.push_str("    return text.len;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static int64_t noema_text_find(NoemaText haystack, NoemaText needle) {\n");
+    out.push_str("    int64_t index = 0;\n");
+    out.push_str("    if (needle.len == 0) {\n");
+    out.push_str("        return 0;\n");
+    out.push_str("    }\n");
+    out.push_str("    if (needle.len > haystack.len) {\n");
+    out.push_str("        return -1;\n");
+    out.push_str("    }\n");
+    out.push_str("    while (index <= haystack.len - needle.len) {\n");
+    out.push_str("        if (memcmp(haystack.data + index, needle.data, (size_t)needle.len) == 0) {\n");
+    out.push_str("            return index;\n");
+    out.push_str("        }\n");
+    out.push_str("        index += 1;\n");
+    out.push_str("    }\n");
+    out.push_str("    return -1;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaText noema_text_slice(NoemaText text, int64_t start, int64_t len) {\n");
+    out.push_str("    if (start < 0 || len < 0 || start > text.len || start + len > text.len) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: invalid text slice\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    return noema_text_literal(text.data + start, len);\n");
     out.push_str("}\n\n");
 
     out.push_str("static bool noema_text_eq(NoemaText left, NoemaText right) {\n");
@@ -2083,6 +2185,33 @@ fn lower_to_c(program: &Program, semantic: &SemanticInfo) -> Result<String, Stri
     out.push_str("    }\n");
     out.push_str("    buffer[got] = '\\0';\n");
     out.push_str("    return noema_text_literal(buffer, (int64_t)got);\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaText noema_socket_recv_all(NoemaSocket socket_value) {\n");
+    out.push_str("    int64_t cap = 4096;\n");
+    out.push_str("    int64_t len = 0;\n");
+    out.push_str("    char *buffer = (char *)noema_alloc((size_t)cap + 1);\n");
+    out.push_str("    while (1) {\n");
+    out.push_str("        ssize_t got = recv(socket_value.fd, buffer + len, (size_t)(cap - len), 0);\n");
+    out.push_str("        if (got < 0) {\n");
+    out.push_str("            fprintf(stderr, \"noema runtime: socket recv failed\\n\");\n");
+    out.push_str("            exit(1);\n");
+    out.push_str("        }\n");
+    out.push_str("        if (got == 0) {\n");
+    out.push_str("            break;\n");
+    out.push_str("        }\n");
+    out.push_str("        len += (int64_t)got;\n");
+    out.push_str("        if (len == cap) {\n");
+    out.push_str("            cap *= 2;\n");
+    out.push_str("            buffer = (char *)realloc(buffer, (size_t)cap + 1);\n");
+    out.push_str("            if (buffer == NULL) {\n");
+    out.push_str("                fprintf(stderr, \"noema runtime: allocation failed\\n\");\n");
+    out.push_str("                exit(1);\n");
+    out.push_str("            }\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    buffer[len] = '\\0';\n");
+    out.push_str("    return noema_text_literal(buffer, len);\n");
     out.push_str("}\n\n");
 
     out.push_str("static bool noema_socket_close(NoemaSocket socket_value) {\n");
@@ -2602,6 +2731,17 @@ fn lower_call(
                 _ => Err("count lowering requires text or list".to_string()),
             }
         }
+        "find" => Ok(format!(
+            "noema_text_find({}, {})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?,
+            lower_expr(&args[1], env, semantic, Some(&TypeName::Text))?
+        )),
+        "slice" => Ok(format!(
+            "noema_text_slice({}, {}, {})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?,
+            lower_expr(&args[1], env, semantic, Some(&TypeName::I64))?,
+            lower_expr(&args[2], env, semantic, Some(&TypeName::I64))?
+        )),
         "append" => {
             let list_type = infer_expr_type(
                 &args[0],
@@ -2670,6 +2810,10 @@ fn lower_call(
             "noema_socket_recv({}, {})",
             lower_expr(&args[0], env, semantic, Some(&TypeName::Socket))?,
             lower_expr(&args[1], env, semantic, Some(&TypeName::I64))?
+        )),
+        "socket_recv_all" => Ok(format!(
+            "noema_socket_recv_all({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Socket))?
         )),
         "socket_close" => Ok(format!(
             "noema_socket_close({})",

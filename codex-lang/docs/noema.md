@@ -120,7 +120,20 @@ tokens :: list<Token> := [Token { kind: "word", lexeme: "emit", line: 1 }];
 - `socket_open(host, port)` -> `socket`
 - `socket_send(socket, text)` -> `i64`
 - `socket_recv(socket, limit)` -> `text`
+- `socket_recv_all(socket)` -> `text`
 - `socket_close(socket)` -> `bool`
+
+## Includes
+
+Noema source files can include other Noema source files with a leading `&`.
+
+Example:
+
+```text
+& "../lib/http.noe";
+```
+
+Includes are expanded before parsing, which is the current library mechanism.
 
 ## Backend
 

@@ -13,6 +13,7 @@ examples:
 	./bin/codexc examples/series.noe build/series
 	./bin/codexc examples/frontend_demo.noe build/frontend_demo
 	./bin/codexc examples/socket_probe.noe build/socket_probe
+	./bin/codexc examples/http_get.noe build/http_get
 
 clean:
 	rm -rf build compiler/target

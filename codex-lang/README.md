@@ -65,6 +65,7 @@ Key design choices:
 - `bin/codexc`: wrapper that runs the compiler inside Docker
 - `docs/noema.md`: language sketch and current grammar
 - `examples/`: sample `Noema` programs
+- `lib/`: reusable Noema source libraries
 - `build/`: generated outputs
 
 ## Quick Start
@@ -97,6 +98,14 @@ A raw socket example:
 cd codex-lang
 ./bin/codexc examples/socket_probe.noe build/socket_probe
 ./build/socket_probe 127.0.0.1 9001 ping
+```
+
+A reusable HTTP layer example:
+
+```sh
+cd codex-lang
+./bin/codexc examples/http_get.noe build/http_get
+./build/http_get http://127.0.0.1:9010/examples/hello.noe
 ```
 
 ## Compilation Strategy
