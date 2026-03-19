@@ -1398,6 +1398,12 @@
         ? (expr.name == "file_sync") {
             ^ "bool";
         }
+        ? (expr.name == "file_try_lock") {
+            ^ "bool";
+        }
+        ? (expr.name == "file_unlock") {
+            ^ "bool";
+        }
         ? (expr.name == "host_cc") {
             ^ "i64";
         }
@@ -1832,6 +1838,20 @@
             }
             ^ native_supported_expr(program, fn, locals, args[0]);
         }
+        ? (expr.name == "file_try_lock") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
+        }
+        ? (expr.name == "file_unlock") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
+        }
         ? (expr.name == "find") {
             args := expr.args;
             ? (count(args) != 2) {
@@ -2221,6 +2241,16 @@
         ? (expr.name == "file_sync") {
             out := native_expr(program, fn, locals, args[0]);
             out = out + "    bl _noema_file_sync_native\n";
+            ^ out;
+        }
+        ? (expr.name == "file_try_lock") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_file_try_lock_native\n";
+            ^ out;
+        }
+        ? (expr.name == "file_unlock") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_file_unlock_native\n";
             ^ out;
         }
         ? (expr.name == "count") {
@@ -2887,6 +2917,26 @@
     out = out + "    mov x29, sp\n";
     out = out + "    ldr x0, [x0]\n";
     out = out + "    bl _fsync\n";
+    out = out + "    cmp x0, #0\n";
+    out = out + "    cset x0, eq\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_file_try_lock_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    ldr x0, [x0]\n";
+    out = out + "    mov x1, #6\n";
+    out = out + "    bl _flock\n";
+    out = out + "    cmp x0, #0\n";
+    out = out + "    cset x0, eq\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_file_unlock_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    ldr x0, [x0]\n";
+    out = out + "    mov x1, #8\n";
+    out = out + "    bl _flock\n";
     out = out + "    cmp x0, #0\n";
     out = out + "    cset x0, eq\n";
     out = out + "    ldp x29, x30, [sp], #16\n";

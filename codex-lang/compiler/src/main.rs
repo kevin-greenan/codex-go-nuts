@@ -2032,6 +2032,32 @@ fn infer_call_type(
             }
             Ok(TypeName::Bool)
         }
+        "file_try_lock" => {
+            if args.len() != 1 {
+                return Err("file_try_lock(...) expects exactly one argument".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File {
+                return Err(format!(
+                    "file_try_lock(...) expects file input, got '{}'",
+                    file_type.display()
+                ));
+            }
+            Ok(TypeName::Bool)
+        }
+        "file_unlock" => {
+            if args.len() != 1 {
+                return Err("file_unlock(...) expects exactly one argument".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File {
+                return Err(format!(
+                    "file_unlock(...) expects file input, got '{}'",
+                    file_type.display()
+                ));
+            }
+            Ok(TypeName::Bool)
+        }
         "host_cc" => {
             if args.len() != 2 {
                 return Err("host_cc(...) expects exactly two arguments".to_string());
@@ -2729,6 +2755,8 @@ fn native_builtin_symbol(name: &str, argc: usize) -> Result<Option<(&'static str
         ("arg", 1) => ("noema_native_arg", 1),
         ("read_text", 1) => ("noema_native_read_text", 1),
         ("write_text", 2) => ("noema_native_write_text", 2),
+        ("file_try_lock", 1) => ("noema_native_file_try_lock", 1),
+        ("file_unlock", 1) => ("noema_native_file_unlock", 1),
         ("host_cc", 2) => ("noema_native_host_cc", 2),
         ("find", 2) => ("noema_native_text_find", 2),
         ("i64_of", 1) => ("noema_native_i64_of", 1),
@@ -3172,6 +3200,7 @@ fn lower_to_c_with_options(
     out.push_str("#include <errno.h>\n");
     out.push_str("#include <fcntl.h>\n");
     out.push_str("#include <netdb.h>\n");
+    out.push_str("#include <sys/file.h>\n");
     out.push_str("#include <sys/stat.h>\n");
     out.push_str("#include <sys/socket.h>\n");
     out.push_str("#include <sys/types.h>\n");
@@ -3477,6 +3506,14 @@ fn lower_to_c_with_options(
     out.push_str("    return fsync(file_value.fd) == 0;\n");
     out.push_str("}\n\n");
 
+    out.push_str("static bool noema_file_try_lock(NoemaFile file_value) {\n");
+    out.push_str("    return flock(file_value.fd, LOCK_EX | LOCK_NB) == 0;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static bool noema_file_unlock(NoemaFile file_value) {\n");
+    out.push_str("    return flock(file_value.fd, LOCK_UN) == 0;\n");
+    out.push_str("}\n\n");
+
     out.push_str("static int64_t noema_host_cc(NoemaText source_path, NoemaText output_path) {\n");
     out.push_str("    char *source_c = noema_text_to_cstr(source_path);\n");
     out.push_str("    char *output_c = noema_text_to_cstr(output_path);\n");
@@ -3723,6 +3760,14 @@ fn lower_to_c_with_options(
 
     out.push_str("int64_t noema_native_file_sync(uint64_t file_value) {\n");
     out.push_str("    return noema_file_sync(noema_native_unbox_file(file_value));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_try_lock(uint64_t file_value) {\n");
+    out.push_str("    return noema_file_try_lock(noema_native_unbox_file(file_value));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_unlock(uint64_t file_value) {\n");
+    out.push_str("    return noema_file_unlock(noema_native_unbox_file(file_value));\n");
     out.push_str("}\n\n");
 
     out.push_str("int64_t noema_native_host_cc(uint64_t source_path, uint64_t output_path) {\n");
@@ -4421,6 +4466,14 @@ fn lower_call(
         }
         "file_sync" => Ok(format!(
             "noema_file_sync({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?
+        )),
+        "file_try_lock" => Ok(format!(
+            "noema_file_try_lock({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?
+        )),
+        "file_unlock" => Ok(format!(
+            "noema_file_unlock({})",
             lower_expr(&args[0], env, semantic, Some(&TypeName::File))?
         )),
         "host_cc" => Ok(format!(

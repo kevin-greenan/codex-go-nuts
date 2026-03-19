@@ -127,7 +127,8 @@ What is already working on `codex/ashdb-foundation`:
 64. freelist validation for cycles, bad markers, and unlinked free pages
 65. freelist corruption coverage
 66. limited root collapse after deletes when a two-leaf root empties one side
-67. smoke-test coverage through the direct self-hosted compiler
+67. advisory single-writer file locking on the database handle
+68. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -161,7 +162,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Operational Safety
 
-1. real file-locking support beyond the current documented single-writer guarantee
+1. clearer lock-behavior docs for unsupported multi-reader patterns
 
 ### Testing and Confidence
 

@@ -101,6 +101,7 @@ AshDB now exposes `db_recovery_state_text(...)` for smoke tests and debugging. I
 4. `wal_entries`
 5. `page_count`
 6. `free_head`
+7. `lock_held`
 
 ## Current Limitations
 

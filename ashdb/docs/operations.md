@@ -16,7 +16,16 @@ What this means in practice:
 2. A second process should not open the same file for concurrent writes.
 3. Readers in other processes are not yet a supported compatibility target.
 
-AshDB does not yet implement OS-level file locking. The safety model right now is an application-level guarantee: one owner process per database file.
+AshDB now acquires an advisory exclusive lock on the main database file during `db_open(...)`.
+
+Current lock behavior:
+
+1. the first writer process acquires the database-file lock
+2. a second open in another process or another file handle will observe `lock_held=false`
+3. mutating APIs reject writes when `lock_held=false`
+4. the lock is released during `db_close(...)`
+
+This is a real OS-level advisory lock, but it is still best treated as a single-writer system rather than a fully concurrent database.
 
 ## Transaction Use
 
@@ -68,6 +77,8 @@ To inspect the recovery state around an interrupted write or crash boundary:
 3. inspect raw pages with `db_page_text(...)`
 4. confirm structural health with `db_validate_report(...)`
 
+`db_recovery_state_text(...)` now also reports `lock_held`.
+
 ## Stability Notes
 
 What is stable enough for application experimentation:
@@ -79,6 +90,6 @@ What is stable enough for application experimentation:
 
 What still needs caution:
 
-1. concurrent multi-process access
+1. concurrent multi-process access beyond the current advisory single-writer model
 2. long-lived heavy-delete workloads without periodic compaction
 3. assuming a frozen long-term file format without consulting the current docs

@@ -4,6 +4,7 @@
 %DB {
     pager: Pager;
     path: text;
+    lock_held: bool;
 }
 
 %DBCursor {
@@ -13,6 +14,14 @@
 
 @db_index_table_name(table_name: text, index_name: text) -> text {
     ^ "idx." + table_name + "." + index_name;
+}
+
+@db_lock_error() -> i64 {
+    ^ -99;
+}
+
+@db_can_write(db: DB) -> bool {
+    ^ db.lock_held;
 }
 
 @db_journal_path(db: DB) -> text {
@@ -161,6 +170,7 @@
     out = row_append(out, "wal_entries", text_of(wal_entries));
     out = row_append(out, "page_count", text_of(pager_total_pages(db.pager)));
     out = row_append(out, "free_head", text_of(pager_free_head(db.pager)));
+    out = row_append(out, "lock_held", text_of(db.lock_held));
     ? (not closed_journal or not closed_wal) {
         out = row_put(out, "ok", "false");
         out = row_put(out, "error", "recovery-state-close-failed");
@@ -517,7 +527,11 @@
 
 @db_open(path: text, page_size: i64) -> DB {
     pager := pager_open(path, page_size);
-    db := DB { pager: pager, path: path };
+    lock_held := file_try_lock(pager.handle);
+    db := DB { pager: pager, path: path, lock_held: lock_held };
+    ? (not lock_held) {
+        ^ db;
+    }
     total_pages := pager_total_pages(pager);
     ? (total_pages == 1) {
         catalog_page := pager_alloc_page(pager);
@@ -585,6 +599,9 @@
 }
 
 @db_create_table(db: DB, name: text, slot_width: i64) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
     page := pager_read_page(db.pager, db_catalog_page());
     count0 := db_catalog_count(page);
     entries := db_catalog_entries_region(page);
@@ -628,6 +645,9 @@
 }
 
 @db_define_table(db: DB, name: text, slot_width: i64, fields: text) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
     ? (not db_schema_fields_supported(fields)) {
         ^ -5;
     }
@@ -688,6 +708,9 @@
 }
 
 @db_compact_table(db: DB, table_name: text) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
     old_table := db_bind_table(db, table_name);
     ? (old_table.root_page < 0 or old_table.slot_width < 0) {
         ^ -1;
@@ -787,6 +810,9 @@
 }
 
 @db_put(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
     table := db_bind_table(db, table_name);
     ? (table.root_page < 0 or table.slot_width < 0) {
         ^ -1;
@@ -799,6 +825,9 @@
 }
 
 @db_insert(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
     table := db_bind_table(db, table_name);
     ? (table.root_page < 0 or table.slot_width < 0) {
         ^ -1;
@@ -811,6 +840,9 @@
 }
 
 @db_update(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
     table := db_bind_table(db, table_name);
     ? (table.root_page < 0 or table.slot_width < 0) {
         ^ -1;
@@ -867,6 +899,9 @@
 }
 
 @db_delete(db: DB, table_name: text, key: i64) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
     table := db_bind_table(db, table_name);
     ? (table.root_page < 0 or table.slot_width < 0) {
         ^ -1;
@@ -1624,6 +1659,9 @@
 }
 
 @db_reclaim_unreachable_pages(db: DB) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
     reachable := db_reachable_pages(db);
     total_pages := pager_total_pages(db.pager);
     captured_header := db_journal_capture_page_if_needed(db, 0);
@@ -2915,6 +2953,9 @@
 }
 
 @db_begin(db: DB) -> bool {
+    ? (not db_can_write(db)) {
+        ^ false;
+    }
     journal := file_open(db_journal_path(db));
     header := file_read(journal, 0, db_journal_header_size());
     ? (db_journal_active(header)) {
@@ -2934,6 +2975,9 @@
 }
 
 @db_commit(db: DB) -> bool {
+    ? (not db_can_write(db)) {
+        ^ false;
+    }
     wrote_wal := db_write_wal_for_commit(db);
     ? (not wrote_wal) {
         ^ false;
@@ -2950,6 +2994,9 @@
 }
 
 @db_rollback(db: DB) -> bool {
+    ? (not db_can_write(db)) {
+        ^ false;
+    }
     journal := file_open(db_journal_path(db));
     journal_size := file_size(journal);
     ? (journal_size < db_journal_header_size()) {
@@ -2971,7 +3018,12 @@
 }
 
 @db_close(db: DB) -> bool {
-    ^ pager_close(db.pager);
+    unlocked := true;
+    ? (db.lock_held) {
+        unlocked = file_unlock(db.pager.handle);
+    }
+    closed := pager_close(db.pager);
+    ^ unlocked and closed;
 }
 
 @db_backup(db: DB, backup_path: text) -> bool {

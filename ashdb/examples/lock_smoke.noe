@@ -1,0 +1,58 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: lock_smoke <db-path>";
+        ^ 1;
+    }
+
+    db0 := db_open(arg(1), 128);
+    state0 := db_recovery_state_text(db0);
+    created := db_create_table(db0, "users", 24);
+    inserted0 := db_insert(db0, "users", 10, "alice");
+
+    db1 := db_open(arg(1), 128);
+    state1 := db_recovery_state_text(db1);
+    inserted1 := db_insert(db1, "users", 20, "bob");
+    read1 := db_get(db1, "users", 10);
+    closed1 := db_close(db1);
+
+    closed0 := db_close(db0);
+
+    db2 := db_open(arg(1), 128);
+    state2 := db_recovery_state_text(db2);
+    inserted2 := db_insert(db2, "users", 20, "bob");
+    read2 := db_get(db2, "users", 20);
+    closed2 := db_close(db2);
+
+    ? (row_get(state0, "lock_held") != "true") {
+        ! "state0=" + state0;
+        ^ 2;
+    }
+    ? ((created != 2 and created != -2) or inserted0 < 0) {
+        ! "write0=" + text_of(created) + ":" + text_of(inserted0);
+        ^ 3;
+    }
+    ? (row_get(state1, "lock_held") != "false") {
+        ! "state1=" + state1;
+        ^ 4;
+    }
+    ? (inserted1 != db_lock_error() or slice(read1, 0, 5) != "alice" or not closed1) {
+        ! "read1=" + text_of(inserted1) + ":" + read1;
+        ^ 5;
+    }
+    ? (not closed0) {
+        ^ 6;
+    }
+    ? (row_get(state2, "lock_held") != "true") {
+        ! "state2=" + state2;
+        ^ 7;
+    }
+    ? (inserted2 < 0 or slice(read2, 0, 3) != "bob" or not closed2) {
+        ! "write2=" + text_of(inserted2) + ":" + read2;
+        ^ 8;
+    }
+
+    ! "ashdb lock smoke ok";
+    ^ 0;
+}
