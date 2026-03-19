@@ -369,6 +369,91 @@
     ^ append(tokens, token(kind, lex));
 }
 
+@trim_left(src: text) -> text {
+    idx := 0;
+    ~ (idx < count(src) and is_space(char_at(src, idx))) {
+        idx = idx + 1;
+    }
+    ^ slice(src, idx, count(src) - idx);
+}
+
+@path_dir(path: text) -> text {
+    idx := count(path) - 1;
+    ~ (idx >= 0) {
+        ? (char_at(path, idx) == "/") {
+            ? (idx == 0) {
+                ^ "/";
+            }
+            ^ slice(path, 0, idx);
+        }
+        idx = idx - 1;
+    }
+    ^ ".";
+}
+
+@path_join(base: text, rel: text) -> text {
+    ? (count(rel) > 0 and char_at(rel, 0) == "/") {
+        ^ rel;
+    }
+    ? (base == "." or count(base) == 0) {
+        ^ rel;
+    }
+    ^ base + "/" + rel;
+}
+
+@line_end(src: text, start: i64) -> i64 {
+    idx := start;
+    ~ (idx < count(src)) {
+        ? (char_at(src, idx) == "\n") {
+            ^ idx;
+        }
+        idx = idx + 1;
+    }
+    ^ count(src);
+}
+
+@expand_includes(path: text, depth: i64) -> text {
+    ? (depth > 32) {
+        ^ "";
+    }
+    source := read_text(path);
+    base := path_dir(path);
+    out := "";
+    pos := 0;
+    ~ (pos < count(source)) {
+        end := line_end(source, pos);
+        line := slice(source, pos, end - pos);
+        trimmed := trim_left(line);
+        handled := false;
+        ? (count(trimmed) > 2 and char_at(trimmed, 0) == "&") {
+            first_quote := find(trimmed, "\"");
+            ? (first_quote >= 0) {
+                rest := slice(trimmed, first_quote + 1, count(trimmed) - (first_quote + 1));
+                second_quote := find(rest, "\"");
+                ? (second_quote >= 0) {
+                    include_path := slice(rest, 0, second_quote);
+                    resolved := path_join(base, include_path);
+                    out = out + expand_includes(resolved, depth + 1);
+                    handled = true;
+                }
+            }
+        }
+        ? (not handled) {
+            out = out + line;
+            ? (end < count(source)) {
+                out = out + "\n";
+            }
+        }
+        | {
+            ? (end < count(source) and count(out) > 0 and slice(out, count(out) - 1, 1) != "\n") {
+                out = out + "\n";
+            }
+        }
+        pos = end + 1;
+    }
+    ^ out;
+}
+
 @scan_string(src: text, start: i64) -> StringScan {
     out := "";
     pos := start + 1;
@@ -2348,6 +2433,54 @@
             arg1_ok := native_supported_expr(program, fn, locals, arg1);
             ^ arg0_ok and arg1_ok;
         }
+        ? (expr.name == "file_open") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
+        }
+        ? (expr.name == "file_close") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
+        }
+        ? (expr.name == "file_size") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
+        }
+        ? (expr.name == "file_read") {
+            args := expr.args;
+            ? (count(args) != 3) {
+                ^ false;
+            }
+            arg0_ok := native_supported_expr(program, fn, locals, args[0]);
+            arg1_ok := native_supported_expr(program, fn, locals, args[1]);
+            arg2_ok := native_supported_expr(program, fn, locals, args[2]);
+            ^ arg0_ok and arg1_ok and arg2_ok;
+        }
+        ? (expr.name == "file_write") {
+            args := expr.args;
+            ? (count(args) != 3) {
+                ^ false;
+            }
+            arg0_ok := native_supported_expr(program, fn, locals, args[0]);
+            arg1_ok := native_supported_expr(program, fn, locals, args[1]);
+            arg2_ok := native_supported_expr(program, fn, locals, args[2]);
+            ^ arg0_ok and arg1_ok and arg2_ok;
+        }
+        ? (expr.name == "file_sync") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
+        }
         ? (expr.name == "find") {
             args := expr.args;
             ? (count(args) != 2) {
@@ -2641,6 +2774,54 @@
             out = out + "    ldr x0, [sp]\n";
             out = out + "    add sp, sp, #16\n";
             out = out + "    bl _noema_write_text_native\n";
+            ^ out;
+        }
+        ? (expr.name == "file_open") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_file_open_native\n";
+            ^ out;
+        }
+        ? (expr.name == "file_close") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_file_close_native\n";
+            ^ out;
+        }
+        ? (expr.name == "file_size") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_file_size_native\n";
+            ^ out;
+        }
+        ? (expr.name == "file_read") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, args[1]);
+            out = out + "    str x0, [sp, #8]\n";
+            out = out + native_expr(program, fn, locals, args[2]);
+            out = out + "    mov x2, x0\n";
+            out = out + "    ldr x1, [sp, #8]\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_file_read_native\n";
+            ^ out;
+        }
+        ? (expr.name == "file_write") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    sub sp, sp, #32\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, args[1]);
+            out = out + "    str x0, [sp, #8]\n";
+            out = out + native_expr(program, fn, locals, args[2]);
+            out = out + "    mov x2, x0\n";
+            out = out + "    ldr x1, [sp, #8]\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #32\n";
+            out = out + "    bl _noema_file_write_native\n";
+            ^ out;
+        }
+        ? (expr.name == "file_sync") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_file_sync_native\n";
             ^ out;
         }
         ? (expr.name == "count") {
@@ -2943,9 +3124,12 @@
     out = out + ".extern _memcmp\n";
     out = out + ".extern _strlen\n";
     out = out + ".extern _open\n";
+    out = out + ".extern _pread\n";
+    out = out + ".extern _pwrite\n";
     out = out + ".extern _read\n";
     out = out + ".extern _close\n";
     out = out + ".extern _chmod\n";
+    out = out + ".extern _fsync\n";
     out = out + ".extern _lseek\n";
     out = out + ".extern _snprintf\n";
     out = out + ".extern _strtoll\n";
@@ -3151,6 +3335,98 @@
     out = out + "L_write_text_fail:\n";
     out = out + "    mov x0, #0\n";
     out = out + "    add sp, sp, #48\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_file_open_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #32\n";
+    out = out + "    bl _noema_text_to_cstr_native\n";
+    out = out + "    str x0, [sp, #8]\n";
+    out = out + "    mov x1, #514\n";
+    out = out + "    mov x2, #420\n";
+    out = out + "    bl _open\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    mov x1, #420\n";
+    out = out + "    bl _chmod\n";
+    out = out + "    mov x0, #8\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    ldr x9, [sp]\n";
+    out = out + "    str x9, [x0]\n";
+    out = out + "    add sp, sp, #32\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_file_close_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    ldr x0, [x0]\n";
+    out = out + "    bl _close\n";
+    out = out + "    cmp x0, #0\n";
+    out = out + "    cset x0, eq\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_file_size_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #16\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    ldr x0, [x0]\n";
+    out = out + "    mov x1, #0\n";
+    out = out + "    mov x2, #2\n";
+    out = out + "    bl _lseek\n";
+    out = out + "    add sp, sp, #16\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_file_read_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #32\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    str x1, [sp, #8]\n";
+    out = out + "    str x2, [sp, #16]\n";
+    out = out + "    add x0, x2, #1\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    str x0, [sp, #24]\n";
+    out = out + "    ldr x9, [sp]\n";
+    out = out + "    ldr x0, [x9]\n";
+    out = out + "    ldr x1, [sp, #24]\n";
+    out = out + "    ldr x2, [sp, #16]\n";
+    out = out + "    ldr x3, [sp, #8]\n";
+    out = out + "    bl _pread\n";
+    out = out + "    mov x10, x0\n";
+    out = out + "    ldr x9, [sp, #24]\n";
+    out = out + "    strb wzr, [x9, x10]\n";
+    out = out + "    mov x0, x9\n";
+    out = out + "    mov x1, x10\n";
+    out = out + "    bl _noema_text_from_parts_native\n";
+    out = out + "    add sp, sp, #32\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_file_write_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #32\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    str x1, [sp, #8]\n";
+    out = out + "    str x2, [sp, #16]\n";
+    out = out + "    ldr x9, [sp]\n";
+    out = out + "    ldr x0, [x9]\n";
+    out = out + "    ldr x10, [sp, #16]\n";
+    out = out + "    ldr x1, [x10, #8]\n";
+    out = out + "    ldr x2, [x10]\n";
+    out = out + "    ldr x3, [sp, #8]\n";
+    out = out + "    bl _pwrite\n";
+    out = out + "    add sp, sp, #32\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_file_sync_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    ldr x0, [x0]\n";
+    out = out + "    bl _fsync\n";
+    out = out + "    cmp x0, #0\n";
+    out = out + "    cset x0, eq\n";
     out = out + "    ldp x29, x30, [sp], #16\n";
     out = out + "    ret\n\n";
     out = out + "_noema_text_eq_native:\n";
@@ -3515,7 +3791,7 @@
         ^ 1;
     }
 
-    source := read_text(arg(1));
+    source := expand_includes(arg(1), 0);
     tokenized := tokenize(source);
     ? (not tokenized.ok) {
         ! "tokenize: " + tokenized.err;
