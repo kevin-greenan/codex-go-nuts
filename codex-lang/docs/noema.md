@@ -170,6 +170,8 @@ It is not self-hosting yet, but it now has the structural features needed to sta
 
 `Noema` now has a bootstrap compiler written in `Noema` at `selfhost/mini_compiler.noe`.
 
+There is also an explicit bootstrap compiler artifact at `selfhost/compiler_1.noe` that is intended to be built into `compiler_1`, then used to build the final `noema_compiler` binary.
+
 Parity expectation:
 
 - the Rust compiler is the reference implementation

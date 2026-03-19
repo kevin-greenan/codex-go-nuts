@@ -1990,7 +1990,7 @@
 
 @main() -> i64 {
     ? (arg_count() < 3) {
-        ! "usage: mini_compiler <input.noe> <output.c>";
+        ! "usage: compiler_1 <input.noe> <output-binary>";
         ^ 1;
     }
 
@@ -2008,9 +2008,16 @@
     }
 
     generated := emit_program(parsed.program);
-    wrote := write_text(arg(2), generated);
+    c_path := arg(2) + ".generated.c";
+    wrote := write_text(c_path, generated);
     ? (not wrote) {
         ! "write failed";
+        ^ 1;
+    }
+
+    status := host_cc(c_path, arg(2));
+    ? (status != 0) {
+        ! "host_cc failed: " + text_of(status);
         ^ 1;
     }
 

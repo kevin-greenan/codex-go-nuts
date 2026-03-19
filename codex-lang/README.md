@@ -190,6 +190,32 @@ Current self-hosted subset:
 
 That subset is now large enough for the Noema-written compiler to compile [series.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/series.noe), [selfhost_text.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/selfhost_text.noe), [socket_probe.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/socket_probe.noe), and [frontend_demo.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/frontend_demo.noe) end to end.
 
+## Bootstrap Workflow
+
+There is now an explicit staged bootstrap path:
+
+1. The Rust stage-1 compiler in [main.rs](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/compiler/src/main.rs) builds [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) into the `compiler_1` binary.
+2. The resulting `compiler_1` binary compiles [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) again into the final `noema_compiler` binary.
+3. The final `noema_compiler` binary can then compile other Noema programs.
+
+Current commands:
+
+```sh
+cd codex-lang
+./bin/codexc selfhost/compiler_1.noe build/compiler_1
+./build/compiler_1 selfhost/compiler_1.noe build/noema_compiler
+./build/noema_compiler examples/frontend_demo.noe build/frontend_demo.bootstrap
+./build/frontend_demo.bootstrap examples/hello.noe
+```
+
+Or via make:
+
+```sh
+make -C codex-lang bootstrap-check
+```
+
+Today `compiler_1` produces final binaries by generating a `.generated.c` file internally and invoking the host C compiler itself. So the bootstrap deliverable now exists as a binary-to-binary workflow, but the Noema-written compiler backend is still C-backed internally rather than a pure direct native emitter.
+
 ## Intent
 
 The long-term goal is still the same: everything else in this repository should eventually be written in this language stack.

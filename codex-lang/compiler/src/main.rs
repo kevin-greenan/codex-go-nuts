@@ -1884,6 +1884,17 @@ fn infer_call_type(
             }
             Ok(TypeName::Bool)
         }
+        "host_cc" => {
+            if args.len() != 2 {
+                return Err("host_cc(...) expects exactly two arguments".to_string());
+            }
+            let source_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            let output_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
+            if source_type != TypeName::Text || output_type != TypeName::Text {
+                return Err("host_cc(...) expects (text, text)".to_string());
+            }
+            Ok(TypeName::I64)
+        }
         "arg" => {
             if args.len() != 1 {
                 return Err("arg(...) expects exactly one argument".to_string());
@@ -2412,6 +2423,7 @@ fn native_builtin_symbol(name: &str, argc: usize) -> Result<Option<(&'static str
         ("arg", 1) => ("noema_native_arg", 1),
         ("read_text", 1) => ("noema_native_read_text", 1),
         ("write_text", 2) => ("noema_native_write_text", 2),
+        ("host_cc", 2) => ("noema_native_host_cc", 2),
         ("count", 1) => ("noema_native_count_text", 1),
         ("find", 2) => ("noema_native_text_find", 2),
         ("slice", 3) => ("noema_native_text_slice", 3),
@@ -2492,6 +2504,7 @@ fn lower_to_arm64_macos(program: &IrProgram) -> Result<String, String> {
     out.push_str(".extern _noema_native_arg\n");
     out.push_str(".extern _noema_native_read_text\n");
     out.push_str(".extern _noema_native_write_text\n");
+    out.push_str(".extern _noema_native_host_cc\n");
     out.push_str(".extern _noema_native_count_text\n");
     out.push_str(".extern _noema_native_text_find\n");
     out.push_str(".extern _noema_native_text_slice\n");
@@ -3022,6 +3035,15 @@ fn lower_to_c_with_options(
     out.push_str("    return written == (size_t)text.len;\n");
     out.push_str("}\n\n");
 
+    out.push_str("static int64_t noema_host_cc(NoemaText source_path, NoemaText output_path) {\n");
+    out.push_str("    char *source_c = noema_text_to_cstr(source_path);\n");
+    out.push_str("    char *output_c = noema_text_to_cstr(output_path);\n");
+    out.push_str("    size_t command_len = strlen(source_c) + strlen(output_c) + 128;\n");
+    out.push_str("    char *command = (char *)noema_alloc(command_len);\n");
+    out.push_str("    snprintf(command, command_len, \"cc -O3 -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-function %s -o %s\", source_c, output_c);\n");
+    out.push_str("    return (int64_t)system(command);\n");
+    out.push_str("}\n\n");
+
     out.push_str("static NoemaSocket noema_socket_open(NoemaText host, int64_t port) {\n");
     out.push_str("    char *host_c = noema_text_to_cstr(host);\n");
     out.push_str("    char port_buffer[32];\n");
@@ -3179,6 +3201,10 @@ fn lower_to_c_with_options(
 
     out.push_str("int64_t noema_native_write_text(uint64_t path, uint64_t text) {\n");
     out.push_str("    return noema_write_text(noema_native_unbox_text(path), noema_native_unbox_text(text));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_host_cc(uint64_t source_path, uint64_t output_path) {\n");
+    out.push_str("    return noema_host_cc(noema_native_unbox_text(source_path), noema_native_unbox_text(output_path));\n");
     out.push_str("}\n\n");
 
     out.push_str("int64_t noema_native_count_text(uint64_t text) {\n");
@@ -3797,6 +3823,11 @@ fn lower_call(
         )),
         "write_text" => Ok(format!(
             "noema_write_text({}, {})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?,
+            lower_expr(&args[1], env, semantic, Some(&TypeName::Text))?
+        )),
+        "host_cc" => Ok(format!(
+            "noema_host_cc({}, {})",
             lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?,
             lower_expr(&args[1], env, semantic, Some(&TypeName::Text))?
         )),
