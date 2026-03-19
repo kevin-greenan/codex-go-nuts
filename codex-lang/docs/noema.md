@@ -215,6 +215,8 @@ The self-hosted compiler also has an experimental pure-direct `native-arm64` bac
 
 That is now enough for a direct-native build of [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) and for the resulting `noema_compiler.direct` binary to compile another Noema program natively on this Mac.
 
+It is also enough for a second-stage rebuild of [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) through `noema_compiler.direct`. The generated arm64 assembly for the stage-1 direct compiler artifact and the stage-2 rebuilt artifact now matches exactly, which gives us a useful bootstrap fixed-point signal.
+
 ## Networking
 
 Noema has a first-pass low-level TCP client layer.

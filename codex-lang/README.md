@@ -245,6 +245,13 @@ The current direct proof chain now includes:
 - direct-native builds of [hello.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/hello.noe), [mini_source.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/mini_source.noe), [series.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/series.noe), [aggregate_probe.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/aggregate_probe.noe), and [selfhost_text.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/selfhost_text.noe)
 - a direct-native build of [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) into `noema_compiler.direct`
 - `noema_compiler.direct` then compiling [hello.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/hello.noe) into another direct-native binary that runs successfully
+- `noema_compiler.direct` rebuilding [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) into `noema_compiler.stage2`, with identical generated assembly for the compiler artifact
+
+There is now a dedicated check for that bootstrap fixed-point:
+
+```sh
+make -C codex-lang direct-bootstrap-check
+```
 
 ## Intent
 
