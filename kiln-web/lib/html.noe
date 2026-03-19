@@ -49,6 +49,11 @@
     ^ kiln_html_tag("a", kiln_html_attr("href", href), kiln_html_text(label));
 }
 
+@kiln_html_stylesheet(href: text) -> text {
+    attrs := kiln_html_attr("rel", "stylesheet") + kiln_html_attr("href", href);
+    ^ kiln_html_empty_tag("link", attrs);
+}
+
 @kiln_html_div(attrs: text, body: text) -> text {
     ^ kiln_html_tag("div", attrs, body);
 }
@@ -112,8 +117,12 @@
     ^ kiln_html_page(title, hero + main);
 }
 
-@kiln_html_page(title: text, body: text) -> text {
-    head := kiln_html_tag("head", "", kiln_html_tag("meta", kiln_html_attr("charset", "utf-8"), "") + kiln_html_tag("title", "", kiln_html_text(title)));
+@kiln_html_page_with_head(title: text, head_extra: text, body: text) -> text {
+    head := kiln_html_tag("head", "", kiln_html_tag("meta", kiln_html_attr("charset", "utf-8"), "") + kiln_html_tag("title", "", kiln_html_text(title)) + head_extra);
     doc_body := kiln_html_tag("body", "", body);
     ^ "<!doctype html>" + kiln_html_tag("html", "", head + doc_body);
+}
+
+@kiln_html_page(title: text, body: text) -> text {
+    ^ kiln_html_page_with_head(title, "", body);
 }

@@ -208,6 +208,14 @@
     ^ kiln_reply(status, "text/html; charset=utf-8", body);
 }
 
+@kiln_reply_css(status: i64, body: text) -> KilnReply {
+    ^ kiln_reply(status, "text/css; charset=utf-8", body);
+}
+
+@kiln_reply_javascript(status: i64, body: text) -> KilnReply {
+    ^ kiln_reply(status, "text/javascript; charset=utf-8", body);
+}
+
 @kiln_reply_redirect(location: text) -> KilnReply {
     body := "redirecting to " + location;
     ^ KilnReply { status: 302, content_type: "text/plain", body: body, location: location, headers: "" };

@@ -74,6 +74,7 @@ What is already working:
 11. HTML rendering now includes reusable page shells and basic form helpers
 12. a first app wrapper now bundles routes, read limits, request dispatch, and reply finishing
 13. a static app layer now supports route-to-reply mapping for simple content-style apps
+14. static asset-style responses now have dedicated CSS/JS reply helpers and example page wiring
 
 What is next:
 

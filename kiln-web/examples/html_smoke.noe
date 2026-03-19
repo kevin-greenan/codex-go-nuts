@@ -9,7 +9,7 @@
     ];
     form := kiln_html_form("post", "/notes", kiln_html_field("Name", "name", kiln_html_input_text("name", "Ada")) + kiln_html_field("Notes", "note", kiln_html_textarea("note", "Math & logic")) + kiln_html_button("Save"));
     body := card + kiln_html_unordered_list(links) + form;
-    page := kiln_html_page_shell("Kiln", "tiny renderer", body);
+    page := kiln_html_page_with_head("Kiln", kiln_html_stylesheet("/assets/site.css"), kiln_html_section(kiln_html_attr("class", "hero"), kiln_html_heading1("Kiln") + kiln_html_paragraph("tiny renderer")) + kiln_html_tag("main", "", body));
     response := kiln_http_response(200, "text/html; charset=utf-8", page);
 
     ? (find(page, "<!doctype html>") != 0) {
@@ -35,6 +35,10 @@
     ? (find(page, "Math &amp; logic") < 0) {
         ! "textarea escape mismatch";
         ^ 8;
+    }
+    ? (find(page, "<link rel=\"stylesheet\" href=\"/assets/site.css\">") < 0) {
+        ! "stylesheet mismatch";
+        ^ 9;
     }
     ? (find(response, "Content-Type: text/html; charset=utf-8") < 0) {
         ! "response content-type mismatch";
