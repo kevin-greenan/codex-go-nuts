@@ -221,7 +221,7 @@ This milestone is intentionally narrow: it should be good enough for one real ho
 
 ## Current Status
 
-The first Hearthlight implementation slice is now underway on `codex/hearthlight-foundation`.
+Hearthlight is now a real local-first MVP on `codex/hearthlight-foundation`.
 
 What is already working:
 
@@ -240,9 +240,9 @@ What is already working:
 13. a setup route now lets a real household edit its name and weekly rhythm, and add members without editing seed data
 14. the pantry route now turns low-stock staples into grocery items and surfaces pantry-friendly recipe suggestions directly in the workflow
 
-The current goal is a real vertical slice, not a full product:
+The current shape is a real vertical slice, not a full product:
 
-1. one seeded household
+1. one configurable household
 2. a dashboard plus planner route
 3. a dashboard, planner, grocery, pantry, chores, recipe, and setup workflow with connected write actions
 4. direct-compiler smoke coverage proving the app stack works end to end
