@@ -4,6 +4,10 @@
     pager: Pager;
 }
 
+@db_index_table_name(table_name: text, index_name: text) -> text {
+    ^ "idx." + table_name + "." + index_name;
+}
+
 @db_catalog_page() -> i64 {
     ^ 1;
 }
@@ -166,6 +170,11 @@
     ^ -1;
 }
 
+@db_create_index(db: DB, table_name: text, index_name: text) -> i64 {
+    index_table := db_index_table_name(table_name, index_name);
+    ^ db_create_table(db, index_table, 20);
+}
+
 @db_bind_table(db: DB, name: text) -> Table {
     root_page := db_table_root(db, name);
     slot_width := db_table_slot_width(db, name);
@@ -218,6 +227,25 @@
         ^ "";
     }
     ^ table_scan_text(table, separator);
+}
+
+@db_index_put(db: DB, table_name: text, index_name: text, secondary_key: i64, primary_key: i64) -> i64 {
+    index_table := db_index_table_name(table_name, index_name);
+    ^ db_put(db, index_table, secondary_key, text_of(primary_key));
+}
+
+@db_index_get(db: DB, table_name: text, index_name: text, secondary_key: i64) -> i64 {
+    index_table := db_index_table_name(table_name, index_name);
+    value := db_get(db, index_table, secondary_key);
+    ? (count(value) == 0) {
+        ^ -1;
+    }
+    ^ i64_of(value);
+}
+
+@db_index_delete(db: DB, table_name: text, index_name: text, secondary_key: i64) -> i64 {
+    index_table := db_index_table_name(table_name, index_name);
+    ^ db_delete(db, index_table, secondary_key);
 }
 
 @db_sync(db: DB) -> bool {
