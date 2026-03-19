@@ -73,11 +73,12 @@ What is already working:
 10. a small server wrapper now handles one-shot listen/accept/read/reply/close flow for example apps
 11. HTML rendering now includes reusable page shells and basic form helpers
 12. a first app wrapper now bundles routes, read limits, request dispatch, and reply finishing
+13. a static app layer now supports route-to-reply mapping for simple content-style apps
 
 What is next:
 
 1. extend request parsing further for richer body handling
-2. grow handler ergonomics further with route-to-reply conventions above the current app wrapper
+2. grow handler ergonomics further with richer dynamic route conventions above the current app wrapper
 3. grow the UI layer with richer layout and form composition patterns
 
 ## Architecture Overview

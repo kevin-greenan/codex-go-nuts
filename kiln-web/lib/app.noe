@@ -1,0 +1,39 @@
+& "server.noe";
+
+%KilnAppRouteReply {
+    route_name: text;
+    reply: KilnReply;
+}
+
+%KilnStaticApp {
+    app: KilnApp;
+    replies: list<KilnAppRouteReply>;
+}
+
+@kiln_app_route_reply(route_name: text, reply: KilnReply) -> KilnAppRouteReply {
+    ^ KilnAppRouteReply { route_name: route_name, reply: reply };
+}
+
+@kiln_static_app(routes: list<KilnRoute>, replies: list<KilnAppRouteReply>, read_limit: i64) -> KilnStaticApp {
+    ^ KilnStaticApp { app: kiln_app(routes, read_limit), replies: replies };
+}
+
+@kiln_static_app_reply(site: KilnStaticApp, dispatch: KilnDispatch) -> KilnReply {
+    idx := 0;
+    ~ (idx < count(site.replies)) {
+        entry := site.replies[idx];
+        ? (kiln_dispatch_is(dispatch, entry.route_name)) {
+            ^ entry.reply;
+        }
+        idx = idx + 1;
+    }
+    ^ kiln_dispatch_fallback_text(dispatch);
+}
+
+@kiln_static_app_receive_once(site: KilnStaticApp, port: i64) -> KilnAppRequest {
+    ^ kiln_app_receive_once(site.app, port);
+}
+
+@kiln_static_app_finish_reply(req: KilnAppRequest, reply: KilnReply) -> bool {
+    ^ kiln_app_finish_reply(req, reply);
+}
