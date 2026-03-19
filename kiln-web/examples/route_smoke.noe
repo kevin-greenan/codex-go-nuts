@@ -1,0 +1,63 @@
+& "../lib/router.noe";
+
+@route_params_get(params: text, name: text) -> text {
+    marker := name + "=";
+    start0 := find(params, marker);
+    ? (start0 < 0) {
+        ^ "";
+    }
+    value_start := start0 + count(marker);
+    tail := slice(params, value_start, count(params) - value_start);
+    end0 := find(tail, ";");
+    ? (end0 < 0) {
+        ^ tail;
+    }
+    ^ slice(tail, 0, end0);
+}
+
+@main() -> i64 {
+    routes :: list<KilnRoute> := [
+        kiln_route("GET", "/", "home"),
+        kiln_route("GET", "/users/:id", "user-show"),
+        kiln_route("POST", "/users", "user-create")
+    ];
+
+    home := kiln_http_parse_request("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    home_dispatch := kiln_dispatch(routes, home);
+    ? (not home_dispatch.ok or home_dispatch.route_name != "home" or home_dispatch.status != 200) {
+        ! "home route mismatch";
+        ^ 1;
+    }
+
+    user := kiln_http_parse_request("GET /users/42?tab=profile HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    user_dispatch := kiln_dispatch(routes, user);
+    ? (not user_dispatch.ok or user_dispatch.route_name != "user-show") {
+        ! "user route mismatch";
+        ^ 2;
+    }
+    ? (route_params_get(user_dispatch.params, "id") != "42") {
+        ! "user param mismatch";
+        ^ 3;
+    }
+    ? (kiln_route_query(user.path) != "tab=profile") {
+        ! "query mismatch";
+        ^ 4;
+    }
+
+    method_miss := kiln_http_parse_request("POST /users/42 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    method_dispatch := kiln_dispatch(routes, method_miss);
+    ? (method_dispatch.ok or method_dispatch.status != 405) {
+        ! "method status mismatch";
+        ^ 5;
+    }
+
+    missing := kiln_http_parse_request("GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    missing_dispatch := kiln_dispatch(routes, missing);
+    ? (missing_dispatch.ok or missing_dispatch.status != 404) {
+        ! "missing status mismatch";
+        ^ 6;
+    }
+
+    ! "kiln route smoke ok";
+    ^ 0;
+}

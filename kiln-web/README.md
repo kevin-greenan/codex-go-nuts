@@ -64,11 +64,12 @@ What is already working:
 1. inbound listener support is landed in both compiler paths
 2. a direct-compiled `hello` server runs locally and responds to `curl`
 3. a first Kiln HTTP library now parses request lines and serializes basic text responses
+4. a first router now matches method/path patterns, including `:param` segments, and distinguishes `404` from `405`
 
 What is next:
 
 1. strengthen request parsing for headers, query strings, and bodies
-2. build route and handler dispatch on top of the HTTP layer
+2. grow the router from dispatch results into more ergonomic handler conventions
 3. add small HTML rendering helpers for server-rendered pages
 
 ## Architecture Overview

@@ -1,0 +1,166 @@
+& "http.noe";
+
+%KilnRoute {
+    method: text;
+    pattern: text;
+    name: text;
+}
+
+%KilnDispatch {
+    ok: bool;
+    status: i64;
+    route_name: text;
+    params: text;
+}
+
+@kiln_route(method: text, pattern: text, name: text) -> KilnRoute {
+    ^ KilnRoute { method: method, pattern: pattern, name: name };
+}
+
+@kiln_route_param_marker() -> text {
+    ^ ":";
+}
+
+@kiln_route_path_only(path: text) -> text {
+    query_at := find(path, "?");
+    ? (query_at < 0) {
+        ^ path;
+    }
+    ^ slice(path, 0, query_at);
+}
+
+@kiln_route_query(path: text) -> text {
+    query_at := find(path, "?");
+    ? (query_at < 0) {
+        ^ "";
+    }
+    ^ slice(path, query_at + 1, count(path) - (query_at + 1));
+}
+
+@kiln_route_segment_at(path: text, segment_index: i64) -> text {
+    normalized := kiln_route_path_only(path);
+    ? (normalized == "/") {
+        ? (segment_index == 0) {
+            ^ "";
+        }
+        ^ "";
+    }
+
+    remaining := normalized;
+    ? (count(remaining) > 0 and slice(remaining, 0, 1) == "/") {
+        remaining = slice(remaining, 1, count(remaining) - 1);
+    }
+
+    idx := 0;
+    ~ (idx < segment_index) {
+        slash_at := find(remaining, "/");
+        ? (slash_at < 0) {
+            ^ "";
+        }
+        remaining = slice(remaining, slash_at + 1, count(remaining) - (slash_at + 1));
+        idx = idx + 1;
+    }
+
+    slash_at := find(remaining, "/");
+    ? (slash_at < 0) {
+        ^ remaining;
+    }
+    ^ slice(remaining, 0, slash_at);
+}
+
+@kiln_route_segment_count(path: text) -> i64 {
+    normalized := kiln_route_path_only(path);
+    ? (normalized == "/" or count(normalized) == 0) {
+        ^ 0;
+    }
+
+    remaining := normalized;
+    ? (slice(remaining, 0, 1) == "/") {
+        remaining = slice(remaining, 1, count(remaining) - 1);
+    }
+
+    total := 1;
+    idx := 0;
+    ~ (idx < count(remaining)) {
+        ? (slice(remaining, idx, 1) == "/") {
+            total = total + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ total;
+}
+
+@kiln_route_param_name(pattern_segment: text) -> text {
+    ? (count(pattern_segment) > 0 and slice(pattern_segment, 0, 1) == kiln_route_param_marker()) {
+        ^ slice(pattern_segment, 1, count(pattern_segment) - 1);
+    }
+    ^ "";
+}
+
+@kiln_route_match_path(pattern: text, path: text) -> text {
+    pattern_count := kiln_route_segment_count(pattern);
+    path_count := kiln_route_segment_count(path);
+    ? (pattern_count != path_count) {
+        ^ "";
+    }
+
+    params := "";
+    idx := 0;
+    ~ (idx < pattern_count) {
+        pattern_segment := kiln_route_segment_at(pattern, idx);
+        path_segment := kiln_route_segment_at(path, idx);
+        param_name := kiln_route_param_name(pattern_segment);
+        ? (count(param_name) == 0) {
+            ? (pattern_segment != path_segment) {
+                ^ "";
+            }
+        }
+        idx = idx + 1;
+    }
+
+    out := "";
+    idx = 0;
+    ~ (idx < pattern_count) {
+        pattern_segment := kiln_route_segment_at(pattern, idx);
+        path_segment := kiln_route_segment_at(path, idx);
+        param_name := kiln_route_param_name(pattern_segment);
+        ? (count(param_name) > 0) {
+            out = out + param_name + "=" + path_segment + ";";
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@kiln_route_matches_pattern(pattern: text, path: text) -> bool {
+    ? (pattern == kiln_route_path_only(path)) {
+        ^ true;
+    }
+    ? (pattern == "/" and kiln_route_path_only(path) == "/") {
+        ^ true;
+    }
+    ^ count(kiln_route_match_path(pattern, path)) > 0;
+}
+
+@kiln_dispatch(routes: list<KilnRoute>, request: KilnHttpRequest) -> KilnDispatch {
+    idx := 0;
+    found_path := false;
+    clean_path := kiln_route_path_only(request.path);
+    ~ (idx < count(routes)) {
+        route := routes[idx];
+        params := kiln_route_match_path(route.pattern, clean_path);
+        same_path := kiln_route_matches_pattern(route.pattern, clean_path);
+        ? (same_path) {
+            found_path = true;
+            ? (route.method == request.method) {
+                ^ KilnDispatch { ok: true, status: 200, route_name: route.name, params: params };
+            }
+        }
+        idx = idx + 1;
+    }
+
+    ? (found_path) {
+        ^ KilnDispatch { ok: false, status: 405, route_name: "", params: "" };
+    }
+    ^ KilnDispatch { ok: false, status: 404, route_name: "", params: "" };
+}
