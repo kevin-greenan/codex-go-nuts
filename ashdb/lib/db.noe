@@ -594,7 +594,42 @@
     ? (colon < 0) {
         ^ "";
     }
-    ^ slice(field_spec, colon + 1, count(field_spec) - (colon + 1));
+    tail := slice(field_spec, colon + 1, count(field_spec) - (colon + 1));
+    qmark := find(tail, "?");
+    eq := find(tail, "=");
+    end0 := count(tail);
+    ? (qmark >= 0 and qmark < end0) {
+        end0 = qmark;
+    }
+    ? (eq >= 0 and eq < end0) {
+        end0 = eq;
+    }
+    ^ slice(tail, 0, end0);
+}
+
+@db_schema_field_is_nullable(field_spec: text) -> bool {
+    colon := find(field_spec, ":");
+    ? (colon < 0) {
+        ^ false;
+    }
+    tail := slice(field_spec, colon + 1, count(field_spec) - (colon + 1));
+    qmark := find(tail, "?");
+    eq := find(tail, "=");
+    ? (qmark < 0) {
+        ^ false;
+    }
+    ? (eq < 0) {
+        ^ true;
+    }
+    ^ qmark < eq;
+}
+
+@db_schema_field_default(field_spec: text) -> text {
+    eq := find(field_spec, "=");
+    ? (eq < 0) {
+        ^ "";
+    }
+    ^ slice(field_spec, eq + 1, count(field_spec) - (eq + 1));
 }
 
 @db_text_is_i64(value: text) -> bool {
@@ -635,6 +670,15 @@
     ^ false;
 }
 
+@db_value_matches_field_spec(value: text, field_spec: text) -> bool {
+    type_name := db_schema_field_type(field_spec);
+    nullable := db_schema_field_is_nullable(field_spec);
+    ? (nullable and value == "null") {
+        ^ true;
+    }
+    ^ db_value_matches_type(value, type_name);
+}
+
 @db_row_matches_schema(payload: text, fields_spec: text) -> bool {
     expected_count := db_schema_field_count(fields_spec);
     ? (expected_count == 0) {
@@ -647,12 +691,11 @@
     ~ (idx < expected_count) {
         field_spec := db_schema_field_at(fields_spec, idx);
         field_name := db_schema_field_name(field_spec);
-        type_name := db_schema_field_type(field_spec);
         value := row_get(payload, field_name);
-        ? (count(field_name) == 0 or count(type_name) == 0 or count(value) == 0) {
+        ? (count(field_name) == 0 or count(value) == 0) {
             ^ false;
         }
-        ? (not db_value_matches_type(value, type_name)) {
+        ? (not db_value_matches_field_spec(value, field_spec)) {
             ^ false;
         }
         idx = idx + 1;
@@ -660,12 +703,51 @@
     ^ true;
 }
 
+@db_materialize_insert_row(payload: text, fields_spec: text) -> text {
+    expected_count := db_schema_field_count(fields_spec);
+    ? (expected_count == 0) {
+        ^ payload;
+    }
+    ? (row_field_count(payload) > expected_count) {
+        ^ "";
+    }
+    out := "";
+    idx := 0;
+    ~ (idx < expected_count) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        value := row_get(payload, field_name);
+        ? (count(field_name) == 0) {
+            ^ "";
+        }
+        ? (count(value) == 0) {
+            default0 := db_schema_field_default(field_spec);
+            ? (count(default0) > 0) {
+                value = default0;
+            }
+            ? (count(default0) == 0 and db_schema_field_is_nullable(field_spec)) {
+                value = "null";
+            }
+        }
+        ? (count(value) == 0 or not db_value_matches_field_spec(value, field_spec)) {
+            ^ "";
+        }
+        out = row_append(out, field_name, value);
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
 @db_insert_row(db: DB, table_name: text, key: i64, payload: text) -> i64 {
     fields_spec := db_table_fields(db, table_name);
-    ? (count(fields_spec) > 0 and not db_row_matches_schema(payload, fields_spec)) {
-        ^ -2;
+    materialized := payload;
+    ? (count(fields_spec) > 0) {
+        materialized = db_materialize_insert_row(payload, fields_spec);
+        ? (count(materialized) == 0) {
+            ^ -2;
+        }
     }
-    ^ db_insert(db, table_name, key, payload);
+    ^ db_insert(db, table_name, key, materialized);
 }
 
 @db_update_row(db: DB, table_name: text, key: i64, payload: text) -> i64 {
