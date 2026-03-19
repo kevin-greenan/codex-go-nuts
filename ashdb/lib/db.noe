@@ -1,4 +1,5 @@
 & "table.noe";
+& "row.noe";
 
 %DB {
     pager: Pager;
@@ -75,6 +76,14 @@
 
 @db_catalog_page() -> i64 {
     ^ 1;
+}
+
+@db_schema_table_name() -> text {
+    ^ "__schema";
+}
+
+@db_schema_slot_width() -> i64 {
+    ^ 96;
 }
 
 @db_catalog_count_width() -> i64 {
@@ -236,6 +245,44 @@
     ^ -1;
 }
 
+@db_ensure_schema_table(db: DB) -> i64 {
+    existing := db_catalog_lookup_index(db, db_schema_table_name());
+    ? (existing >= 0) {
+        ^ db_table_root(db, db_schema_table_name());
+    }
+    ^ db_create_table(db, db_schema_table_name(), db_schema_slot_width());
+}
+
+@db_schema_payload(name: text, slot_width: i64, fields: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "slot_width", text_of(slot_width));
+    payload = row_append(payload, "fields", fields);
+    ^ payload;
+}
+
+@db_define_table(db: DB, name: text, slot_width: i64, fields: text) -> i64 {
+    ? (name != db_schema_table_name()) {
+        schema_ready := db_ensure_schema_table(db);
+        ? (schema_ready < 0) {
+            ^ -3;
+        }
+    }
+    root_page := db_create_table(db, name, slot_width);
+    ? (root_page < 0) {
+        ^ root_page;
+    }
+    ? (name == db_schema_table_name()) {
+        ^ root_page;
+    }
+    schema_payload := db_schema_payload(name, slot_width, fields);
+    schema_written := db_insert(db, db_schema_table_name(), root_page, schema_payload);
+    ? (schema_written < 0) {
+        ^ -4;
+    }
+    ^ root_page;
+}
+
 @db_create_index(db: DB, table_name: text, index_name: text) -> i64 {
     index_table := db_index_table_name(table_name, index_name);
     ^ db_create_table(db, index_table, 20);
@@ -318,6 +365,14 @@
     ^ i64_of(value);
 }
 
+@db_get_by_index(db: DB, table_name: text, index_name: text, secondary_key: i64) -> text {
+    primary_key := db_index_get(db, table_name, index_name, secondary_key);
+    ? (primary_key < 0) {
+        ^ "";
+    }
+    ^ db_get(db, table_name, primary_key);
+}
+
 @db_index_delete(db: DB, table_name: text, index_name: text, secondary_key: i64) -> i64 {
     index_table := db_index_table_name(table_name, index_name);
     ^ db_delete(db, index_table, secondary_key);
@@ -373,6 +428,96 @@
         ^ -4;
     }
     ^ 0;
+}
+
+@db_row_get(db: DB, table_name: text, key: i64, field_name: text) -> text {
+    payload := db_get(db, table_name, key);
+    ? (count(payload) == 0) {
+        ^ "";
+    }
+    ^ row_get(payload, field_name);
+}
+
+@db_row_put(db: DB, table_name: text, key: i64, field_name: text, field_value: text) -> i64 {
+    payload := db_get(db, table_name, key);
+    ? (count(payload) == 0) {
+        ^ -1;
+    }
+    updated := row_put(payload, field_name, field_value);
+    ^ db_update(db, table_name, key, updated);
+}
+
+@db_table_schema(db: DB, table_name: text) -> text {
+    ? (table_name == db_schema_table_name()) {
+        ^ db_schema_payload(db_schema_table_name(), db_schema_slot_width(), "name:text,slot_width:i64,fields:text");
+    }
+    schema_index := db_catalog_lookup_index(db, db_schema_table_name());
+    ? (schema_index < 0) {
+        ^ "";
+    }
+    root_page := db_table_root(db, table_name);
+    ? (root_page < 0) {
+        ^ "";
+    }
+    ^ db_get(db, db_schema_table_name(), root_page);
+}
+
+@db_table_fields(db: DB, table_name: text) -> text {
+    schema0 := db_table_schema(db, table_name);
+    ? (count(schema0) == 0) {
+        ^ "";
+    }
+    ^ row_get(schema0, "fields");
+}
+
+@db_scan_where_page(db: DB, table: Table, page_id: i64, field_name: text, expected_value: text, separator: text) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        page := leaf_read_page(table.pager, page_id);
+        slot_count := leaf_slot_count(page);
+        out := "";
+        slot_index := 0;
+        ~ (slot_index < slot_count) {
+            value := leaf_read_slot(table.pager, page_id, slot_index);
+            ? (count(value) > 0 and row_get(value, field_name) == expected_value) {
+                normalized := row_trim_padding(value);
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + normalized;
+            }
+            slot_index = slot_index + 1;
+        }
+        ^ out;
+    }
+    ? (page_kind == "I") {
+        page := pager_read_page(table.pager, page_id);
+        key_count := table_internal_key_count(page);
+        used_cells := table_internal_used_cells(page);
+        out := db_scan_where_page(db, table, table_internal_left_child(page), field_name, expected_value, separator);
+        cell_index := 0;
+        ~ (cell_index < key_count) {
+            cell := table_internal_cell_at(used_cells, cell_index);
+            child_text := db_scan_where_page(db, table, table_internal_cell_child(cell), field_name, expected_value, separator);
+            ? (count(child_text) > 0) {
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + child_text;
+            }
+            cell_index = cell_index + 1;
+        }
+        ^ out;
+    }
+    ^ "";
+}
+
+@db_scan_where_field_equals(db: DB, table_name: text, field_name: text, expected_value: text, separator: text) -> text {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ "";
+    }
+    ^ db_scan_where_page(db, table, table.root_page, field_name, expected_value, separator);
 }
 
 @db_validate(db: DB) -> bool {

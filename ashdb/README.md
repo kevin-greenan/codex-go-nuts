@@ -82,14 +82,17 @@ What is already working on `codex/ashdb-foundation`:
 19. coarse rollback-journal transactions with recovery on reopen
 20. point lookup by key
 21. ordered scan across the current tree shape
-22. smoke-test coverage through the direct self-hosted compiler
+22. row-field helpers for record-like payloads
+23. schema metadata stored inside AshDB itself
+24. small structured query helpers for secondary-index lookup and field-equality scans
+25. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
-1. richer row/schema metadata beyond fixed slot-width text payloads
-2. stronger transactional semantics than whole-file rollback snapshots
-3. corruption tooling and format validation
-4. broader secondary-index integration across more query shapes
+1. stronger transactional semantics than whole-file rollback snapshots
+2. richer schema constraints and typed column enforcement
+3. broader corruption tooling and repair workflows
+4. broader query shapes beyond point lookup and equality filtering
 5. any SQL surface
 
 ## Architecture Overview
@@ -288,11 +291,11 @@ Exit criteria:
 Status:
 
 1. In progress.
-2. The current branch has keyed leaf storage, internal-node routing, root promotion, table scans, and a small named-table catalog.
+2. The current branch has keyed leaf storage, internal-node routing, root promotion, table scans, record-like row helpers, and a small named-table catalog with schema metadata.
 3. The next concrete milestones are:
-4. richer table metadata
-5. better row encoding
-6. validation and tooling
+4. stronger typed schema enforcement
+5. richer query helpers
+6. validation and repair tooling
 7. more index/query integration
 8. cursor-style scans
 
@@ -332,7 +335,7 @@ Exit criteria:
 Status:
 
 1. Not started.
-2. The API now has a first structured shape through `table_*` and `db_*` calls.
+2. The API now has a first structured shape through `table_*` and `db_*` calls, including row helpers, schema lookup, index lookup, and field-equality scans.
 3. It should continue growing as structured Noema calls, not SQL.
 
 ## Testing Strategy
@@ -358,11 +361,11 @@ Completed:
 
 Next:
 
-1. internal-node split mechanics
-2. catalog-backed table metadata beyond root page and slot width
-3. delete/update operations
-4. secondary index storage
-5. rollback journal and recovery validation
+1. stronger typed schema enforcement
+2. richer field-aware query helpers
+3. page-aware journaling or WAL-style durability
+4. repair-oriented validation tooling
+5. cursor-style scans
 
 ## Definition of Success
 
