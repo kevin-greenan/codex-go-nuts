@@ -837,6 +837,54 @@
     ^ table_validate_page_report(table, table.root_page);
 }
 
+@table_layout_page_text(table: Table, page_id: i64, depth: i64, separator: text) -> text {
+    indent := repeat_unit("  ", depth);
+    kind := table_page_kind(table, page_id);
+    ? (kind == "L") {
+        page := leaf_read_page(table.pager, page_id);
+        slot_count := leaf_slot_count(page);
+        first_key := leaf_first_key(table.pager, page_id);
+        last_key := -1;
+        ? (slot_count > 0) {
+            last_key = leaf_slot_key(leaf_slot_text_at(leaf_entries_region(page), leaf_slot_width(page), slot_count - 1));
+        }
+        ^ indent + "leaf page=" + text_of(page_id) + " slots=" + text_of(slot_count) + " first=" + text_of(first_key) + " last=" + text_of(last_key);
+    }
+    ? (kind == "I") {
+        page := pager_read_page(table.pager, page_id);
+        key_count := table_internal_key_count(page);
+        left_child := table_internal_left_child(page);
+        used_cells := table_internal_used_cells(page);
+        out := indent + "internal page=" + text_of(page_id) + " keys=" + text_of(key_count) + " left=" + text_of(left_child);
+        child_text := table_layout_page_text(table, left_child, depth + 1, separator);
+        ? (count(child_text) > 0) {
+            out = out + separator + child_text;
+        }
+        idx := 0;
+        ~ (idx < key_count) {
+            cell := table_internal_cell_at(used_cells, idx);
+            key := table_internal_cell_key(cell);
+            child := table_internal_cell_child(cell);
+            out = out + separator + indent + "  sep key=" + text_of(key) + " child=" + text_of(child);
+            child_text = table_layout_page_text(table, child, depth + 1, separator);
+            ? (count(child_text) > 0) {
+                out = out + separator + child_text;
+            }
+            idx = idx + 1;
+        }
+        ^ out;
+    }
+    ^ indent + "unknown page=" + text_of(page_id) + " kind=" + kind;
+}
+
+@table_layout_text(table: Table, separator: text) -> text {
+    total_pages := pager_total_pages(table.pager);
+    ? (table.root_page <= 0 or table.root_page >= total_pages) {
+        ^ "root page is out of range";
+    }
+    ^ table_layout_page_text(table, table.root_page, 0, separator);
+}
+
 @table_sync(table: Table) -> bool {
     ^ pager_sync(table.pager);
 }
