@@ -120,7 +120,8 @@ What is already working on `codex/ashdb-foundation`:
 57. validation now flags unreachable pages as a corruption signal
 58. a recovery-state inspection helper for journal and WAL state
 59. written recovery and durability documentation in `ashdb/docs/recovery.md`
-60. smoke-test coverage through the direct self-hosted compiler
+60. text-prefix predicate scans for `text` fields
+61. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -144,7 +145,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Query Surface
 
-1. broader predicate support beyond equality, compound equality, and `i64` field ranges
+1. broader predicate support beyond equality, compound equality, text-prefix matching, and `i64` field ranges
 2. better result-shape APIs than joined text output
 
 ### Integrity and Recovery Tooling

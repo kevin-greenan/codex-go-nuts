@@ -1277,6 +1277,59 @@
     ^ out;
 }
 
+@db_text_starts_with(value: text, prefix: text) -> bool {
+    ? (count(prefix) > count(value)) {
+        ^ false;
+    }
+    ^ slice(value, 0, count(prefix)) == prefix;
+}
+
+@db_scan_where_field_text_prefix_text(db: DB, table_name: text, field_name: text, prefix: text, separator: text) -> text {
+    fields_spec := db_table_fields(db, table_name);
+    field_spec := db_schema_field_spec(fields_spec, field_name);
+    ? (count(field_spec) > 0 and db_schema_field_type(field_spec) != "text") {
+        ^ "";
+    }
+    key := db_first_key(db, table_name);
+    out := "";
+    ~ (key >= 0) {
+        row0 := db_get(db, table_name, key);
+        value_text := row_get(row0, field_name);
+        ? (count(row0) > 0 and db_text_starts_with(value_text, prefix)) {
+            normalized := row_trim_padding(row0);
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + normalized;
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ out;
+}
+
+@db_scan_where_field_text_prefix_rows_text(db: DB, table_name: text, field_name: text, prefix: text, separator: text) -> text {
+    fields_spec := db_table_fields(db, table_name);
+    field_spec := db_schema_field_spec(fields_spec, field_name);
+    ? (count(field_spec) > 0 and db_schema_field_type(field_spec) != "text") {
+        ^ "";
+    }
+    key := db_first_key(db, table_name);
+    out := "";
+    ~ (key >= 0) {
+        row0 := db_get(db, table_name, key);
+        value_text := row_get(row0, field_name);
+        ? (count(row0) > 0 and db_text_starts_with(value_text, prefix)) {
+            result_row := db_result_row(key, row0);
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + result_row;
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ out;
+}
+
 @db_scan_by_index_key_range_rows_text(db: DB, table_name: text, index_name: text, min_secondary_key: i64, max_secondary_key: i64, separator: text) -> text {
     ? (min_secondary_key > max_secondary_key) {
         ^ "";
