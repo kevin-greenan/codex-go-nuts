@@ -327,6 +327,13 @@
     ^ slice(entry, start, db_catalog_name_width());
 }
 
+@db_catalog_replace_entry(entries: text, index: i64, entry_text: text) -> text {
+    prefix := slice(entries, 0, index * db_catalog_entry_size());
+    suffix_start := (index + 1) * db_catalog_entry_size();
+    suffix := slice(entries, suffix_start, count(entries) - suffix_start);
+    ^ prefix + entry_text + suffix;
+}
+
 @db_catalog_build_entries(capacity: i64, used_entries: text, count0: i64) -> text {
     ^ used_entries + repeat_unit(db_catalog_empty_entry(), capacity - count0);
 }
@@ -363,6 +370,25 @@
         index = index + 1;
     }
     ^ -1;
+}
+
+@db_catalog_update_root(db: DB, name: text, new_root_page: i64) -> bool {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    index := db_catalog_lookup_index(db, name);
+    ? (index < 0 or index >= count0) {
+        ^ false;
+    }
+    captured := db_capture_catalog_write(db);
+    ? (not captured) {
+        ^ false;
+    }
+    entry := db_catalog_entry_at(entries, index);
+    updated_entry := db_catalog_entry_text(new_root_page, db_catalog_entry_slot_width(entry), db_catalog_display_name(entry));
+    updated_entries := db_catalog_replace_entry(entries, index, updated_entry);
+    wrote := pager_write_page(db.pager, db_catalog_page(), db_catalog_page_text(db.pager.page_size, count0, updated_entries));
+    ^ wrote == db.pager.page_size;
 }
 
 @db_table_root(db: DB, name: text) -> i64 {
@@ -468,6 +494,125 @@
     root_page := db_table_root(db, name);
     slot_width := db_table_slot_width(db, name);
     ^ table_bind(db.pager, root_page, slot_width);
+}
+
+@db_free_table_subtree(table: Table, page_id: i64) -> bool {
+    ? (page_id <= 0) {
+        ^ false;
+    }
+    page := pager_read_page(table.pager, page_id);
+    kind := slice(page, 1, 1);
+    ? (kind == "I") {
+        freed_left := db_free_table_subtree(table, table_internal_left_child(page));
+        key_count := table_internal_key_count(page);
+        used_cells := table_internal_used_cells(page);
+        idx := 0;
+        ~ (idx < key_count) {
+            cell := table_internal_cell_at(used_cells, idx);
+            freed_child := db_free_table_subtree(table, table_internal_cell_child(cell));
+            idx = idx + 1;
+        }
+    }
+    ^ pager_free_page(table.pager, page_id);
+}
+
+@db_compact_table(db: DB, table_name: text) -> i64 {
+    old_table := db_bind_table(db, table_name);
+    ? (old_table.root_page < 0 or old_table.slot_width < 0) {
+        ^ -1;
+    }
+    captured := db_capture_bound_table_write(db, old_table);
+    ? (not captured) {
+        ^ -2;
+    }
+    new_root := pager_alloc_page(db.pager);
+    initialized := leaf_init_page(db.pager, new_root, old_table.slot_width);
+    ? (initialized != db.pager.page_size) {
+        ^ -3;
+    }
+    rebuilt := table_bind(db.pager, new_root, old_table.slot_width);
+    key := table_first_key_in_order(old_table);
+    copied := 0;
+    ~ (key >= 0) {
+        payload := table_get(old_table, key);
+        wrote := table_insert(rebuilt, key, payload);
+        ? (wrote < 0) {
+            ^ -4;
+        }
+        copied = copied + 1;
+        key = table_next_key_in_order(old_table, key);
+    }
+    updated_catalog := db_catalog_update_root(db, table_name, new_root);
+    ? (not updated_catalog) {
+        ^ -5;
+    }
+    freed := db_free_table_subtree(old_table, old_table.root_page);
+    ? (not freed) {
+        ^ -6;
+    }
+    ^ copied;
+}
+
+@db_compact_unique_indexes(db: DB, table_name: text) -> i64 {
+    fields_spec := db_table_fields(db, table_name);
+    count0 := db_schema_field_count(fields_spec);
+    compacted := 0;
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_is_unique(field_spec)) {
+            index_name := db_index_table_name(table_name, db_schema_unique_index_name(field_spec));
+            compacted0 := db_compact_table(db, index_name);
+            ? (compacted0 < 0) {
+                ^ compacted0;
+            }
+            compacted = compacted + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ compacted;
+}
+
+@db_compact_table_with_indexes(db: DB, table_name: text) -> i64 {
+    compacted_table := db_compact_table(db, table_name);
+    ? (compacted_table < 0) {
+        ^ compacted_table;
+    }
+    compacted_indexes := db_compact_unique_indexes(db, table_name);
+    ? (compacted_indexes < 0) {
+        ^ compacted_indexes;
+    }
+    ^ compacted_table;
+}
+
+@db_compact_database(db: DB) -> i64 {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    compacted := 0;
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (db_catalog_entry_is_used(entry)) {
+            table_name := db_catalog_display_name(entry);
+            ? (table_name != db_schema_table_name() and slice(table_name, 0, 4) != "idx.") {
+                compacted0 := db_compact_table_with_indexes(db, table_name);
+                ? (compacted0 < 0) {
+                    ^ compacted0;
+                }
+                compacted = compacted + 1;
+            }
+        }
+        idx = idx + 1;
+    }
+    schema_root := db_catalog_lookup_index(db, db_schema_table_name());
+    ? (schema_root >= 0) {
+        compacted_schema := db_compact_table(db, db_schema_table_name());
+        ? (compacted_schema < 0) {
+            ^ compacted_schema;
+        }
+    }
+    ^ compacted;
 }
 
 @db_put(db: DB, table_name: text, key: i64, payload: text) -> i64 {
