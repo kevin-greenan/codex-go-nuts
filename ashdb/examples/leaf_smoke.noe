@@ -8,14 +8,18 @@
 
     pager := pager_open(arg(1), 64);
     page_id := pager_alloc_page(pager);
-    initialized := leaf_init_page(pager, page_id, 12);
-    slot0 := leaf_insert(pager, page_id, "alpha");
-    slot1 := leaf_insert(pager, page_id, "beta");
+    initialized := leaf_init_page(pager, page_id, 20);
+    slot0 := leaf_insert_key(pager, page_id, 10, "alpha");
+    slot1 := leaf_insert_key(pager, page_id, 20, "beta");
     page := leaf_read_page(pager, page_id);
     count0 := leaf_slot_count(page);
     width0 := leaf_slot_width(page);
     first := leaf_read_slot(pager, page_id, slot0);
     second := leaf_read_slot(pager, page_id, slot1);
+    found0 := leaf_find_key(pager, page_id, 10);
+    found1 := leaf_find_key(pager, page_id, 20);
+    found_missing := leaf_find_key(pager, page_id, 99);
+    by_key := leaf_read_by_key(pager, page_id, 20);
     synced := pager_sync(pager);
     closed := pager_close(pager);
 
@@ -28,7 +32,7 @@
     ? (slot0 != 0 or slot1 != 1) {
         ^ 4;
     }
-    ? (count0 != 2 or width0 != 12) {
+    ? (count0 != 2 or width0 != 20) {
         ! "leaf_meta=" + text_of(count0) + ":" + text_of(width0);
         ^ 5;
     }
@@ -44,8 +48,16 @@
         ! "second=" + second;
         ^ 8;
     }
-    ? (not synced or not closed) {
+    ? (found0 != 0 or found1 != 1 or found_missing != -1) {
+        ! "found=" + text_of(found0) + ":" + text_of(found1) + ":" + text_of(found_missing);
         ^ 9;
+    }
+    ? (slice(by_key, 0, 4) != "beta") {
+        ! "by_key=" + by_key;
+        ^ 10;
+    }
+    ? (not synced or not closed) {
+        ^ 11;
     }
 
     ! "ashdb leaf smoke ok";
