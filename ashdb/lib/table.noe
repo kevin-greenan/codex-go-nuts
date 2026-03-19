@@ -433,8 +433,49 @@
     ^ -1;
 }
 
+@table_try_collapse_root_after_delete(table: Table) -> bool {
+    ? (table_root_kind(table) != "I") {
+        ^ false;
+    }
+    root_raw := pager_read_page(table.pager, table.root_page);
+    key_count := table_internal_key_count(root_raw);
+    ? (key_count != 1) {
+        ^ false;
+    }
+    left_child := table_internal_left_child(root_raw);
+    used_cells := table_internal_used_cells(root_raw);
+    first_cell := table_internal_cell_at(used_cells, 0);
+    right_child := table_internal_cell_child(first_cell);
+    ? (table_page_kind(table, left_child) != "L" or table_page_kind(table, right_child) != "L") {
+        ^ false;
+    }
+    left_page := leaf_read_page(table.pager, left_child);
+    right_page := leaf_read_page(table.pager, right_child);
+    left_count := leaf_slot_count(left_page);
+    right_count := leaf_slot_count(right_page);
+    ? (left_count > 0 and right_count > 0) {
+        ^ false;
+    }
+    replacement_page := left_child;
+    ? (left_count == 0 and right_count > 0) {
+        replacement_page = right_child;
+    }
+    replacement_raw := pager_read_page(table.pager, replacement_page);
+    wrote_root := pager_raw_write_page(table.pager, table.root_page, replacement_raw);
+    ? (wrote_root != table.pager.page_size) {
+        ^ false;
+    }
+    freed_left := pager_free_page(table.pager, left_child);
+    freed_right := pager_free_page(table.pager, right_child);
+    ^ freed_left and freed_right;
+}
+
 @table_delete(table: Table, key: i64) -> i64 {
-    ^ table_delete_page(table, table.root_page, key);
+    deleted := table_delete_page(table, table.root_page, key);
+    ? (deleted >= 0) {
+        collapsed := table_try_collapse_root_after_delete(table);
+    }
+    ^ deleted;
 }
 
 @table_scan_leaf_text(table: Table, page_id: i64, separator: text) -> text {

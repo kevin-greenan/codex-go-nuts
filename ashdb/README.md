@@ -126,7 +126,8 @@ What is already working on `codex/ashdb-foundation`:
 63. negative recovery-boundary coverage for tampered WAL headers
 64. freelist validation for cycles, bad markers, and unlinked free pages
 65. freelist corruption coverage
-66. smoke-test coverage through the direct self-hosted compiler
+66. limited root collapse after deletes when a two-leaf root empties one side
+67. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -142,7 +143,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Storage Engine
 
-1. better delete/rebalance behavior beyond explicit table compaction
+1. broader delete/rebalance behavior beyond the current limited root collapse and explicit table compaction
 
 ### Schema and Data Model
 
