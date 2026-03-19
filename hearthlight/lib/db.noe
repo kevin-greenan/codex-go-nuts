@@ -1,0 +1,168 @@
+& "../../ashdb/lib/db.noe";
+
+@hearthlight_db_page_size() -> i64 {
+    ^ 256;
+}
+
+@hearthlight_today_key() -> i64 {
+    ^ 20260319;
+}
+
+@hearthlight_households_table() -> text {
+    ^ "households";
+}
+
+@hearthlight_members_table() -> text {
+    ^ "members";
+}
+
+@hearthlight_meals_table() -> text {
+    ^ "meals";
+}
+
+@hearthlight_groceries_table() -> text {
+    ^ "groceries";
+}
+
+@hearthlight_chores_table() -> text {
+    ^ "chores";
+}
+
+@hearthlight_household_row(name: text, shopping_day: text, planning_day: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "shopping_day", shopping_day);
+    payload = row_append(payload, "planning_day", planning_day);
+    ^ payload;
+}
+
+@hearthlight_member_row(name: text, role: text, color: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "role", role);
+    payload = row_append(payload, "color", color);
+    ^ payload;
+}
+
+@hearthlight_meal_row(title: text, notes: text, day_label: text) -> text {
+    payload := "";
+    payload = row_append(payload, "title", title);
+    payload = row_append(payload, "notes", notes);
+    payload = row_append(payload, "day_label", day_label);
+    ^ payload;
+}
+
+@hearthlight_grocery_row(name: text, section: text, purchased: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "section", section);
+    payload = row_append(payload, "purchased", purchased);
+    ^ payload;
+}
+
+@hearthlight_chore_row(name: text, owner: text, due_label: text, status: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "owner", owner);
+    payload = row_append(payload, "due_label", due_label);
+    payload = row_append(payload, "status", status);
+    ^ payload;
+}
+
+@hearthlight_insert_if_missing(db: DB, table_name: text, key: i64, payload: text) -> bool {
+    ? (count(db_get(db, table_name, key)) > 0) {
+        ^ true;
+    }
+    ^ db_insert_row(db, table_name, key, payload) >= 0;
+}
+
+@hearthlight_ensure_schema(db: DB) -> bool {
+    households_root := db_table_root(db, hearthlight_households_table());
+    ? (households_root < 0 and db_define_table(db, hearthlight_households_table(), 96, "name:text,shopping_day:text,planning_day:text") < 0) {
+        ^ false;
+    }
+
+    members_root := db_table_root(db, hearthlight_members_table());
+    ? (members_root < 0 and db_define_table(db, hearthlight_members_table(), 96, "name:text,role:text,color:text") < 0) {
+        ^ false;
+    }
+
+    meals_root := db_table_root(db, hearthlight_meals_table());
+    ? (meals_root < 0 and db_define_table(db, hearthlight_meals_table(), 128, "title:text,notes:text?,day_label:text") < 0) {
+        ^ false;
+    }
+
+    groceries_root := db_table_root(db, hearthlight_groceries_table());
+    ? (groceries_root < 0 and db_define_table(db, hearthlight_groceries_table(), 128, "name:text,section:text,purchased:bool=false") < 0) {
+        ^ false;
+    }
+
+    chores_root := db_table_root(db, hearthlight_chores_table());
+    ? (chores_root < 0 and db_define_table(db, hearthlight_chores_table(), 128, "name:text,owner:text,due_label:text,status:text=todo") < 0) {
+        ^ false;
+    }
+
+    ^ true;
+}
+
+@hearthlight_seed_demo(db: DB) -> bool {
+    household_ok := hearthlight_insert_if_missing(db, hearthlight_households_table(), 1, hearthlight_household_row("Maple House", "Saturday", "Sunday"));
+    member0_ok := hearthlight_insert_if_missing(db, hearthlight_members_table(), 1, hearthlight_member_row("Avery", "Meal planner", "terracotta"));
+    member1_ok := hearthlight_insert_if_missing(db, hearthlight_members_table(), 2, hearthlight_member_row("Jordan", "Grocery runner", "sage"));
+    meal_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_today_key(), hearthlight_meal_row("Lemon Pasta", "Fast enough for a busy Thursday.", "Tonight"));
+    grocery0_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 1, hearthlight_grocery_row("Milk", "Dairy", "false"));
+    grocery1_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 2, hearthlight_grocery_row("Parsley", "Produce", "false"));
+    grocery2_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 3, hearthlight_grocery_row("Olive Oil", "Pantry", "false"));
+    chore0_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 1, hearthlight_chore_row("Counters", "Jordan", "Today", "todo"));
+    chore1_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 2, hearthlight_chore_row("Laundry", "Avery", "Tomorrow", "todo"));
+    chore2_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 3, hearthlight_chore_row("Water herbs", "Jordan", "Tonight", "todo"));
+    ^ household_ok and member0_ok and member1_ok and meal_ok and grocery0_ok and grocery1_ok and grocery2_ok and chore0_ok and chore1_ok and chore2_ok;
+}
+
+@hearthlight_bootstrap(db: DB) -> bool {
+    began := db_begin(db);
+    ? (not began) {
+        ^ false;
+    }
+
+    schema_ok := hearthlight_ensure_schema(db);
+    ? (not schema_ok) {
+        rolled := db_rollback(db);
+        ^ false;
+    }
+
+    seed_ok := hearthlight_seed_demo(db);
+    ? (not seed_ok) {
+        rolled := db_rollback(db);
+        ^ false;
+    }
+
+    ^ db_commit(db);
+}
+
+@hearthlight_open(path: text) -> DB {
+    db := db_open(path, hearthlight_db_page_size());
+    bootstrapped := hearthlight_bootstrap(db);
+    ^ db;
+}
+
+@hearthlight_next_key(db: DB, table_name: text) -> i64 {
+    key := db_first_key(db, table_name);
+    max_key := 0;
+    ~ (key >= 0) {
+        max_key = key;
+        key = db_next_key(db, table_name, key);
+    }
+    ^ max_key + 1;
+}
+
+@hearthlight_add_grocery(db: DB, name: text, section: text) -> i64 {
+    payload := hearthlight_grocery_row(name, section, "false");
+    ^ db_insert_row(db, hearthlight_groceries_table(), hearthlight_next_key(db, hearthlight_groceries_table()), payload);
+}
+
+@hearthlight_complete_chore(db: DB, key: i64) -> i64 {
+    patch := "";
+    patch = row_append(patch, "status", "done");
+    ^ db_patch_row(db, hearthlight_chores_table(), key, patch);
+}

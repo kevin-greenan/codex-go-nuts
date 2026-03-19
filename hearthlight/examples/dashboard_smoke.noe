@@ -1,0 +1,36 @@
+& "../lib/app.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: dashboard_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := hearthlight_open(arg(1));
+    request := kiln_http_parse_request("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    dispatch := kiln_dispatch(hearthlight_routes(), request);
+    reply := hearthlight_route_reply(db, dispatch, request);
+    response := kiln_reply_response(reply);
+    validate := db_validate_report(db);
+    closed := db_close(db);
+
+    ? (find(response, "HTTP/1.1 200 OK") < 0) {
+        ! "status mismatch";
+        ^ 2;
+    }
+    ? (find(response, "Lemon Pasta") < 0 or find(response, "Milk") < 0 or find(response, "Counters") < 0) {
+        ! "dashboard body mismatch";
+        ^ 3;
+    }
+    ? (find(response, "/groceries") < 0 or find(response, "/chores/1/complete") < 0 or find(response, "/assets/site.css") < 0) {
+        ! "actions mismatch";
+        ^ 4;
+    }
+    ? (validate != "ok" or not closed) {
+        ! "validate=" + validate;
+        ^ 5;
+    }
+
+    ! "hearthlight dashboard smoke ok";
+    ^ 0;
+}

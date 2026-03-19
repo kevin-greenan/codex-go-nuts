@@ -219,6 +219,26 @@ The first implementation milestone should deliver:
 
 This milestone is intentionally narrow: it should be good enough for one real household to try for two weeks and reveal where the product is genuinely helpful versus merely organized.
 
+## Current Status
+
+The first Hearthlight implementation slice is now underway on `codex/hearthlight-foundation`.
+
+What is already working:
+
+1. Hearthlight now uses AshDB and Kiln as libraries from inside `hearthlight/`
+2. the app bootstraps a local AshDB file with tables for households, members, meals, groceries, and chores
+3. the first seeded household dashboard renders server-side HTML through Kiln
+4. the dashboard shows tonight's meal, household members, grocery items, and open chores
+5. the first app actions support adding a grocery item and marking a chore complete
+6. the first local asset path is wired for Hearthlight-specific styling
+
+The current goal is a real vertical slice, not a full product:
+
+1. one seeded household
+2. one dashboard route
+3. a couple of live write actions
+4. direct-compiler smoke coverage proving the app stack works end to end
+
 ## Definition of Success
 
 Hearthlight succeeds if it becomes the place a household checks when deciding what to cook, what to buy, and what needs doing, and if it makes that coordination feel lighter instead of more complicated.
