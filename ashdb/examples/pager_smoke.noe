@@ -6,18 +6,23 @@
         ^ 1;
     }
 
-    pager := pager_open(arg(1), 32);
+    pager := pager_open(arg(1), 40);
     initial_pages := pager_total_pages(pager);
     first_page := pager_alloc_page(pager);
     second_page := pager_alloc_page(pager);
+    freed := pager_free_page(pager, first_page);
+    reused_page := pager_alloc_page(pager);
     wrote0 := pager_write_page(pager, first_page, "page0000");
     wrote1 := pager_write_page(pager, second_page, "page0001");
+    wrote2 := pager_write_page(pager, reused_page, "page0002");
     synced := pager_sync(pager);
     size := pager_file_size(pager);
     total_pages := pager_total_pages(pager);
     header := pager_load_header(pager);
+    free_head := pager_free_head(pager);
     first := pager_read_page(pager, first_page);
     second := pager_read_page(pager, second_page);
+    reused := pager_read_page(pager, reused_page);
     closed := pager_close(pager);
 
     ? (initial_pages != 1) {
@@ -26,31 +31,42 @@
     ? (first_page != 1 or second_page != 2) {
         ^ 3;
     }
-    ? (wrote0 != 32 or wrote1 != 32) {
+    ? (not freed or reused_page != first_page) {
         ^ 4;
     }
-    ? (not synced or not closed) {
+    ? (wrote0 != 40 or wrote1 != 40 or wrote2 != 40) {
         ^ 5;
     }
-    ? (size != 96) {
-        ! "unexpected_size=" + text_of(size);
+    ? (not synced or not closed) {
         ^ 6;
+    }
+    ? (size != 120) {
+        ! "unexpected_size=" + text_of(size);
+        ^ 7;
     }
     ? (total_pages != 3) {
         ! "unexpected_pages=" + text_of(total_pages);
-        ^ 7;
-    }
-    ? (slice(header, 0, 8) != "ASHDB001") {
-        ! "header=" + header;
         ^ 8;
     }
-    ? (slice(first, 0, 8) != "page0000") {
-        ! "first=" + first;
+    ? (slice(header, 0, 9) != "HASHDB001") {
+        ! "header=" + header;
         ^ 9;
     }
-    ? (slice(second, 0, 8) != "page0001") {
-        ! "second=" + second;
+    ? (free_head != 0) {
+        ! "free_head=" + text_of(free_head);
         ^ 10;
+    }
+    ? (slice(first, 0, 9) != "Dpage0002") {
+        ! "first=" + first;
+        ^ 11;
+    }
+    ? (slice(second, 0, 9) != "Dpage0001") {
+        ! "second=" + second;
+        ^ 12;
+    }
+    ? (slice(reused, 0, 9) != "Dpage0002") {
+        ! "reused=" + reused;
+        ^ 13;
     }
 
     ! "ashdb pager smoke ok";
