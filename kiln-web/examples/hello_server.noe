@@ -1,0 +1,25 @@
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: hello_server <port>";
+        ^ 1;
+    }
+
+    port := i64_of(arg(1));
+    listener := listener_open(port);
+    conn := listener_accept(listener);
+    request := socket_recv(conn, 2048);
+    wrote := socket_send(conn, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 16\r\nConnection: close\r\n\r\nhello from kiln");
+    closed_conn := socket_close(conn);
+    closed_listener := listener_close(listener);
+    touched := find(request, "GET / ");
+    ? (wrote <= 0) {
+        ^ 2;
+    }
+    ? (not closed_conn or not closed_listener) {
+        ^ 3;
+    }
+    ? (touched < -1) {
+        ^ 4;
+    }
+    ^ 0;
+}

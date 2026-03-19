@@ -178,6 +178,7 @@ enum TypeName {
     Text,
     Bytes,
     File,
+    Listener,
     Socket,
     Void,
     Named(String),
@@ -249,6 +250,7 @@ enum IrInst {
 
 #[derive(Default)]
 struct IrFunctionBuilder {
+    function_name: String,
     slots: HashMap<String, usize>,
     slot_types: HashMap<String, TypeName>,
     next_slot: usize,
@@ -617,6 +619,7 @@ fn parse_type_inner(chars: &[char], index: &mut usize) -> Option<TypeName> {
         "text" => TypeName::Text,
         "bytes" => TypeName::Bytes,
         "file" => TypeName::File,
+        "listener" => TypeName::Listener,
         "socket" => TypeName::Socket,
         "void" => TypeName::Void,
         _ => TypeName::Named(ident),
@@ -1386,7 +1389,7 @@ fn ensure_type_defined(
     shapes: &HashMap<String, ShapeDecl>,
 ) -> Result<(), String> {
     match ty {
-        TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::Bytes | TypeName::File | TypeName::Socket | TypeName::Void => Ok(()),
+                TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::Bytes | TypeName::File | TypeName::Listener | TypeName::Socket | TypeName::Void => Ok(()),
         TypeName::Named(name) => {
             if shapes.contains_key(name) {
                 Ok(())
@@ -2154,6 +2157,41 @@ fn infer_call_type(
             }
             Ok(TypeName::I64)
         }
+        "listener_open" => {
+            if args.len() != 1 {
+                return Err("listener_open(...) expects exactly one argument".to_string());
+            }
+            let port_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if port_type != TypeName::I64 {
+                return Err("listener_open(...) expects i64 port".to_string());
+            }
+            Ok(TypeName::Listener)
+        }
+        "listener_accept" => {
+            if args.len() != 1 {
+                return Err("listener_accept(...) expects exactly one argument".to_string());
+            }
+            let listener_type =
+                infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if listener_type != TypeName::Listener {
+                return Err("listener_accept(...) expects listener input".to_string());
+            }
+            Ok(TypeName::Socket)
+        }
+        "listener_close" => {
+            if args.len() != 1 {
+                return Err("listener_close(...) expects exactly one argument".to_string());
+            }
+            let listener_type =
+                infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if listener_type != TypeName::Listener {
+                return Err(format!(
+                    "listener_close(...) expects listener input, got '{}'",
+                    listener_type.display()
+                ));
+            }
+            Ok(TypeName::Bool)
+        }
         "socket_open" => {
             if args.len() != 2 {
                 return Err("socket_open(...) expects exactly two arguments".to_string());
@@ -2311,6 +2349,7 @@ fn lower_function_to_ir(function: &Function, semantic: &SemanticInfo) -> Result<
     }
 
     let mut builder = IrFunctionBuilder::default();
+    builder.function_name = function.name.clone();
     for param in &function.params {
         builder.alloc_slot(param.name.clone(), param.ty.clone());
     }
@@ -2746,7 +2785,7 @@ fn ensure_native_expr(
 }
 
 fn is_native_value_type(ty: &TypeName) -> bool {
-    matches!(ty, TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::Bytes | TypeName::Socket)
+    matches!(ty, TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::Bytes | TypeName::Listener | TypeName::Socket)
 }
 
 fn native_builtin_symbol(name: &str, argc: usize) -> Result<Option<(&'static str, usize)>, String> {
@@ -2760,6 +2799,9 @@ fn native_builtin_symbol(name: &str, argc: usize) -> Result<Option<(&'static str
         ("host_cc", 2) => ("noema_native_host_cc", 2),
         ("find", 2) => ("noema_native_text_find", 2),
         ("i64_of", 1) => ("noema_native_i64_of", 1),
+        ("listener_open", 1) => ("noema_native_listener_open", 1),
+        ("listener_accept", 1) => ("noema_native_listener_accept", 1),
+        ("listener_close", 1) => ("noema_native_listener_close", 1),
         ("socket_open", 2) => ("noema_native_socket_open", 2),
         ("socket_send", 2) => ("noema_native_socket_send", 2),
         ("socket_recv", 2) => ("noema_native_socket_recv", 2),
@@ -2796,7 +2838,7 @@ impl IrFunctionBuilder {
     }
 
     fn label(&mut self, prefix: &str) -> String {
-        let label = format!("{prefix}_{}", self.label_counter);
+        let label = format!("{}_{}_{}", self.function_name, prefix, self.label_counter);
         self.label_counter += 1;
         label
     }
@@ -2805,7 +2847,7 @@ impl IrFunctionBuilder {
         if let Some(label) = self.string_labels.get(value) {
             return label.clone();
         }
-        let label = format!("LCSTR_{}", self.string_counter);
+        let label = format!("LCSTR_{}_{}", self.function_name, self.string_counter);
         self.string_counter += 1;
         self.string_labels.insert(value.to_string(), label.clone());
         self.strings.push((label.clone(), value.to_string()));
@@ -2848,6 +2890,9 @@ fn lower_to_arm64_macos(program: &IrProgram) -> Result<String, String> {
     out.push_str(".extern _noema_native_bytes_slice\n");
     out.push_str(".extern _noema_native_bytes_xor\n");
     out.push_str(".extern _noema_native_i64_of\n");
+    out.push_str(".extern _noema_native_listener_open\n");
+    out.push_str(".extern _noema_native_listener_accept\n");
+    out.push_str(".extern _noema_native_listener_close\n");
     out.push_str(".extern _noema_native_socket_open\n");
     out.push_str(".extern _noema_native_socket_send\n");
     out.push_str(".extern _noema_native_socket_recv\n");
@@ -3214,6 +3259,9 @@ fn lower_to_c_with_options(
 
     out.push_str("typedef struct {\n");
     out.push_str("    int fd;\n");
+    out.push_str("} NoemaListener;\n\n");
+    out.push_str("typedef struct {\n");
+    out.push_str("    int fd;\n");
     out.push_str("} NoemaSocket;\n\n");
 
     out.push_str("typedef struct {\n");
@@ -3523,6 +3571,47 @@ fn lower_to_c_with_options(
     out.push_str("    return (int64_t)system(command);\n");
     out.push_str("}\n\n");
 
+    out.push_str("static NoemaListener noema_listener_open(int64_t port) {\n");
+    out.push_str("    int fd = socket(AF_INET, SOCK_STREAM, 0);\n");
+    out.push_str("    NoemaListener listener_value;\n");
+    out.push_str("    int reuse = 1;\n");
+    out.push_str("    struct sockaddr_in addr;\n");
+    out.push_str("    if (fd < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to create listener socket\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    memset(&addr, 0, sizeof(addr));\n");
+    out.push_str("    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));\n");
+    out.push_str("    addr.sin_family = AF_INET;\n");
+    out.push_str("    addr.sin_port = htons((uint16_t)port);\n");
+    out.push_str("    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);\n");
+    out.push_str("    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to bind listener on port %lld\\n\", (long long)port);\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    if (listen(fd, 16) != 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to listen on port %lld\\n\", (long long)port);\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    listener_value.fd = fd;\n");
+    out.push_str("    return listener_value;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaSocket noema_listener_accept(NoemaListener listener_value) {\n");
+    out.push_str("    NoemaSocket socket_value;\n");
+    out.push_str("    int fd = accept(listener_value.fd, NULL, NULL);\n");
+    out.push_str("    if (fd < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: listener accept failed\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    socket_value.fd = fd;\n");
+    out.push_str("    return socket_value;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static bool noema_listener_close(NoemaListener listener_value) {\n");
+    out.push_str("    return close(listener_value.fd) == 0;\n");
+    out.push_str("}\n\n");
+
     out.push_str("static NoemaSocket noema_socket_open(NoemaText host, int64_t port) {\n");
     out.push_str("    char *host_c = noema_text_to_cstr(host);\n");
     out.push_str("    char port_buffer[32];\n");
@@ -3636,6 +3725,16 @@ fn lower_to_c_with_options(
 
     out.push_str("static NoemaBytes noema_native_unbox_bytes(uint64_t handle) {\n");
     out.push_str("    return *(NoemaBytes *)(uintptr_t)handle;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static uint64_t noema_native_box_listener(NoemaListener listener_value) {\n");
+    out.push_str("    NoemaListener *ptr = (NoemaListener *)noema_alloc(sizeof(NoemaListener));\n");
+    out.push_str("    *ptr = listener_value;\n");
+    out.push_str("    return (uint64_t)(uintptr_t)ptr;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaListener noema_native_unbox_listener(uint64_t handle) {\n");
+    out.push_str("    return *(NoemaListener *)(uintptr_t)handle;\n");
     out.push_str("}\n\n");
 
     out.push_str("static uint64_t noema_native_box_socket(NoemaSocket socket_value) {\n");
@@ -3788,6 +3887,18 @@ fn lower_to_c_with_options(
 
     out.push_str("int64_t noema_native_i64_of(uint64_t text) {\n");
     out.push_str("    return noema_i64_of(noema_native_unbox_text(text));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_listener_open(int64_t port) {\n");
+    out.push_str("    return noema_native_box_listener(noema_listener_open(port));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_listener_accept(uint64_t listener_value) {\n");
+    out.push_str("    return noema_native_box_socket(noema_listener_accept(noema_native_unbox_listener(listener_value)));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_listener_close(uint64_t listener_value) {\n");
+    out.push_str("    return noema_listener_close(noema_native_unbox_listener(listener_value));\n");
     out.push_str("}\n\n");
 
     out.push_str("uint64_t noema_native_socket_open(uint64_t host, int64_t port) {\n");
@@ -4520,6 +4631,18 @@ fn lower_call(
             "noema_i64_of({})",
             lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?
         )),
+        "listener_open" => Ok(format!(
+            "noema_listener_open({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::I64))?
+        )),
+        "listener_accept" => Ok(format!(
+            "noema_listener_accept({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Listener))?
+        )),
+        "listener_close" => Ok(format!(
+            "noema_listener_close({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Listener))?
+        )),
         "socket_open" => Ok(format!(
             "noema_socket_open({}, {})",
             lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?,
@@ -4577,6 +4700,7 @@ fn c_type_name(ty: &TypeName) -> String {
         TypeName::Text => "NoemaText".to_string(),
         TypeName::Bytes => "NoemaBytes".to_string(),
         TypeName::File => "NoemaFile".to_string(),
+        TypeName::Listener => "NoemaListener".to_string(),
         TypeName::Socket => "NoemaSocket".to_string(),
         TypeName::Void => "void".to_string(),
         TypeName::Named(name) => name.clone(),
@@ -4616,6 +4740,7 @@ impl TypeName {
             TypeName::Text => "text".to_string(),
             TypeName::Bytes => "bytes".to_string(),
             TypeName::File => "file".to_string(),
+            TypeName::Listener => "listener".to_string(),
             TypeName::Socket => "socket".to_string(),
             TypeName::Void => "void".to_string(),
             TypeName::Named(name) => name.clone(),
@@ -4630,6 +4755,7 @@ impl TypeName {
             TypeName::Text => "text".to_string(),
             TypeName::Bytes => "bytes".to_string(),
             TypeName::File => "file".to_string(),
+            TypeName::Listener => "listener".to_string(),
             TypeName::Socket => "socket".to_string(),
             TypeName::Void => "void".to_string(),
             TypeName::Named(name) => name.to_lowercase(),

@@ -55,6 +55,21 @@ This folder should grow into:
 4. `kiln-web/tests/` for request and response cases.
 5. `kiln-web/dev/` for local harnesses.
 
+## Current Status
+
+The first Kiln Web milestone is now underway on `codex/kiln-web-foundation`.
+
+What is already working:
+
+1. listener runtime support is being added to the compiler/runtime surface
+2. the target shape for the first acceptance slice is a direct-compiler `hello` server example under this folder
+
+What is next:
+
+1. land the inbound listener primitives end to end
+2. prove a sequential local HTTP response from a Noema server
+3. build the first HTTP parser and response helpers on top of that
+
 ## Architecture Overview
 
 Kiln Web should be built in layers:
