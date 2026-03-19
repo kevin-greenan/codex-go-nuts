@@ -108,7 +108,8 @@ What is already working on `codex/ashdb-foundation`:
 45. stable cursor APIs for incremental table iteration
 46. table compaction/rebuild helpers with freelist recovery for long-lived trees
 47. tagged result-record conventions for lookup and cursor APIs
-48. smoke-test coverage through the direct self-hosted compiler
+48. `i64` field-range predicate scans and rowset helpers
+49. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -135,7 +136,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Query Surface
 
-1. richer predicate support beyond exact field equality
+1. broader predicate support beyond equality and `i64` field ranges
 2. better result-shape APIs than joined text output
 
 ### Integrity and Recovery Tooling
