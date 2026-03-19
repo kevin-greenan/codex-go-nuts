@@ -659,6 +659,42 @@
     ^ table_get(table, key);
 }
 
+@db_result_ok(payload: text) -> text {
+    out := row_trim_padding(payload);
+    out = row_put(out, "ok", "true");
+    out = row_put(out, "found", "true");
+    ^ out;
+}
+
+@db_result_missing() -> text {
+    out := "";
+    out = row_append(out, "ok", "true");
+    out = row_append(out, "found", "false");
+    ^ out;
+}
+
+@db_result_error(message: text) -> text {
+    out := "";
+    out = row_append(out, "ok", "false");
+    out = row_append(out, "found", "false");
+    out = row_append(out, "error", message);
+    ^ out;
+}
+
+@db_get_result(db: DB, table_name: text, key: i64) -> text {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ db_result_error("table not found");
+    }
+    payload := table_get(table, key);
+    ? (count(payload) == 0) {
+        ^ db_result_missing();
+    }
+    out := db_result_ok(payload);
+    out = row_put(out, "__key", text_of(key));
+    ^ out;
+}
+
 @db_delete(db: DB, table_name: text, key: i64) -> i64 {
     table := db_bind_table(db, table_name);
     ? (table.root_page < 0 or table.slot_width < 0) {
@@ -738,6 +774,19 @@
     ^ db_result_row(cursor.key, row0);
 }
 
+@db_cursor_result(db: DB, cursor: DBCursor) -> text {
+    ? (not db_cursor_valid(cursor)) {
+        ^ db_result_missing();
+    }
+    row0 := db_cursor_row(db, cursor);
+    ? (count(row0) == 0) {
+        ^ db_result_error("cursor points to missing row");
+    }
+    out := db_result_ok(row0);
+    out = row_put(out, "__key", text_of(cursor.key));
+    ^ out;
+}
+
 @db_cursor_next(db: DB, cursor: DBCursor) -> DBCursor {
     ? (cursor.key < 0) {
         ^ cursor;
@@ -788,6 +837,28 @@
         ^ "";
     }
     ^ db_get(db, table_name, primary_key);
+}
+
+@db_get_by_index_result(db: DB, table_name: text, index_name: text, secondary_key: i64) -> text {
+    index_table := db_index_table_name(table_name, index_name);
+    ? (db_table_root(db, table_name) < 0) {
+        ^ db_result_error("table not found");
+    }
+    ? (db_table_root(db, index_table) < 0) {
+        ^ db_result_error("index not found");
+    }
+    primary_key := db_index_get(db, table_name, index_name, secondary_key);
+    ? (primary_key < 0) {
+        ^ db_result_missing();
+    }
+    payload := db_get(db, table_name, primary_key);
+    ? (count(payload) == 0) {
+        ^ db_result_error("index points to missing row");
+    }
+    out := db_result_ok(payload);
+    out = row_put(out, "__key", text_of(primary_key));
+    out = row_put(out, "__index_key", text_of(secondary_key));
+    ^ out;
 }
 
 @db_scan_by_index_key_range_text(db: DB, table_name: text, index_name: text, min_secondary_key: i64, max_secondary_key: i64, separator: text) -> text {

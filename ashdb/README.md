@@ -107,7 +107,8 @@ What is already working on `codex/ashdb-foundation`:
 44. commit ordering now flushes database pages before clearing the rollback journal
 45. stable cursor APIs for incremental table iteration
 46. table compaction/rebuild helpers with freelist recovery for long-lived trees
-47. smoke-test coverage through the direct self-hosted compiler
+47. tagged result-record conventions for lookup and cursor APIs
+48. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -136,7 +137,6 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 1. richer predicate support beyond exact field equality
 2. better result-shape APIs than joined text output
-3. explicit query/result conventions for failure cases
 
 ### Integrity and Recovery Tooling
 
