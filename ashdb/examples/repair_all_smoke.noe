@@ -30,6 +30,7 @@
 
     broke0 := db_index_delete(db, "users", "email_key", 1002);
     idx0 := db_index_get(db, "users", "email_key", 1002);
+    report_broken := db_validate_report(db);
     repaired := db_repair_unique_indexes(db);
     idx1 := db_index_get(db, "users", "email_key", 1002);
     report0 := db_validate_report(db);
@@ -53,6 +54,10 @@
     ? (broke0 < 0 or idx0 != -1) {
         ! "break=" + text_of(broke0) + ":" + text_of(idx0);
         ^ 4;
+    }
+    ? (find(report_broken, "unique index email_key is inconsistent") < 0) {
+        ! "broken_report=" + report_broken;
+        ^ 8;
     }
     ? (repaired != 1 or idx1 != 20 or idx2 != 20) {
         ! "repair=" + text_of(repaired) + ":" + text_of(idx1) + ":" + text_of(idx2);
