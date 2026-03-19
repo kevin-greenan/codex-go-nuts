@@ -24,15 +24,15 @@
         kiln_route("GET", "/about", "about"),
         kiln_route("GET", "/users/:id", "user-show")
     ];
+    app := kiln_app(routes, 2048);
 
     port := i64_of(arg(1));
-    server := kiln_server_receive_once(port, 2048);
-    dispatch := kiln_dispatch(routes, server.request);
-    reply := route_server_reply(dispatch);
-    ? (server.request.version != "HTTP/1.1") {
+    req := kiln_app_receive_once(app, port);
+    reply := route_server_reply(req.dispatch);
+    ? (kiln_app_request(req).version != "HTTP/1.1") {
         ^ 2;
     }
-    finished := kiln_server_finish_reply(server, reply);
+    finished := kiln_app_finish_reply(req, reply);
     ? (not finished) {
         ^ 3;
     }

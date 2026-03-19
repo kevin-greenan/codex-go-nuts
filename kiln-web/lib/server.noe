@@ -6,6 +6,20 @@
     request: KilnHttpRequest;
 }
 
+%KilnApp {
+    routes: list<KilnRoute>;
+    read_limit: i64;
+}
+
+%KilnAppRequest {
+    server: KilnServeOnce;
+    dispatch: KilnDispatch;
+}
+
+@kiln_app(routes: list<KilnRoute>, read_limit: i64) -> KilnApp {
+    ^ KilnApp { routes: routes, read_limit: read_limit };
+}
+
 @kiln_server_receive_once(port: i64, read_limit: i64) -> KilnServeOnce {
     listener0 := listener_open(port);
     conn0 := listener_accept(listener0);
@@ -23,4 +37,18 @@
 
 @kiln_server_finish_reply(server: KilnServeOnce, reply: KilnReply) -> bool {
     ^ kiln_server_finish_response(server, kiln_reply_response(reply));
+}
+
+@kiln_app_receive_once(app: KilnApp, port: i64) -> KilnAppRequest {
+    server := kiln_server_receive_once(port, app.read_limit);
+    dispatch := kiln_dispatch(app.routes, server.request);
+    ^ KilnAppRequest { server: server, dispatch: dispatch };
+}
+
+@kiln_app_finish_reply(request: KilnAppRequest, reply: KilnReply) -> bool {
+    ^ kiln_server_finish_reply(request.server, reply);
+}
+
+@kiln_app_request(req: KilnAppRequest) -> KilnHttpRequest {
+    ^ req.server.request;
 }
