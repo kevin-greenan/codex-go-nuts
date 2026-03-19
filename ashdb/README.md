@@ -121,7 +121,8 @@ What is already working on `codex/ashdb-foundation`:
 58. a recovery-state inspection helper for journal and WAL state
 59. written recovery and durability documentation in `ashdb/docs/recovery.md`
 60. text-prefix predicate scans for `text` fields
-61. smoke-test coverage through the direct self-hosted compiler
+61. an operations guide covering single-writer assumptions and backup/restore workflows
+62. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -155,9 +156,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Operational Safety
 
-1. documented single-process writer guarantees or real file-locking support
-2. backup/export story for application snapshots
-3. import/restore story for development and migration
+1. real file-locking support beyond the current documented single-writer guarantee
 4. file-format documentation stable enough to preserve compatibility intentionally
 
 ### Testing and Confidence
