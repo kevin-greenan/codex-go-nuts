@@ -1840,6 +1840,10 @@
 }
 
 @db_commit(db: DB) -> bool {
+    synced := db_sync(db);
+    ? (not synced) {
+        ^ false;
+    }
     ^ db_journal_clear(db);
 }
 

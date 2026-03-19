@@ -104,7 +104,8 @@ What is already working on `codex/ashdb-foundation`:
 41. larger-tree stress coverage with rollback recovery checks
 42. structural corruption-detection coverage
 43. schema-aware index-assisted field equality lookups for unique `i64` fields
-44. smoke-test coverage through the direct self-hosted compiler
+44. commit ordering now flushes database pages before clearing the rollback journal
+45. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
