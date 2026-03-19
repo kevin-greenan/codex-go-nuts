@@ -93,11 +93,12 @@ What is already working on `codex/ashdb-foundation`:
 30. cursor-style first/next key traversal primitives
 31. nullable-field and default-value support for row inserts
 32. schema-declared unique `i64` fields with automatic index maintenance
-33. smoke-test coverage through the direct self-hosted compiler
+33. page-aware rollback journal records instead of a single whole-file snapshot blob
+34. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
-1. stronger transactional semantics than whole-file rollback snapshots
+1. stronger transactional semantics beyond page-aware rollback journaling
 2. richer schema constraints beyond scalar types, nullable fields, defaults, and unique `i64` fields
 3. broader corruption tooling and repair workflows beyond index rebuild
 4. broader query shapes beyond point lookup, equality filtering, primary-key ranges, and key-by-key traversal
@@ -109,11 +110,10 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Storage Engine
 
-1. page-aware journaling or WAL-style durability instead of whole-file snapshots
+1. changed-page journaling or WAL-style durability instead of journaling every page up front
 2. durability boundaries that operate on changed pages rather than the entire file
 3. better delete/rebalance behavior for long-lived trees
-4. cursor-style scans for incremental iteration instead of whole-result text concatenation
-5. larger data-path testing with hundreds or thousands of rows per table
+4. larger data-path testing with hundreds or thousands of rows per table
 
 ### Schema and Data Model
 
@@ -157,7 +157,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 The best path from here is:
 
 1. broader repair-oriented validation helpers
-2. page-aware durability work
+2. changed-page durability work or WAL
 3. richer schema constraints and defaults
 4. richer query helpers and cursor APIs
 5. larger negative and recovery test coverage

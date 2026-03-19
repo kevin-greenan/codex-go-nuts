@@ -19,15 +19,15 @@
 }
 
 @db_journal_header_size() -> i64 {
-    ^ 1 + db_journal_size_width();
+    ^ 1 + db_journal_size_width() + db_journal_size_width();
 }
 
-@db_journal_header(active: bool, size0: i64) -> text {
+@db_journal_header(active: bool, original_page_count: i64, entry_count: i64) -> text {
     flag := ".";
     ? (active) {
         flag = "J";
     }
-    ^ flag + pad_left_i64(size0, db_journal_size_width());
+    ^ flag + pad_left_i64(original_page_count, db_journal_size_width()) + pad_left_i64(entry_count, db_journal_size_width());
 }
 
 @db_journal_active(header: text) -> bool {
@@ -37,19 +37,62 @@
     ^ slice(header, 0, 1) == "J";
 }
 
-@db_journal_snapshot_size(header: text) -> i64 {
+@db_journal_original_page_count(header: text) -> i64 {
     ? (count(header) < db_journal_header_size()) {
         ^ 0;
     }
     ^ i64_of(slice(header, 1, db_journal_size_width()));
 }
 
+@db_journal_entry_count(header: text) -> i64 {
+    ? (count(header) < db_journal_header_size()) {
+        ^ 0;
+    }
+    ^ i64_of(slice(header, 1 + db_journal_size_width(), db_journal_size_width()));
+}
+
+@db_journal_entry_size(page_size: i64) -> i64 {
+    ^ db_journal_size_width() + page_size;
+}
+
+@db_journal_entry_offset(page_size: i64, entry_index: i64) -> i64 {
+    ^ db_journal_header_size() + (entry_index * db_journal_entry_size(page_size));
+}
+
+@db_journal_entry_text(page_id: i64, page_text: text) -> text {
+    ^ pad_left_i64(page_id, db_journal_size_width()) + page_text;
+}
+
+@db_journal_entry_page_id(entry_text: text) -> i64 {
+    ^ i64_of(slice(entry_text, 0, db_journal_size_width()));
+}
+
+@db_journal_entry_page_text(entry_text: text, page_size: i64) -> text {
+    ^ slice(entry_text, db_journal_size_width(), page_size);
+}
+
 @db_journal_clear(db: DB) -> bool {
     journal := file_open(db_journal_path(db));
-    wrote := file_write(journal, 0, db_journal_header(false, 0));
+    wrote := file_write(journal, 0, db_journal_header(false, 0, 0));
     synced := file_sync(journal);
     closed := file_close(journal);
     ^ wrote == db_journal_header_size() and synced and closed;
+}
+
+@db_restore_journal_pages(db: DB, journal: file, entry_count: i64) -> bool {
+    idx := 0;
+    ~ (idx < entry_count) {
+        entry_offset := db_journal_entry_offset(db.pager.page_size, idx);
+        entry_text := file_read(journal, entry_offset, db_journal_entry_size(db.pager.page_size));
+        page_id := db_journal_entry_page_id(entry_text);
+        page_text := db_journal_entry_page_text(entry_text, db.pager.page_size);
+        restored := pager_raw_write_page(db.pager, page_id, page_text);
+        ? (restored != db.pager.page_size) {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
 }
 
 @db_recover_if_needed(db: DB) -> bool {
@@ -64,14 +107,13 @@
         closed := file_close(journal);
         ^ true;
     }
-    snapshot_size := db_journal_snapshot_size(header);
-    snapshot := file_read_bytes(journal, db_journal_header_size(), snapshot_size);
-    restored := file_write(db.pager.handle, 0, snapshot);
+    entry_count := db_journal_entry_count(header);
+    restored := db_restore_journal_pages(db, journal, entry_count);
     synced_db := file_sync(db.pager.handle);
-    cleared := file_write(journal, 0, db_journal_header(false, 0));
+    cleared := file_write(journal, 0, db_journal_header(false, 0, 0));
     synced_journal := file_sync(journal);
     closed := file_close(journal);
-    ^ restored == snapshot_size and synced_db and cleared == db_journal_header_size() and synced_journal and closed;
+    ^ restored and synced_db and cleared == db_journal_header_size() and synced_journal and closed;
 }
 
 @db_catalog_page() -> i64 {
@@ -1216,13 +1258,24 @@
         closed := file_close(journal);
         ^ false;
     }
-    snapshot_size := pager_file_size(db.pager);
-    snapshot := file_read_bytes(db.pager.handle, 0, snapshot_size);
-    wrote_header := file_write(journal, 0, db_journal_header(true, snapshot_size));
-    wrote_snapshot := file_write(journal, db_journal_header_size(), snapshot);
+    total_pages := pager_total_pages(db.pager);
+    wrote_header := file_write(journal, 0, db_journal_header(true, total_pages, total_pages));
+    wrote_pages := 0;
+    page_id := 0;
+    ~ (page_id < total_pages) {
+        page_text := pager_raw_read_page(db.pager, page_id);
+        entry_offset := db_journal_entry_offset(db.pager.page_size, page_id);
+        wrote_entry := file_write(journal, entry_offset, db_journal_entry_text(page_id, page_text));
+        ? (wrote_entry != db_journal_entry_size(db.pager.page_size)) {
+            closed := file_close(journal);
+            ^ false;
+        }
+        wrote_pages = wrote_pages + 1;
+        page_id = page_id + 1;
+    }
     synced := file_sync(journal);
     closed := file_close(journal);
-    ^ wrote_header == db_journal_header_size() and wrote_snapshot == snapshot_size and synced and closed;
+    ^ wrote_header == db_journal_header_size() and wrote_pages == total_pages and synced and closed;
 }
 
 @db_commit(db: DB) -> bool {
@@ -1241,14 +1294,13 @@
         closed := file_close(journal);
         ^ false;
     }
-    snapshot_size := db_journal_snapshot_size(header);
-    snapshot := file_read_bytes(journal, db_journal_header_size(), snapshot_size);
-    restored := file_write(db.pager.handle, 0, snapshot);
+    entry_count := db_journal_entry_count(header);
+    restored := db_restore_journal_pages(db, journal, entry_count);
     synced_db := file_sync(db.pager.handle);
-    cleared := file_write(journal, 0, db_journal_header(false, 0));
+    cleared := file_write(journal, 0, db_journal_header(false, 0, 0));
     synced_journal := file_sync(journal);
     closed := file_close(journal);
-    ^ restored == snapshot_size and synced_db and cleared == db_journal_header_size() and synced_journal and closed;
+    ^ restored and synced_db and cleared == db_journal_header_size() and synced_journal and closed;
 }
 
 @db_close(db: DB) -> bool {
