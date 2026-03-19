@@ -92,12 +92,13 @@ What is already working on `codex/ashdb-foundation`:
 29. secondary-index rebuild helpers from row data
 30. cursor-style first/next key traversal primitives
 31. nullable-field and default-value support for row inserts
-32. smoke-test coverage through the direct self-hosted compiler
+32. schema-declared unique `i64` fields with automatic index maintenance
+33. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
 1. stronger transactional semantics than whole-file rollback snapshots
-2. richer schema constraints beyond scalar types, nullable fields, and defaults
+2. richer schema constraints beyond scalar types, nullable fields, defaults, and unique `i64` fields
 3. broader corruption tooling and repair workflows beyond index rebuild
 4. broader query shapes beyond point lookup, equality filtering, primary-key ranges, and key-by-key traversal
 5. any SQL surface
@@ -117,9 +118,8 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 ### Schema and Data Model
 
 1. richer scalar validation and coercion rules
-2. unique constraints beyond hand-managed secondary indexes
-3. foreign-key style relationship checks or a clearly documented phase-one omission
-4. schema evolution support for adding fields or changing table metadata safely
+2. foreign-key style relationship checks or a clearly documented phase-one omission
+3. schema evolution support for adding fields or changing table metadata safely
 
 ### Query Surface
 

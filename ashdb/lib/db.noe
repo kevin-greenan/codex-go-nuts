@@ -262,6 +262,9 @@
 }
 
 @db_define_table(db: DB, name: text, slot_width: i64, fields: text) -> i64 {
+    ? (not db_schema_fields_supported(fields)) {
+        ^ -5;
+    }
     ? (name != db_schema_table_name()) {
         schema_ready := db_ensure_schema_table(db);
         ? (schema_ready < 0) {
@@ -279,6 +282,10 @@
     schema_written := db_insert(db, db_schema_table_name(), root_page, schema_payload);
     ? (schema_written < 0) {
         ^ -4;
+    }
+    unique_created := db_create_schema_unique_indexes(db, name, fields);
+    ? (unique_created < 0) {
+        ^ unique_created;
     }
     ^ root_page;
 }
@@ -596,10 +603,14 @@
     }
     tail := slice(field_spec, colon + 1, count(field_spec) - (colon + 1));
     qmark := find(tail, "?");
+    bang := find(tail, "!");
     eq := find(tail, "=");
     end0 := count(tail);
     ? (qmark >= 0 and qmark < end0) {
         end0 = qmark;
+    }
+    ? (bang >= 0 and bang < end0) {
+        end0 = bang;
     }
     ? (eq >= 0 and eq < end0) {
         end0 = eq;
@@ -630,6 +641,63 @@
         ^ "";
     }
     ^ slice(field_spec, eq + 1, count(field_spec) - (eq + 1));
+}
+
+@db_schema_field_is_unique(field_spec: text) -> bool {
+    colon := find(field_spec, ":");
+    ? (colon < 0) {
+        ^ false;
+    }
+    tail := slice(field_spec, colon + 1, count(field_spec) - (colon + 1));
+    bang := find(tail, "!");
+    ? (bang < 0) {
+        ^ false;
+    }
+    eq := find(tail, "=");
+    ? (eq < 0) {
+        ^ true;
+    }
+    ^ bang < eq;
+}
+
+@db_schema_unique_index_name(field_spec: text) -> text {
+    ^ db_schema_field_name(field_spec);
+}
+
+@db_schema_fields_supported(fields_spec: text) -> bool {
+    count0 := db_schema_field_count(fields_spec);
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        type_name := db_schema_field_type(field_spec);
+        ? (count(field_name) == 0 or count(type_name) == 0) {
+            ^ false;
+        }
+        ? (db_schema_field_is_unique(field_spec) and type_name != "i64") {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@db_create_schema_unique_indexes(db: DB, table_name: text, fields_spec: text) -> i64 {
+    count0 := db_schema_field_count(fields_spec);
+    created := 0;
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_is_unique(field_spec)) {
+            built := db_create_index(db, table_name, db_schema_unique_index_name(field_spec));
+            ? (built < 0) {
+                ^ built;
+            }
+            created = created + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ created;
 }
 
 @db_text_is_i64(value: text) -> bool {
@@ -738,6 +806,88 @@
     ^ out;
 }
 
+@db_unique_fields_precheck(db: DB, table_name: text, primary_key: i64, payload: text, fields_spec: text) -> i64 {
+    count0 := db_schema_field_count(fields_spec);
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_is_unique(field_spec)) {
+            field_name := db_schema_field_name(field_spec);
+            value_text := row_get(payload, field_name);
+            ? (not db_text_is_i64(value_text)) {
+                ^ -3;
+            }
+            existing := db_index_get(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text));
+            ? (existing >= 0 and existing != primary_key) {
+                ^ -4;
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ 0;
+}
+
+@db_unique_fields_insert_indexes(db: DB, table_name: text, primary_key: i64, payload: text, fields_spec: text) -> i64 {
+    count0 := db_schema_field_count(fields_spec);
+    inserted := 0;
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_is_unique(field_spec)) {
+            field_name := db_schema_field_name(field_spec);
+            value_text := row_get(payload, field_name);
+            wrote := db_index_insert_unique(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text), primary_key);
+            ? (wrote < 0) {
+                ^ wrote;
+            }
+            inserted = inserted + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ inserted;
+}
+
+@db_unique_fields_update_indexes(db: DB, table_name: text, primary_key: i64, old_payload: text, new_payload: text, fields_spec: text) -> i64 {
+    count0 := db_schema_field_count(fields_spec);
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_is_unique(field_spec)) {
+            field_name := db_schema_field_name(field_spec);
+            old_value := row_get(old_payload, field_name);
+            new_value := row_get(new_payload, field_name);
+            ? (old_value != new_value) {
+                deleted := db_index_delete(db, table_name, db_schema_unique_index_name(field_spec), i64_of(old_value));
+                inserted := db_index_insert_unique(db, table_name, db_schema_unique_index_name(field_spec), i64_of(new_value), primary_key);
+                ? (deleted < 0 or inserted < 0) {
+                    ^ -5;
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ 0;
+}
+
+@db_unique_fields_delete_indexes(db: DB, table_name: text, payload: text, fields_spec: text) -> i64 {
+    count0 := db_schema_field_count(fields_spec);
+    deleted := 0;
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_is_unique(field_spec)) {
+            field_name := db_schema_field_name(field_spec);
+            value_text := row_get(payload, field_name);
+            removed := db_index_delete(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text));
+            ? (removed >= 0) {
+                deleted = deleted + 1;
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ deleted;
+}
+
 @db_insert_row(db: DB, table_name: text, key: i64, payload: text) -> i64 {
     fields_spec := db_table_fields(db, table_name);
     materialized := payload;
@@ -746,8 +896,23 @@
         ? (count(materialized) == 0) {
             ^ -2;
         }
+        unique_ok := db_unique_fields_precheck(db, table_name, key, materialized, fields_spec);
+        ? (unique_ok < 0) {
+            ^ unique_ok;
+        }
     }
-    ^ db_insert(db, table_name, key, materialized);
+    inserted := db_insert(db, table_name, key, materialized);
+    ? (inserted < 0) {
+        ^ inserted;
+    }
+    ? (count(fields_spec) > 0) {
+        indexed := db_unique_fields_insert_indexes(db, table_name, key, materialized, fields_spec);
+        ? (indexed < 0) {
+            rollback := db_delete(db, table_name, key);
+            ^ indexed;
+        }
+    }
+    ^ inserted;
 }
 
 @db_update_row(db: DB, table_name: text, key: i64, payload: text) -> i64 {
@@ -755,15 +920,85 @@
     ? (count(fields_spec) > 0 and not db_row_matches_schema(payload, fields_spec)) {
         ^ -2;
     }
-    ^ db_update(db, table_name, key, payload);
+    old_payload := db_get(db, table_name, key);
+    ? (count(old_payload) == 0) {
+        ^ -1;
+    }
+    ? (count(fields_spec) > 0) {
+        unique_ok := db_unique_fields_precheck(db, table_name, key, payload, fields_spec);
+        ? (unique_ok < 0) {
+            ^ unique_ok;
+        }
+    }
+    updated := db_update(db, table_name, key, payload);
+    ? (updated < 0) {
+        ^ updated;
+    }
+    ? (count(fields_spec) > 0) {
+        synced := db_unique_fields_update_indexes(db, table_name, key, old_payload, payload, fields_spec);
+        ? (synced < 0) {
+            ^ synced;
+        }
+    }
+    ^ updated;
 }
 
 @db_put_row(db: DB, table_name: text, key: i64, payload: text) -> i64 {
     fields_spec := db_table_fields(db, table_name);
-    ? (count(fields_spec) > 0 and not db_row_matches_schema(payload, fields_spec)) {
-        ^ -2;
+    materialized := payload;
+    old_payload := db_get(db, table_name, key);
+    ? (count(fields_spec) > 0) {
+        ? (count(old_payload) == 0) {
+            materialized = db_materialize_insert_row(payload, fields_spec);
+            ? (count(materialized) == 0) {
+                ^ -2;
+            }
+        }
+        ? (count(old_payload) > 0 and not db_row_matches_schema(payload, fields_spec)) {
+            ^ -2;
+        }
+        ? (count(old_payload) > 0) {
+            materialized = payload;
+        }
+        unique_ok := db_unique_fields_precheck(db, table_name, key, materialized, fields_spec);
+        ? (unique_ok < 0) {
+            ^ unique_ok;
+        }
     }
-    ^ db_put(db, table_name, key, payload);
+    wrote := db_put(db, table_name, key, materialized);
+    ? (wrote < 0) {
+        ^ wrote;
+    }
+    ? (count(fields_spec) > 0 and count(old_payload) == 0) {
+        indexed := db_unique_fields_insert_indexes(db, table_name, key, materialized, fields_spec);
+        ? (indexed < 0) {
+            rollback := db_delete(db, table_name, key);
+            ^ indexed;
+        }
+    }
+    ? (count(fields_spec) > 0 and count(old_payload) > 0) {
+        synced := db_unique_fields_update_indexes(db, table_name, key, old_payload, materialized, fields_spec);
+        ? (synced < 0) {
+            ^ synced;
+        }
+    }
+    ^ wrote;
+}
+
+@db_delete_row(db: DB, table_name: text, key: i64) -> i64 {
+    fields_spec := db_table_fields(db, table_name);
+    payload := db_get(db, table_name, key);
+    ? (count(payload) == 0) {
+        ^ -1;
+    }
+    deleted := db_delete(db, table_name, key);
+    ? (deleted < 0) {
+        ^ deleted;
+    }
+    ? (count(fields_spec) > 0) {
+        cleaned := db_unique_fields_delete_indexes(db, table_name, payload, fields_spec);
+    }
+    ^ deleted;
 }
 
 @db_scan_keys_text(db: DB, table_name: text, separator: text) -> text {
