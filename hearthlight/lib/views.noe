@@ -21,6 +21,20 @@
     ^ kiln_html_tag("div", kiln_html_attr("class", "collection-row"), main + extra);
 }
 
+@hearthlight_nav(current_path: text) -> text {
+    dashboard_class := "nav-link";
+    planner_class := "nav-link";
+    ? (current_path == "/") {
+        dashboard_class = "nav-link active";
+    }
+    ? (current_path == "/planner") {
+        planner_class = "nav-link active";
+    }
+    links := kiln_html_tag("a", kiln_html_attr("class", dashboard_class) + kiln_html_attr("href", "/"), kiln_html_text("Dashboard"));
+    links = links + kiln_html_tag("a", kiln_html_attr("class", planner_class) + kiln_html_attr("href", "/planner"), kiln_html_text("Planner"));
+    ^ kiln_html_tag("nav", kiln_html_attr("class", "top-nav"), links);
+}
+
 @hearthlight_flash_html(request: KilnHttpRequest) -> text {
     level := kiln_flash_level(request);
     message := kiln_flash_message(request);
@@ -95,6 +109,60 @@
     cards = cards + hearthlight_card("Household", hearthlight_members_html(db));
     cards = cards + hearthlight_card("Groceries", hearthlight_groceries_html(db));
     cards = cards + hearthlight_card("Chores", hearthlight_chores_html(db));
-    body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hero + hearthlight_flash_html(request) + kiln_html_tag("div", kiln_html_attr("class", "grid"), cards));
+    body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + kiln_html_tag("div", kiln_html_attr("class", "grid"), cards));
     ^ kiln_html_page_with_head("Hearthlight", kiln_html_stylesheet("/assets/site.css"), body);
+}
+
+@hearthlight_planner_week_html(db: DB) -> text {
+    items := "";
+    offset := 0;
+    ~ (offset < 7) {
+        key := hearthlight_day_key(offset);
+        row0 := db_get(db, hearthlight_meals_table(), key);
+        title := row_get(row0, "title");
+        ? (count(title) == 0) {
+            title = "Open night";
+        }
+        notes := row_get(row0, "notes");
+        ? (count(notes) == 0) {
+            notes = "No notes yet.";
+        }
+        badge := kiln_html_tag("span", kiln_html_attr("class", "planner-key"), kiln_html_text(text_of(key)));
+        card_body := kiln_html_tag("p", kiln_html_attr("class", "planner-day"), kiln_html_text(hearthlight_day_label(offset)));
+        card_body = card_body + kiln_html_tag("h3", kiln_html_attr("class", "planner-title"), kiln_html_text(title));
+        card_body = card_body + kiln_html_tag("p", kiln_html_attr("class", "planner-note"), kiln_html_text(notes));
+        items = items + kiln_html_tag("section", kiln_html_attr("class", "planner-card"), badge + card_body);
+        offset = offset + 1;
+    }
+    ^ kiln_html_tag("div", kiln_html_attr("class", "planner-grid"), items);
+}
+
+@hearthlight_planner_form() -> text {
+    day_items :: list<text> := [
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(0))), kiln_html_text("Monday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(1))), kiln_html_text("Tuesday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(2))), kiln_html_text("Wednesday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(3))), kiln_html_text("Thursday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(4))), kiln_html_text("Friday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(5))), kiln_html_text("Saturday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(6))), kiln_html_text("Sunday"))
+    ];
+    select := kiln_html_tag("select", kiln_html_attr("name", "day_key"), day_items[0] + day_items[1] + day_items[2] + day_items[3] + day_items[4] + day_items[5] + day_items[6]);
+    form_body := kiln_html_field("Day", "day_key", select);
+    form_body = form_body + kiln_html_field("Meal", "title", kiln_html_input_text("title", ""));
+    form_body = form_body + kiln_html_field("Notes", "notes", kiln_html_textarea("notes", ""));
+    form_body = form_body + kiln_html_button("Save To Plan");
+    ^ kiln_html_tag("div", kiln_html_attr("class", "composer"), kiln_html_form("post", "/planner/meals", form_body));
+}
+
+@hearthlight_planner_page(db: DB, request: KilnHttpRequest) -> text {
+    household := db_get(db, hearthlight_households_table(), 1);
+    hero_copy := kiln_html_tag("div", kiln_html_attr("class", "hero-copy"), kiln_html_tag("p", kiln_html_attr("class", "eyebrow"), kiln_html_text("Weekly Planning")) + kiln_html_tag("h1", "", kiln_html_text("Meal Plan")) + kiln_html_tag("p", kiln_html_attr("class", "hero-intro"), kiln_html_text("Shape the next seven days around energy, leftovers, and shopping rhythm for " + row_get(household, "name") + ".")));
+    hero_stats := kiln_html_tag("div", kiln_html_attr("class", "hero-stats"), hearthlight_stat("Week starts", "Monday") + hearthlight_stat("Tonight", row_get(db_get(db, hearthlight_meals_table(), hearthlight_today_key()), "title")) + hearthlight_stat("Planning ritual", row_get(household, "planning_day")));
+    hero := kiln_html_tag("section", kiln_html_attr("class", "hero"), hero_copy + hero_stats);
+    main := hearthlight_card("Week At A Glance", hearthlight_planner_week_html(db));
+    side := hearthlight_card("Plan A Meal", hearthlight_planner_form());
+    layout := kiln_html_tag("div", kiln_html_attr("class", "planner-layout"), main + side);
+    body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + layout);
+    ^ kiln_html_page_with_head("Hearthlight Planner", kiln_html_stylesheet("/assets/site.css"), body);
 }

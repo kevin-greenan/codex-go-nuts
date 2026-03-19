@@ -8,6 +8,36 @@
     ^ 20260319;
 }
 
+@hearthlight_week_start_key() -> i64 {
+    ^ 20260316;
+}
+
+@hearthlight_day_key(offset: i64) -> i64 {
+    ^ hearthlight_week_start_key() + offset;
+}
+
+@hearthlight_day_label(offset: i64) -> text {
+    ? (offset == 0) {
+        ^ "Monday";
+    }
+    ? (offset == 1) {
+        ^ "Tuesday";
+    }
+    ? (offset == 2) {
+        ^ "Wednesday";
+    }
+    ? (offset == 3) {
+        ^ "Thursday";
+    }
+    ? (offset == 4) {
+        ^ "Friday";
+    }
+    ? (offset == 5) {
+        ^ "Saturday";
+    }
+    ^ "Sunday";
+}
+
 @hearthlight_households_table() -> text {
     ^ "households";
 }
@@ -109,14 +139,20 @@
     household_ok := hearthlight_insert_if_missing(db, hearthlight_households_table(), 1, hearthlight_household_row("Maple House", "Saturday", "Sunday"));
     member0_ok := hearthlight_insert_if_missing(db, hearthlight_members_table(), 1, hearthlight_member_row("Avery", "Meal planner", "terracotta"));
     member1_ok := hearthlight_insert_if_missing(db, hearthlight_members_table(), 2, hearthlight_member_row("Jordan", "Grocery runner", "sage"));
-    meal_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_today_key(), hearthlight_meal_row("Lemon Pasta", "Fast enough for a busy Thursday.", "Tonight"));
+    meal0_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(0), hearthlight_meal_row("Chickpea Bowls", "Use the last of the tahini and cucumbers.", hearthlight_day_label(0)));
+    meal1_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(1), hearthlight_meal_row("Soup Night", "Double batch for leftovers.", hearthlight_day_label(1)));
+    meal2_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(2), hearthlight_meal_row("Breakfast Tacos", "Easy pantry dinner for the midweek crunch.", hearthlight_day_label(2)));
+    meal3_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(3), hearthlight_meal_row("Lemon Pasta", "Fast enough for a busy Thursday.", "Tonight"));
+    meal4_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(4), hearthlight_meal_row("Leftover Night", "Clear the fridge before shopping day.", hearthlight_day_label(4)));
+    meal5_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(5), hearthlight_meal_row("Market Salad", "Shopping day dinner with crusty bread.", hearthlight_day_label(5)));
+    meal6_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(6), hearthlight_meal_row("Roast Chicken", "Anchor meal for the next week.", hearthlight_day_label(6)));
     grocery0_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 1, hearthlight_grocery_row("Milk", "Dairy", "false"));
     grocery1_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 2, hearthlight_grocery_row("Parsley", "Produce", "false"));
     grocery2_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 3, hearthlight_grocery_row("Olive Oil", "Pantry", "false"));
     chore0_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 1, hearthlight_chore_row("Counters", "Jordan", "Today", "todo"));
     chore1_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 2, hearthlight_chore_row("Laundry", "Avery", "Tomorrow", "todo"));
     chore2_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 3, hearthlight_chore_row("Water herbs", "Jordan", "Tonight", "todo"));
-    ^ household_ok and member0_ok and member1_ok and meal_ok and grocery0_ok and grocery1_ok and grocery2_ok and chore0_ok and chore1_ok and chore2_ok;
+    ^ household_ok and member0_ok and member1_ok and meal0_ok and meal1_ok and meal2_ok and meal3_ok and meal4_ok and meal5_ok and meal6_ok and grocery0_ok and grocery1_ok and grocery2_ok and chore0_ok and chore1_ok and chore2_ok;
 }
 
 @hearthlight_bootstrap(db: DB) -> bool {
@@ -159,6 +195,11 @@
 @hearthlight_add_grocery(db: DB, name: text, section: text) -> i64 {
     payload := hearthlight_grocery_row(name, section, "false");
     ^ db_insert_row(db, hearthlight_groceries_table(), hearthlight_next_key(db, hearthlight_groceries_table()), payload);
+}
+
+@hearthlight_put_meal(db: DB, key: i64, title: text, notes: text, day_label: text) -> i64 {
+    payload := hearthlight_meal_row(title, notes, day_label);
+    ^ db_put_row(db, hearthlight_meals_table(), key, payload);
 }
 
 @hearthlight_complete_chore(db: DB, key: i64) -> i64 {
