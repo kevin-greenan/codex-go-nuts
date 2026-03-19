@@ -1135,6 +1135,107 @@
     ^ out;
 }
 
+@db_predicate_count(predicates: text) -> i64 {
+    ? (count(predicates) == 0) {
+        ^ 0;
+    }
+    count0 := 1;
+    idx := 0;
+    ~ (idx < count(predicates)) {
+        ? (slice(predicates, idx, 1) == ",") {
+            count0 = count0 + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ count0;
+}
+
+@db_predicate_at(predicates: text, predicate_index: i64) -> text {
+    remaining := predicates;
+    idx := 0;
+    ~ (idx < predicate_index) {
+        split_at := find(remaining, ",");
+        ? (split_at < 0) {
+            ^ "";
+        }
+        remaining = slice(remaining, split_at + 1, count(remaining) - (split_at + 1));
+        idx = idx + 1;
+    }
+    split_at := find(remaining, ",");
+    ? (split_at < 0) {
+        ^ remaining;
+    }
+    ^ slice(remaining, 0, split_at);
+}
+
+@db_predicate_field(predicate: text) -> text {
+    eq := find(predicate, "=");
+    ? (eq < 0) {
+        ^ "";
+    }
+    ^ slice(predicate, 0, eq);
+}
+
+@db_predicate_expected_value(predicate: text) -> text {
+    eq := find(predicate, "=");
+    ? (eq < 0) {
+        ^ "";
+    }
+    ^ slice(predicate, eq + 1, count(predicate) - (eq + 1));
+}
+
+@db_predicates_match_row(payload: text, predicates: text) -> bool {
+    predicate_count := db_predicate_count(predicates);
+    idx := 0;
+    ~ (idx < predicate_count) {
+        predicate := db_predicate_at(predicates, idx);
+        field_name := db_predicate_field(predicate);
+        expected_value := db_predicate_expected_value(predicate);
+        ? (count(field_name) == 0 or row_get(payload, field_name) != expected_value) {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@db_scan_where_all_equals_text(db: DB, table_name: text, predicates: text, separator: text) -> text {
+    ? (count(predicates) == 0) {
+        ^ db_scan_text(db, table_name, separator);
+    }
+    key := db_first_key(db, table_name);
+    out := "";
+    ~ (key >= 0) {
+        row0 := db_get(db, table_name, key);
+        ? (count(row0) > 0 and db_predicates_match_row(row0, predicates)) {
+            normalized := row_trim_padding(row0);
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + normalized;
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ out;
+}
+
+@db_scan_where_all_equals_rows_text(db: DB, table_name: text, predicates: text, separator: text) -> text {
+    key := db_first_key(db, table_name);
+    out := "";
+    ~ (key >= 0) {
+        row0 := db_get(db, table_name, key);
+        ? (count(row0) > 0 and (count(predicates) == 0 or db_predicates_match_row(row0, predicates))) {
+            result_row := db_result_row(key, row0);
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + result_row;
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ out;
+}
+
 @db_scan_by_index_key_range_rows_text(db: DB, table_name: text, index_name: text, min_secondary_key: i64, max_secondary_key: i64, separator: text) -> text {
     ? (min_secondary_key > max_secondary_key) {
         ^ "";

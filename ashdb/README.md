@@ -116,7 +116,8 @@ What is already working on `codex/ashdb-foundation`:
 53. table-layout and raw-page inspection helpers for debugging trees and page contents
 54. unreachable-page detection and reclaim helpers for broader repair workflows
 55. field-drop schema migration for non-indexed/non-reference columns
-56. smoke-test coverage through the direct self-hosted compiler
+56. compound equality predicate scans across multiple fields
+57. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -140,7 +141,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Query Surface
 
-1. broader predicate support beyond equality and `i64` field ranges
+1. broader predicate support beyond equality, compound equality, and `i64` field ranges
 2. better result-shape APIs than joined text output
 
 ### Integrity and Recovery Tooling
