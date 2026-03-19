@@ -1,4 +1,9 @@
 @main() -> i64 {
+    ? (arg_count() < 3) {
+        ! "usage: text_pipeline <input-path> <output-path>";
+        ^ 1;
+    }
+
     source := read_text(arg(1));
     prefix := slice(source, 0, 5);
     marker := "bytes=" + text_of(count(source));

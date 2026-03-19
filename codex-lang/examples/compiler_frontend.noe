@@ -27,7 +27,7 @@
 
 @main() -> i64 {
     ? (arg_count() < 2) {
-        ! "usage: frontend_demo <input-path> [output-path]";
+        ! "usage: compiler_frontend <input-path> [output-path]";
         ^ 1;
     }
 
