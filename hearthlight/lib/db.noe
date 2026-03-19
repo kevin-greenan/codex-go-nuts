@@ -543,6 +543,26 @@
     ^ total;
 }
 
+@hearthlight_add_low_stock_staples_to_groceries(db: DB) -> i64 {
+    added := 0;
+    key := db_first_key(db, hearthlight_pantry_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_pantry_table(), key);
+        ? (row_get(row0, "staple") == "true" and i64_of(row_get(row0, "quantity")) <= i64_of(row_get(row0, "threshold"))) {
+            name := row_get(row0, "name");
+            ? (hearthlight_find_open_grocery_key_by_name(db, name) < 0) {
+                inserted := hearthlight_add_grocery(db, name, row_get(row0, "section"));
+                ? (inserted < 0) {
+                    ^ inserted;
+                }
+                added = added + 1;
+            }
+        }
+        key = db_next_key(db, hearthlight_pantry_table(), key);
+    }
+    ^ added;
+}
+
 @hearthlight_open_chore_count(db: DB) -> i64 {
     total := 0;
     key := db_first_key(db, hearthlight_chores_table());

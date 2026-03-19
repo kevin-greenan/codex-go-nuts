@@ -238,6 +238,7 @@ What is already working:
 11. a chores route now supports recurring chore creation, completion history, and completion that advances the next due state instead of just hiding work
 12. a recipes route now stores reusable meals, scores pantry matches, and lets households drop saved recipes directly into the weekly plan
 13. a setup route now lets a real household edit its name and weekly rhythm, and add members without editing seed data
+14. the pantry route now turns low-stock staples into grocery items and surfaces pantry-friendly recipe suggestions directly in the workflow
 
 The current goal is a real vertical slice, not a full product:
 

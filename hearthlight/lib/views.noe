@@ -77,6 +77,34 @@
     ^ hearthlight_collection(items);
 }
 
+@hearthlight_recipe_suggestions_html(db: DB, include_forms: bool, limit: i64) -> text {
+    items := "";
+    key := db_first_key(db, hearthlight_recipes_table());
+    shown := 0;
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_recipes_table(), key);
+        ingredients := row_get(row0, "ingredients");
+        match_count := hearthlight_recipe_match_count(db, ingredients);
+        total_count := hearthlight_count_named_ingredients(ingredients);
+        ? (match_count > 0 and shown < limit) {
+            extra := kiln_html_tag("span", kiln_html_attr("class", "section-pill"), kiln_html_text(text_of(match_count) + "/" + text_of(total_count) + " pantry"));
+            ? (include_forms) {
+                form_body := kiln_html_tag("input", kiln_html_attr("type", "hidden") + kiln_html_attr("name", "recipe_key") + kiln_html_attr("value", text_of(key)), "");
+                form_body = form_body + hearthlight_recipe_picker_form();
+                planner_form := kiln_html_tag("div", kiln_html_attr("class", "quiet-button"), kiln_html_form("post", "/planner/recipes", form_body));
+                extra = extra + planner_form;
+            }
+            items = items + hearthlight_collection_row(row_get(row0, "name"), row_get(row0, "notes"), extra);
+            shown = shown + 1;
+        }
+        key = db_next_key(db, hearthlight_recipes_table(), key);
+    }
+    ? (count(items) == 0) {
+        items = kiln_html_tag("p", kiln_html_attr("class", "meta"), kiln_html_text("No pantry-friendly recipes are standing out yet."));
+    }
+    ^ hearthlight_collection(items);
+}
+
 @hearthlight_meal_html(db: DB) -> text {
     result := db_get_result(db, hearthlight_meals_table(), hearthlight_today_key());
     ? (row_get(result, "found") != "true") {
@@ -183,6 +211,7 @@
     cards = cards + hearthlight_card("Groceries", hearthlight_groceries_html(db));
     cards = cards + hearthlight_card("Pantry", hearthlight_pantry_preview_html(db));
     cards = cards + hearthlight_card("Chores", hearthlight_chores_html(db));
+    cards = cards + hearthlight_card("Cook From Pantry", hearthlight_recipe_suggestions_html(db, false, 3));
     cards = cards + hearthlight_card("Next Three Days", hearthlight_next_days_html(db));
     body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + kiln_html_tag("div", kiln_html_attr("class", "grid"), cards));
     ^ kiln_html_page_with_head("Hearthlight", kiln_html_stylesheet("/assets/site.css"), body);
@@ -276,7 +305,7 @@
     ^ kiln_html_tag("div", kiln_html_attr("class", "composer"), kiln_html_form("post", "/planner/meals", form_body));
 }
 
-@hearthlight_recipe_picker_form(db: DB) -> text {
+@hearthlight_recipe_picker_form() -> text {
     day_items :: list<text> := [
         kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(0))), kiln_html_text("Monday")),
         kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(1))), kiln_html_text("Tuesday")),
@@ -302,7 +331,7 @@
         extra := kiln_html_tag("span", kiln_html_attr("class", "section-pill"), kiln_html_text(tempo));
         ? (include_forms) {
             form_body := kiln_html_tag("input", kiln_html_attr("type", "hidden") + kiln_html_attr("name", "recipe_key") + kiln_html_attr("value", text_of(key)), "");
-            form_body = form_body + hearthlight_recipe_picker_form(db);
+            form_body = form_body + hearthlight_recipe_picker_form();
             planner_form := kiln_html_tag("div", kiln_html_attr("class", "quiet-button"), kiln_html_form("post", "/planner/recipes", form_body));
             extra = extra + planner_form;
         }
@@ -384,7 +413,11 @@
     hero_stats := kiln_html_tag("div", kiln_html_attr("class", "hero-stats"), hearthlight_stat("Low stock staples", text_of(hearthlight_pantry_low_stock_count(db))) + hearthlight_stat("Shopping day", row_get(household, "shopping_day")) + hearthlight_stat("Recent purchase flow", "Groceries → Pantry"));
     hero := kiln_html_tag("section", kiln_html_attr("class", "hero"), hero_copy + hero_stats);
     inventory := hearthlight_card("Current Pantry", hearthlight_pantry_collection_html(db));
-    body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + inventory);
+    restock_body := kiln_html_tag("p", kiln_html_attr("class", "meta"), kiln_html_text("Turn low-stock staples into grocery items before the next shopping run."));
+    restock_body = restock_body + kiln_html_tag("div", kiln_html_attr("class", "quiet-button"), kiln_html_form("post", "/pantry/restock", kiln_html_button("Add Low Stock Staples")));
+    restock := hearthlight_card("Restock Staples", restock_body);
+    suggestions := hearthlight_card("Pantry-Friendly Recipes", hearthlight_recipe_suggestions_html(db, true, 4));
+    body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + kiln_html_tag("div", kiln_html_attr("class", "planner-layout"), inventory + kiln_html_tag("div", kiln_html_attr("class", "stack"), restock + suggestions)));
     ^ kiln_html_page_with_head("Hearthlight Pantry", kiln_html_stylesheet("/assets/site.css"), body);
 }
 

@@ -15,6 +15,7 @@
         kiln_route("POST", "/recipes", "recipe-create"),
         kiln_route("POST", "/setup/household", "setup-household"),
         kiln_route("POST", "/setup/members", "setup-member"),
+        kiln_route("POST", "/pantry/restock", "pantry-restock"),
         kiln_route("POST", "/groceries", "grocery-create"),
         kiln_route("POST", "/chores", "chore-create"),
         kiln_route("POST", "/groceries/:id/purchase", "grocery-purchase"),
@@ -220,6 +221,26 @@
     ^ kiln_reply_with_flash(kiln_reply_redirect("/setup"), "success", "Added " + name + " to the household.");
 }
 
+@hearthlight_handle_pantry_restock(db: DB) -> KilnReply {
+    began := db_begin(db);
+    ? (not began) {
+        ^ kiln_reply_text(500, "unable to begin pantry restock transaction");
+    }
+    added := hearthlight_add_low_stock_staples_to_groceries(db);
+    ? (added < 0) {
+        rolled := db_rollback(db);
+        ^ kiln_reply_with_flash(kiln_reply_redirect("/pantry"), "notice", "Hearthlight could not build a restock list right now.");
+    }
+    committed := db_commit(db);
+    ? (not committed) {
+        ^ kiln_reply_text(500, "unable to commit pantry restock transaction");
+    }
+    ? (added == 0) {
+        ^ kiln_reply_with_flash(kiln_reply_redirect("/pantry"), "notice", "All low-stock staples were already on the grocery list.");
+    }
+    ^ kiln_reply_with_flash(kiln_reply_redirect("/pantry"), "success", "Added " + text_of(added) + " low-stock staples to groceries.");
+}
+
 @hearthlight_handle_chore_complete(db: DB, chore_id_text: text) -> KilnReply {
     ? (count(chore_id_text) == 0) {
         ^ hearthlight_redirect_with_flash("notice", "That chore link was missing an id.");
@@ -379,6 +400,9 @@
     }
     ? (kiln_dispatch_is(dispatch, "setup-member")) {
         ^ hearthlight_handle_member_create(db, request);
+    }
+    ? (kiln_dispatch_is(dispatch, "pantry-restock")) {
+        ^ hearthlight_handle_pantry_restock(db);
     }
     ? (kiln_dispatch_is(dispatch, "grocery-create")) {
         ^ hearthlight_handle_grocery_create(db, request);
