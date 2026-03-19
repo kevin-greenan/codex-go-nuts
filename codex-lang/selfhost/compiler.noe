@@ -1298,6 +1298,9 @@
     ? (ty == "text") {
         ^ "noema_list_append_text";
     }
+    ? (ty == "bytes") {
+        ^ "noema_list_append_bytes";
+    }
     ? (ty == "file") {
         ^ "noema_list_append_file";
     }
@@ -1344,6 +1347,9 @@
     }
     ? (ty == "text") {
         ^ "noema_text";
+    }
+    ? (ty == "bytes") {
+        ^ "noema_bytes";
     }
     ? (ty == "file") {
         ^ "noema_file";
@@ -1417,6 +1423,9 @@
         ? (expr.op == "+" and (left_ty == "text" or right_ty == "text")) {
             ^ "text";
         }
+        ? (expr.op == "+" and (left_ty == "bytes" or right_ty == "bytes")) {
+            ^ "bytes";
+        }
         ? (expr.op == "==" or expr.op == "!=" or expr.op == "<" or expr.op == "<=" or expr.op == ">" or expr.op == ">=" or expr.op == "and" or expr.op == "or") {
             ^ "bool";
         }
@@ -1447,6 +1456,9 @@
         ? (expr.name == "file_read") {
             ^ "text";
         }
+        ? (expr.name == "file_read_bytes") {
+            ^ "bytes";
+        }
         ? (expr.name == "file_write") {
             ^ "i64";
         }
@@ -1468,7 +1480,18 @@
             ^ "i64";
         }
         ? (expr.name == "slice") {
+            slice_args := expr.args;
+            arg0_ty := infer_expr_type(program, fn, locals, slice_args[0]);
+            ^ arg0_ty;
+        }
+        ? (expr.name == "bytes_of_text") {
+            ^ "bytes";
+        }
+        ? (expr.name == "text_of_bytes") {
             ^ "text";
+        }
+        ? (expr.name == "bytes_xor") {
+            ^ "bytes";
         }
         ? (expr.name == "text_of") {
             ^ "text";
@@ -1571,7 +1594,14 @@
     ? (name == "file_read") {
         ^ "noema_file_read(" + emit_args(program, fn, locals, args) + ")";
     }
+    ? (name == "file_read_bytes") {
+        ^ "noema_file_read_bytes(" + emit_args(program, fn, locals, args) + ")";
+    }
     ? (name == "file_write") {
+        value_ty := infer_expr_type(program, fn, locals, args[2]);
+        ? (value_ty == "bytes") {
+            ^ "noema_file_write_bytes(" + emit_args(program, fn, locals, args) + ")";
+        }
         ^ "noema_file_write(" + emit_args(program, fn, locals, args) + ")";
     }
     ? (name == "file_sync") {
@@ -1584,6 +1614,9 @@
         arg_ty := infer_expr_type(program, fn, locals, args[0]);
         ? (is_list_type(arg_ty)) {
             ^ "noema_list_count(" + emit_args(program, fn, locals, args) + ")";
+        }
+        ? (arg_ty == "bytes") {
+            ^ "noema_bytes_count(" + emit_args(program, fn, locals, args) + ")";
         }
         ^ "noema_text_count(" + emit_args(program, fn, locals, args) + ")";
     }
@@ -1598,6 +1631,10 @@
         ^ "noema_text_find(" + emit_args(program, fn, locals, args) + ")";
     }
     ? (name == "slice") {
+        arg_ty := infer_expr_type(program, fn, locals, args[0]);
+        ? (arg_ty == "bytes") {
+            ^ "noema_bytes_slice(" + emit_args(program, fn, locals, args) + ")";
+        }
         ^ "noema_text_slice(" + emit_args(program, fn, locals, args) + ")";
     }
     ? (name == "i64_of") {
@@ -1628,6 +1665,15 @@
             ^ "noema_text_from_bool(" + arg_code + ")";
         }
         ^ arg_code;
+    }
+    ? (name == "bytes_of_text") {
+        ^ "noema_bytes_from_text(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "text_of_bytes") {
+        ^ "noema_text_from_bytes(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "bytes_xor") {
+        ^ "noema_bytes_xor(" + emit_args(program, fn, locals, args) + ")";
     }
     ^ c_name(name) + "(" + emit_args(program, fn, locals, args) + ")";
 }
@@ -1722,11 +1768,20 @@
         ? (expr.op == "+" and (left_ty == "text" or right_ty == "text")) {
             ^ "noema_text_concat(" + left_code + ", " + right_code + ")";
         }
+        ? (expr.op == "+" and (left_ty == "bytes" or right_ty == "bytes")) {
+            ^ "noema_bytes_concat(" + left_code + ", " + right_code + ")";
+        }
         ? (expr.op == "==" and left_ty == "text" and right_ty == "text") {
             ^ "noema_text_eq(" + left_code + ", " + right_code + ")";
         }
         ? (expr.op == "!=" and left_ty == "text" and right_ty == "text") {
             ^ "(!noema_text_eq(" + left_code + ", " + right_code + "))";
+        }
+        ? (expr.op == "==" and left_ty == "bytes" and right_ty == "bytes") {
+            ^ "noema_bytes_eq(" + left_code + ", " + right_code + ")";
+        }
+        ? (expr.op == "!=" and left_ty == "bytes" and right_ty == "bytes") {
+            ^ "(!noema_bytes_eq(" + left_code + ", " + right_code + "))";
         }
         ? (expr.op == "and") {
             ^ "(" + left_code + " && " + right_code + ")";
@@ -1861,6 +1916,7 @@
     out = out + "static noema_list noema_list_append_i64(noema_list list, noema_i64 value) { return noema_list_append_raw(list, &value, sizeof(noema_i64)); }\n";
     out = out + "static noema_list noema_list_append_bool(noema_list list, bool value) { return noema_list_append_raw(list, &value, sizeof(bool)); }\n";
     out = out + "static noema_list noema_list_append_text(noema_list list, noema_text value) { return noema_list_append_raw(list, &value, sizeof(noema_text)); }\n";
+    out = out + "static noema_list noema_list_append_bytes(noema_list list, noema_bytes value) { return noema_list_append_raw(list, &value, sizeof(noema_bytes)); }\n";
     out = out + "static noema_list noema_list_append_file(noema_list list, noema_file value) { return noema_list_append_raw(list, &value, sizeof(noema_file)); }\n";
     out = out + "static noema_list noema_list_append_socket(noema_list list, noema_socket value) { return noema_list_append_raw(list, &value, sizeof(noema_socket)); }\n";
     out = out + "static noema_list noema_list_append_list(noema_list list, noema_list value) { return noema_list_append_raw(list, &value, sizeof(noema_list)); }\n";
@@ -1948,6 +2004,7 @@
     out = out + "%:include <unistd.h>\n\n";
     out = out + "typedef int64_t noema_i64;\n\n";
     out = out + "typedef struct { noema_i64 len; const char *data; } noema_text;\n";
+    out = out + "typedef noema_text noema_bytes;\n";
     out = out + "typedef struct { int fd; } noema_file;\n";
     out = out + "typedef struct { int fd; } noema_socket;\n";
     out = out + "typedef struct { noema_i64 len; void *items; } noema_list;\n";
@@ -1968,6 +2025,8 @@
     out = out + "    return buffer;\n";
     out = out + "}\n\n";
     out = out + "static noema_i64 noema_text_count(noema_text text) { return text.len; }\n\n";
+    out = out + "static noema_bytes noema_bytes_literal(const char *data, noema_i64 len) { return noema_text_literal(data, len); }\n\n";
+    out = out + "static noema_i64 noema_bytes_count(noema_bytes bytes) { return bytes.len; }\n\n";
     out = out + "static noema_list noema_list_build(const void *items, noema_i64 len, size_t item_size) {\n";
     out = out + "    noema_list list;\n";
     out = out + "    list.len = len;\n";
@@ -2003,7 +2062,14 @@
     out = out + "static noema_text noema_text_slice(noema_text text, noema_i64 start, noema_i64 len) {\n";
     out = out + "    return noema_text_literal(text.data + start, len);\n";
     out = out + "}\n\n";
+    out = out + "static noema_bytes noema_bytes_slice(noema_bytes bytes, noema_i64 start, noema_i64 len) {\n";
+    out = out + "    return noema_bytes_literal(bytes.data + start, len);\n";
+    out = out + "}\n\n";
     out = out + "static bool noema_text_eq(noema_text left, noema_text right) {\n";
+    out = out + "    if (left.len != right.len) return 0;\n";
+    out = out + "    return memcmp(left.data, right.data, (size_t)left.len) == 0;\n";
+    out = out + "}\n\n";
+    out = out + "static bool noema_bytes_eq(noema_bytes left, noema_bytes right) {\n";
     out = out + "    if (left.len != right.len) return 0;\n";
     out = out + "    return memcmp(left.data, right.data, (size_t)left.len) == 0;\n";
     out = out + "}\n\n";
@@ -2013,6 +2079,27 @@
     out = out + "    memcpy(buffer + left.len, right.data, (size_t)right.len);\n";
     out = out + "    buffer[left.len + right.len] = '\\0';\n";
     out = out + "    return noema_text_literal(buffer, left.len + right.len);\n";
+    out = out + "}\n\n";
+    out = out + "static noema_bytes noema_bytes_concat(noema_bytes left, noema_bytes right) {\n";
+    out = out + "    char *buffer = (char *)noema_alloc((size_t)(left.len + right.len + 1));\n";
+    out = out + "    memcpy(buffer, left.data, (size_t)left.len);\n";
+    out = out + "    memcpy(buffer + left.len, right.data, (size_t)right.len);\n";
+    out = out + "    buffer[left.len + right.len] = '\\0';\n";
+    out = out + "    return noema_bytes_literal(buffer, left.len + right.len);\n";
+    out = out + "}\n\n";
+    out = out + "static noema_bytes noema_bytes_from_text(noema_text text) { return noema_bytes_literal(text.data, text.len); }\n\n";
+    out = out + "static noema_text noema_text_from_bytes(noema_bytes bytes) { return noema_text_literal(bytes.data, bytes.len); }\n\n";
+    out = out + "static noema_bytes noema_bytes_xor(noema_bytes left, noema_bytes right) {\n";
+    out = out + "    noema_i64 index = 0;\n";
+    out = out + "    char *buffer;\n";
+    out = out + "    if (left.len != right.len) return noema_bytes_literal((const char *)0, 0);\n";
+    out = out + "    buffer = (char *)noema_alloc((size_t)left.len + 1);\n";
+    out = out + "    while (index < left.len) {\n";
+    out = out + "        buffer[index] = (char)(((unsigned char)left.data[index]) ^ ((unsigned char)right.data[index]));\n";
+    out = out + "        index += 1;\n";
+    out = out + "    }\n";
+    out = out + "    buffer[left.len] = '\\0';\n";
+    out = out + "    return noema_bytes_literal(buffer, left.len);\n";
     out = out + "}\n\n";
     out = out + "static noema_text noema_text_from_i64(noema_i64 value) {\n";
     out = out + "    char stack_buffer[64];\n";
@@ -2078,6 +2165,10 @@
     out = out + "    buffer[got] = '\\0';\n";
     out = out + "    return noema_text_literal(buffer, (noema_i64)got);\n";
     out = out + "}\n\n";
+    out = out + "static noema_bytes noema_file_read_bytes(noema_file file_value, noema_i64 offset, noema_i64 len) {\n";
+    out = out + "    noema_text text = noema_file_read(file_value, offset, len);\n";
+    out = out + "    return noema_bytes_literal(text.data, text.len);\n";
+    out = out + "}\n\n";
     out = out + "static noema_i64 noema_file_write(noema_file file_value, noema_i64 offset, noema_text text) {\n";
     out = out + "    noema_i64 total = 0;\n";
     out = out + "    if (offset < 0) { fprintf(stderr, \"invalid file_write offset\\n\"); exit(1); }\n";
@@ -2087,6 +2178,9 @@
     out = out + "        total = total + wrote;\n";
     out = out + "    }\n";
     out = out + "    return total;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_i64 noema_file_write_bytes(noema_file file_value, noema_i64 offset, noema_bytes bytes) {\n";
+    out = out + "    return noema_file_write(file_value, offset, noema_text_from_bytes(bytes));\n";
     out = out + "}\n\n";
     out = out + "static bool noema_file_sync(noema_file file_value) { return fsync(file_value.fd) == 0; }\n\n";
     out = out + "static noema_i64 noema_host_cc(noema_text source_path, noema_text output_path) {\n";
@@ -2464,6 +2558,16 @@
             arg2_ok := native_supported_expr(program, fn, locals, args[2]);
             ^ arg0_ok and arg1_ok and arg2_ok;
         }
+        ? (expr.name == "file_read_bytes") {
+            args := expr.args;
+            ? (count(args) != 3) {
+                ^ false;
+            }
+            arg0_ok := native_supported_expr(program, fn, locals, args[0]);
+            arg1_ok := native_supported_expr(program, fn, locals, args[1]);
+            arg2_ok := native_supported_expr(program, fn, locals, args[2]);
+            ^ arg0_ok and arg1_ok and arg2_ok;
+        }
         ? (expr.name == "file_write") {
             args := expr.args;
             ? (count(args) != 3) {
@@ -2514,6 +2618,29 @@
             arg0_ok := native_supported_expr(program, fn, locals, arg0);
             ^ arg0_ok;
         }
+        ? (expr.name == "bytes_of_text") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
+        }
+        ? (expr.name == "text_of_bytes") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
+        }
+        ? (expr.name == "bytes_xor") {
+            args := expr.args;
+            ? (count(args) != 2) {
+                ^ false;
+            }
+            arg0_ok := native_supported_expr(program, fn, locals, args[0]);
+            arg1_ok := native_supported_expr(program, fn, locals, args[1]);
+            ^ arg0_ok and arg1_ok;
+        }
         ? (expr.name == "i64_of") {
             args := expr.args;
             ? (count(args) != 1) {
@@ -2542,7 +2669,7 @@
             arg0 := args[0];
             arg_ty := infer_expr_type(program, fn, locals, arg0);
             arg_ok := native_supported_expr(program, fn, locals, arg0);
-            ^ (is_list_type(arg_ty) or arg_ty == "text") and arg_ok;
+            ^ (is_list_type(arg_ty) or arg_ty == "text" or arg_ty == "bytes") and arg_ok;
         }
         ? (expr.name == "append") {
             ? (count(expr.args) != 2) {
@@ -2586,8 +2713,14 @@
         ? (expr.op == "+" and (left_ty == "text" or right_ty == "text")) {
             ^ native_supported_expr(program, fn, locals, expr.left) and native_supported_expr(program, fn, locals, expr.right);
         }
+        ? (expr.op == "+" and (left_ty == "bytes" or right_ty == "bytes")) {
+            ^ native_supported_expr(program, fn, locals, expr.left) and native_supported_expr(program, fn, locals, expr.right);
+        }
         text_cmp := expr.op == "==" or expr.op == "!=";
         ? (text_cmp and left_ty == "text" and right_ty == "text") {
+            ^ native_supported_expr(program, fn, locals, expr.left) and native_supported_expr(program, fn, locals, expr.right);
+        }
+        ? (text_cmp and left_ty == "bytes" and right_ty == "bytes") {
             ^ native_supported_expr(program, fn, locals, expr.left) and native_supported_expr(program, fn, locals, expr.right);
         }
         ? (expr.op != "+" and expr.op != "-" and expr.op != "*" and expr.op != "/" and expr.op != "<" and expr.op != "<=" and expr.op != ">" and expr.op != ">=" and expr.op != "==" and expr.op != "!=" and expr.op != "and" and expr.op != "or") {
@@ -2805,6 +2938,20 @@
             out = out + "    bl _noema_file_read_native\n";
             ^ out;
         }
+        ? (expr.name == "file_read_bytes") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, args[1]);
+            out = out + "    str x0, [sp, #8]\n";
+            out = out + native_expr(program, fn, locals, args[2]);
+            out = out + "    mov x2, x0\n";
+            out = out + "    ldr x1, [sp, #8]\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_file_read_bytes_native\n";
+            ^ out;
+        }
         ? (expr.name == "file_write") {
             out := native_expr(program, fn, locals, args[0]);
             out = out + "    sub sp, sp, #32\n";
@@ -2816,6 +2963,11 @@
             out = out + "    ldr x1, [sp, #8]\n";
             out = out + "    ldr x0, [sp]\n";
             out = out + "    add sp, sp, #32\n";
+            value_ty := infer_expr_type(program, fn, locals, args[2]);
+            ? (value_ty == "bytes") {
+                out = out + "    bl _noema_file_write_bytes_native\n";
+                ^ out;
+            }
             out = out + "    bl _noema_file_write_native\n";
             ^ out;
         }
@@ -2831,6 +2983,12 @@
                 out = out + "    bl _noema_text_count_native\n";
             }
             | {
+                ? (arg_ty == "bytes") {
+                    out = out + "    bl _noema_bytes_count_native\n";
+                    ^ out;
+                }
+            }
+            ? (arg_ty != "text" and arg_ty != "bytes") {
                 out = out + "    bl _noema_list_count_native\n";
             }
             ^ out;
@@ -2868,6 +3026,11 @@
             out = out + "    ldr x1, [sp, #16]\n";
             out = out + "    ldr x0, [sp]\n";
             out = out + "    add sp, sp, #32\n";
+            value_ty := infer_expr_type(program, fn, locals, args[0]);
+            ? (value_ty == "bytes") {
+                out = out + "    bl _noema_bytes_slice_native\n";
+                ^ out;
+            }
             out = out + "    bl _noema_text_slice_native\n";
             ^ out;
         }
@@ -2882,6 +3045,27 @@
                 out = out + "    bl _noema_text_from_bool_native\n";
                 ^ out;
             }
+            ^ out;
+        }
+        ? (expr.name == "bytes_of_text") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_bytes_from_text_native\n";
+            ^ out;
+        }
+        ? (expr.name == "text_of_bytes") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_text_from_bytes_native\n";
+            ^ out;
+        }
+        ? (expr.name == "bytes_xor") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, args[1]);
+            out = out + "    mov x1, x0\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_bytes_xor_native\n";
             ^ out;
         }
         ? (expr.name == "i64_of") {
@@ -2935,6 +3119,17 @@
             out = out + "    bl _noema_text_concat_native\n";
             ^ out;
         }
+        ? (expr.op == "+" and (left_ty == "bytes" or right_ty == "bytes")) {
+            out := native_expr(program, fn, locals, expr.left);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, expr.right);
+            out = out + "    mov x1, x0\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_bytes_concat_native\n";
+            ^ out;
+        }
         text_cmp := expr.op == "==" or expr.op == "!=";
         ? (text_cmp and left_ty == "text" and right_ty == "text") {
             out := native_expr(program, fn, locals, expr.left);
@@ -2945,6 +3140,20 @@
             out = out + "    ldr x0, [sp]\n";
             out = out + "    add sp, sp, #16\n";
             out = out + "    bl _noema_text_eq_native\n";
+            ? (expr.op == "!=") {
+                out = out + "    eor x0, x0, #1\n";
+            }
+            ^ out;
+        }
+        ? (text_cmp and left_ty == "bytes" and right_ty == "bytes") {
+            out := native_expr(program, fn, locals, expr.left);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, expr.right);
+            out = out + "    mov x1, x0\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_bytes_eq_native\n";
             ? (expr.op == "!=") {
                 out = out + "    eor x0, x0, #1\n";
             }
@@ -3154,6 +3363,8 @@
     out = out + "_noema_text_count_native:\n";
     out = out + "    ldr x0, [x0]\n";
     out = out + "    ret\n\n";
+    out = out + "_noema_bytes_count_native:\n";
+    out = out + "    b _noema_text_count_native\n\n";
     out = out + "_noema_text_to_cstr_native:\n";
     out = out + "    stp x29, x30, [sp, #-16]!\n";
     out = out + "    mov x29, sp\n";
@@ -3403,6 +3614,8 @@
     out = out + "    add sp, sp, #32\n";
     out = out + "    ldp x29, x30, [sp], #16\n";
     out = out + "    ret\n\n";
+    out = out + "_noema_file_read_bytes_native:\n";
+    out = out + "    b _noema_file_read_native\n\n";
     out = out + "_noema_file_write_native:\n";
     out = out + "    stp x29, x30, [sp, #-16]!\n";
     out = out + "    mov x29, sp\n";
@@ -3420,6 +3633,8 @@
     out = out + "    add sp, sp, #32\n";
     out = out + "    ldp x29, x30, [sp], #16\n";
     out = out + "    ret\n\n";
+    out = out + "_noema_file_write_bytes_native:\n";
+    out = out + "    b _noema_file_write_native\n\n";
     out = out + "_noema_file_sync_native:\n";
     out = out + "    stp x29, x30, [sp, #-16]!\n";
     out = out + "    mov x29, sp\n";
@@ -3453,6 +3668,8 @@
     out = out + "    add sp, sp, #32\n";
     out = out + "    ldp x29, x30, [sp], #16\n";
     out = out + "    ret\n\n";
+    out = out + "_noema_bytes_eq_native:\n";
+    out = out + "    b _noema_text_eq_native\n\n";
     out = out + "_noema_text_concat_native:\n";
     out = out + "    stp x29, x30, [sp, #-16]!\n";
     out = out + "    mov x29, sp\n";
@@ -3489,6 +3706,8 @@
     out = out + "    add sp, sp, #64\n";
     out = out + "    ldp x29, x30, [sp], #16\n";
     out = out + "    ret\n\n";
+    out = out + "_noema_bytes_concat_native:\n";
+    out = out + "    b _noema_text_concat_native\n\n";
     out = out + "_noema_text_find_native:\n";
     out = out + "    stp x29, x30, [sp, #-16]!\n";
     out = out + "    mov x29, sp\n";
@@ -3542,6 +3761,8 @@
     out = out + "    add x0, x9, x1\n";
     out = out + "    mov x1, x2\n";
     out = out + "    b _noema_text_from_parts_native\n\n";
+    out = out + "_noema_bytes_slice_native:\n";
+    out = out + "    b _noema_text_slice_native\n\n";
     out = out + "_noema_text_from_i64_native:\n";
     out = out + "    stp x29, x30, [sp, #-16]!\n";
     out = out + "    mov x29, sp\n";
@@ -3574,6 +3795,57 @@
     out = out + false_label;
     out = out + "    mov x1, #5\n";
     out = out + "    b _noema_text_from_parts_native\n\n";
+    out = out + "_noema_bytes_from_text_native:\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_text_from_bytes_native:\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_bytes_xor_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #48\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    str x1, [sp, #8]\n";
+    out = out + "    ldr x9, [x0]\n";
+    out = out + "    ldr x10, [x1]\n";
+    out = out + "    cmp x9, x10\n";
+    out = out + "    b.ne L_bytes_xor_bad_len\n";
+    out = out + "    str x9, [sp, #16]\n";
+    out = out + "    add x0, x9, #1\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    str x0, [sp, #24]\n";
+    out = out + "    mov x11, #0\n";
+    out = out + "L_bytes_xor_loop:\n";
+    out = out + "    ldr x12, [sp, #16]\n";
+    out = out + "    cmp x11, x12\n";
+    out = out + "    b.ge L_bytes_xor_done\n";
+    out = out + "    ldr x13, [sp]\n";
+    out = out + "    ldr x13, [x13, #8]\n";
+    out = out + "    ldrb w14, [x13, x11]\n";
+    out = out + "    ldr x15, [sp, #8]\n";
+    out = out + "    ldr x15, [x15, #8]\n";
+    out = out + "    ldrb w16, [x15, x11]\n";
+    out = out + "    eor w14, w14, w16\n";
+    out = out + "    ldr x17, [sp, #24]\n";
+    out = out + "    strb w14, [x17, x11]\n";
+    out = out + "    add x11, x11, #1\n";
+    out = out + "    b L_bytes_xor_loop\n";
+    out = out + "L_bytes_xor_done:\n";
+    out = out + "    ldr x9, [sp, #24]\n";
+    out = out + "    ldr x10, [sp, #16]\n";
+    out = out + "    strb wzr, [x9, x10]\n";
+    out = out + "    mov x0, x9\n";
+    out = out + "    mov x1, x10\n";
+    out = out + "    bl _noema_text_from_parts_native\n";
+    out = out + "    add sp, sp, #48\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n";
+    out = out + "L_bytes_xor_bad_len:\n";
+    out = out + "    mov x0, #0\n";
+    out = out + "    mov x1, #0\n";
+    out = out + "    bl _noema_text_from_parts_native\n";
+    out = out + "    add sp, sp, #48\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
     out = out + "_noema_i64_of_native:\n";
     out = out + "    stp x29, x30, [sp, #-16]!\n";
     out = out + "    mov x29, sp\n";
