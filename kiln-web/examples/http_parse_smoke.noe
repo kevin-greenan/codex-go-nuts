@@ -1,7 +1,7 @@
 & "../lib/http.noe";
 
 @main() -> i64 {
-    raw := "POST /submit?ok=1&name=ada+lovelace HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=ada+lovelace&role=math%20pioneer";
+    raw := "POST /submit?ok=1&name=ada+lovelace HTTP/1.1\r\nHost: localhost\r\nX-Tag: one\r\nX-Tag: two\r\nCookie: session=abc123; theme=light\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=ada+lovelace&role=math%20pioneer";
     request := kiln_http_parse_request(raw);
     ? (request.method != "POST") {
         ! "method mismatch";
@@ -22,6 +22,18 @@
     ? (kiln_http_header_value(request.headers, "Content-Type") != "application/x-www-form-urlencoded") {
         ! "content-type mismatch";
         ^ 5;
+    }
+    ? (kiln_http_header_values(request.headers, "X-Tag") != "one;two;") {
+        ! "repeated header mismatch";
+        ^ 15;
+    }
+    ? (kiln_http_cookie_value(request.headers, "session") != "abc123") {
+        ! "cookie session mismatch";
+        ^ 16;
+    }
+    ? (kiln_http_cookie_value(request.headers, "theme") != "light") {
+        ! "cookie theme mismatch";
+        ^ 17;
     }
     ? (request.body != "name=ada+lovelace&role=math%20pioneer") {
         ! "body mismatch";

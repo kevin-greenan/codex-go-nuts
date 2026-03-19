@@ -1,0 +1,34 @@
+& "../lib/http.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: cookie_server <port>";
+        ^ 1;
+    }
+
+    port := i64_of(arg(1));
+    listener := listener_open(port);
+    conn := listener_accept(listener);
+    raw := socket_recv(conn, 4096);
+    request := kiln_http_parse_request(raw);
+
+    body := "session=" + kiln_http_cookie_value(request.headers, "session");
+    body = body + ";theme=" + kiln_http_cookie_value(request.headers, "theme");
+    body = body + ";tags=" + kiln_http_header_values(request.headers, "X-Tag");
+
+    response := kiln_http_text(200, body);
+    wrote := socket_send(conn, response);
+    closed_conn := socket_close(conn);
+    closed_listener := listener_close(listener);
+
+    ? (wrote <= 0) {
+        ^ 2;
+    }
+    ? (not closed_conn or not closed_listener) {
+        ^ 3;
+    }
+    ? (request.version != "HTTP/1.1") {
+        ^ 4;
+    }
+    ^ 0;
+}

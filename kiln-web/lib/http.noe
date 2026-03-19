@@ -132,6 +132,63 @@
     ^ kiln_http_trim_trailing_cr(slice(tail, 0, line_end));
 }
 
+@kiln_http_header_line_at(headers: text, line_index: i64) -> text {
+    remaining := headers;
+    idx := 0;
+    ~ (idx < line_index) {
+        line_end := find(remaining, kiln_http_line_sep());
+        ? (line_end < 0) {
+            ^ "";
+        }
+        next_start := line_end + count(kiln_http_line_sep());
+        remaining = slice(remaining, next_start, count(remaining) - next_start);
+        idx = idx + 1;
+    }
+
+    line_end := find(remaining, kiln_http_line_sep());
+    ? (line_end < 0) {
+        ^ kiln_http_trim_trailing_cr(remaining);
+    }
+    ^ kiln_http_trim_trailing_cr(slice(remaining, 0, line_end));
+}
+
+@kiln_http_header_name(line: text) -> text {
+    colon := find(line, ":");
+    ? (colon < 0) {
+        ^ "";
+    }
+    ^ slice(line, 0, colon);
+}
+
+@kiln_http_header_line_value(line: text) -> text {
+    colon := find(line, ":");
+    ? (colon < 0) {
+        ^ "";
+    }
+    value_start := colon + 1;
+    value := slice(line, value_start, count(line) - value_start);
+    ? (count(value) > 0 and slice(value, 0, 1) == " ") {
+        ^ slice(value, 1, count(value) - 1);
+    }
+    ^ value;
+}
+
+@kiln_http_header_values(headers: text, name: text) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx <= count(headers)) {
+        line := kiln_http_header_line_at(headers, idx);
+        ? (count(line) == 0) {
+            ^ out;
+        }
+        ? (kiln_http_header_name(line) == name) {
+            out = out + kiln_http_header_line_value(line) + ";";
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
 @kiln_http_query_string(path: text) -> text {
     query_at := find(path, "?");
     ? (query_at < 0) {
@@ -258,6 +315,34 @@
         idx = idx + 1;
     }
     ^ "";
+}
+
+@kiln_http_cookie_value(headers: text, name: text) -> text {
+    cookies := kiln_http_header_values(headers, "Cookie");
+    idx := 0;
+    ~ (idx <= count(cookies)) {
+        cookie_line := kiln_http_pair_at(cookies, idx, ";");
+        ? (count(cookie_line) == 0) {
+            ^ "";
+        }
+        value := kiln_http_param_value(cookie_line, "; ", name);
+        ? (count(value) > 0) {
+            ^ value;
+        }
+        fallback_name := kiln_http_pair_name(cookie_line);
+        ? (kiln_http_decode_component(kiln_http_trim_leading_space(fallback_name)) == name) {
+            ^ kiln_http_decode_component(kiln_http_pair_value(cookie_line));
+        }
+        idx = idx + 1;
+    }
+    ^ "";
+}
+
+@kiln_http_trim_leading_space(value: text) -> text {
+    ? (count(value) > 0 and slice(value, 0, 1) == " ") {
+        ^ slice(value, 1, count(value) - 1);
+    }
+    ^ value;
 }
 
 @kiln_http_query_value(path: text, name: text) -> text {

@@ -68,10 +68,11 @@ What is already working:
 5. a first HTML renderer now supports escaping, attributes, tags, lists, and whole-page responses
 6. request parsing now exposes query lookup, form-field lookup, and basic URL decoding for app handlers
 7. handler ergonomics now include dispatch param helpers and a shared `KilnReply` response model
+8. HTTP parsing now supports repeated-header access and cookie lookup helpers
 
 What is next:
 
-1. extend request parsing further for repeated headers, cookies, and richer body handling
+1. extend request parsing further for richer body handling and cookie-setting response helpers
 2. grow handler ergonomics further with redirects, form helpers, and small server wrappers
 3. add forms, layout helpers, and higher-level page composition patterns
 
