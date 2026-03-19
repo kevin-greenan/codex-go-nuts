@@ -342,6 +342,14 @@
     ^ table_scan_text(table, separator);
 }
 
+@db_scan_key_range_text(db: DB, table_name: text, min_key: i64, max_key: i64, separator: text) -> text {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ "";
+    }
+    ^ table_scan_key_range_text(table, min_key, max_key, separator);
+}
+
 @db_index_put(db: DB, table_name: text, index_name: text, secondary_key: i64, primary_key: i64) -> i64 {
     index_table := db_index_table_name(table_name, index_name);
     ^ db_put(db, index_table, secondary_key, text_of(primary_key));
