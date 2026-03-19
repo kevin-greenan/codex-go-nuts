@@ -1465,6 +1465,38 @@
     ^ rebuilt;
 }
 
+@db_repair_unique_indexes(db: DB) -> i64 {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    repaired := 0;
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (db_catalog_entry_is_used(entry)) {
+            table_name := db_catalog_display_name(entry);
+            ? (slice(table_name, 0, 4) != "idx.") {
+                fields_spec := db_table_fields(db, table_name);
+                field_count := db_schema_field_count(fields_spec);
+                field_index := 0;
+                ~ (field_index < field_count) {
+                    field_spec := db_schema_field_at(fields_spec, field_index);
+                    ? (db_schema_field_is_unique(field_spec)) {
+                        rebuilt := db_rebuild_index_from_field(db, table_name, db_schema_unique_index_name(field_spec), db_schema_field_name(field_spec));
+                        ? (rebuilt < 0) {
+                            ^ rebuilt;
+                        }
+                        repaired = repaired + 1;
+                    }
+                    field_index = field_index + 1;
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ repaired;
+}
+
 @db_scan_where_page(db: DB, table: Table, page_id: i64, field_name: text, expected_value: text, separator: text) -> text {
     page_kind := table_page_kind(table, page_id);
     ? (page_kind == "L") {

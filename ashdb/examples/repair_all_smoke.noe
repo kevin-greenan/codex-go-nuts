@@ -1,0 +1,71 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: repair_all_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 256);
+    users_root := db_define_table(db, "users", 96, "name:text,email_key:i64!,role:text");
+    tasks_root := db_define_table(db, "tasks", 96, "title:text,owner_id:i64@users");
+
+    user10 := "";
+    user10 = row_append(user10, "name", "alice");
+    user10 = row_append(user10, "email_key", "1001");
+    user10 = row_append(user10, "role", "cook");
+
+    user20 := "";
+    user20 = row_append(user20, "name", "bob");
+    user20 = row_append(user20, "email_key", "1002");
+    user20 = row_append(user20, "role", "shop");
+
+    task100 := "";
+    task100 = row_append(task100, "title", "laundry");
+    task100 = row_append(task100, "owner_id", "10");
+
+    ins0 := db_insert_row(db, "users", 10, user10);
+    ins1 := db_insert_row(db, "users", 20, user20);
+    ins2 := db_insert_row(db, "tasks", 100, task100);
+
+    broke0 := db_index_delete(db, "users", "email_key", 1002);
+    idx0 := db_index_get(db, "users", "email_key", 1002);
+    repaired := db_repair_unique_indexes(db);
+    idx1 := db_index_get(db, "users", "email_key", 1002);
+    report0 := db_validate_report(db);
+    synced0 := db_sync(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 256);
+    idx2 := db_index_get(reopened, "users", "email_key", 1002);
+    report1 := db_validate_report(reopened);
+    synced1 := db_sync(reopened);
+    closed1 := db_close(reopened);
+
+    ? (users_root < 0 or tasks_root < 0) {
+        ! "roots=" + text_of(users_root) + ":" + text_of(tasks_root);
+        ^ 2;
+    }
+    ? (ins0 < 0 or ins1 < 0 or ins2 < 0) {
+        ! "ins=" + text_of(ins0) + ":" + text_of(ins1) + ":" + text_of(ins2);
+        ^ 3;
+    }
+    ? (broke0 < 0 or idx0 != -1) {
+        ! "break=" + text_of(broke0) + ":" + text_of(idx0);
+        ^ 4;
+    }
+    ? (repaired != 1 or idx1 != 20 or idx2 != 20) {
+        ! "repair=" + text_of(repaired) + ":" + text_of(idx1) + ":" + text_of(idx2);
+        ^ 5;
+    }
+    ? (report0 != "ok" or report1 != "ok") {
+        ! "report=" + report0 + ":" + report1;
+        ^ 6;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 7;
+    }
+
+    ! "ashdb repair all smoke ok";
+    ^ 0;
+}

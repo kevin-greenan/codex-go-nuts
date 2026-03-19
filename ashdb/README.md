@@ -99,7 +99,8 @@ What is already working on `codex/ashdb-foundation`:
 36. unique secondary-index range scans for base-row retrieval
 37. rowset-style query helpers that include primary keys in result rows
 38. backup and restore copy helpers for committed snapshots
-39. smoke-test coverage through the direct self-hosted compiler
+39. whole-database unique-index repair helper
+40. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -136,7 +137,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Integrity and Recovery Tooling
 
-1. broader repair-oriented helpers for recoverable states
+1. broader repair-oriented helpers beyond unique-index repair
 2. corruption fixtures and negative tests
 3. deeper debug/inspection tooling for pages and trees
 4. clear recovery behavior documentation for interrupted writes
