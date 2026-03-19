@@ -1,0 +1,130 @@
+%Tape {
+    c0: i64;
+    c1: i64;
+    c2: i64;
+    c3: i64;
+    c4: i64;
+    c5: i64;
+}
+
+%Machine {
+    tape: Tape;
+    head: i64;
+    state: i64;
+    halted: bool;
+}
+
+@read_cell(tape: Tape, index: i64) -> i64 {
+    ? (index == 0) {
+        ^ tape.c0;
+    }
+    ? (index == 1) {
+        ^ tape.c1;
+    }
+    ? (index == 2) {
+        ^ tape.c2;
+    }
+    ? (index == 3) {
+        ^ tape.c3;
+    }
+    ? (index == 4) {
+        ^ tape.c4;
+    }
+    ? (index == 5) {
+        ^ tape.c5;
+    }
+    ^ 0;
+}
+
+@write_cell(tape: Tape, index: i64, value: i64) -> Tape {
+    ? (index == 0) {
+        ^ Tape { c0: value, c1: tape.c1, c2: tape.c2, c3: tape.c3, c4: tape.c4, c5: tape.c5 };
+    }
+    ? (index == 1) {
+        ^ Tape { c0: tape.c0, c1: value, c2: tape.c2, c3: tape.c3, c4: tape.c4, c5: tape.c5 };
+    }
+    ? (index == 2) {
+        ^ Tape { c0: tape.c0, c1: tape.c1, c2: value, c3: tape.c3, c4: tape.c4, c5: tape.c5 };
+    }
+    ? (index == 3) {
+        ^ Tape { c0: tape.c0, c1: tape.c1, c2: tape.c2, c3: value, c4: tape.c4, c5: tape.c5 };
+    }
+    ? (index == 4) {
+        ^ Tape { c0: tape.c0, c1: tape.c1, c2: tape.c2, c3: tape.c3, c4: value, c5: tape.c5 };
+    }
+    ? (index == 5) {
+        ^ Tape { c0: tape.c0, c1: tape.c1, c2: tape.c2, c3: tape.c3, c4: tape.c4, c5: value };
+    }
+    ^ tape;
+}
+
+@step(machine: Machine) -> Machine {
+    symbol := read_cell(machine.tape, machine.head);
+
+    ? (machine.state == 0) {
+        ? (symbol == 1) {
+            ^ Machine {
+                tape: machine.tape,
+                head: machine.head + 1,
+                state: machine.state,
+                halted: false
+            };
+        }
+        | {
+            ^ Machine {
+                tape: write_cell(machine.tape, machine.head, 1),
+                head: machine.head,
+                state: 1,
+                halted: true
+            };
+        }
+    }
+
+    ^ Machine {
+        tape: machine.tape,
+        head: machine.head,
+        state: machine.state,
+        halted: true
+    };
+}
+
+@run(machine: Machine, limit: i64) -> Machine {
+    next := machine;
+    remaining := limit;
+    ~ ((not next.halted) and (remaining > 0)) {
+        next = step(next);
+        remaining = remaining - 1;
+    }
+    ^ next;
+}
+
+@emit_tape(tape: Tape) -> i64 {
+    ! tape.c0;
+    ! tape.c1;
+    ! tape.c2;
+    ! tape.c3;
+    ! tape.c4;
+    ! tape.c5;
+    ^ 0;
+}
+
+@count_ones(tape: Tape) -> i64 {
+    total := 0;
+    index := 0;
+    ~ (index < 6) {
+        total = total + read_cell(tape, index);
+        index = index + 1;
+    }
+    ^ total;
+}
+
+@main() -> i64 {
+    start_tape := Tape { c0: 1, c1: 1, c2: 1, c3: 0, c4: 0, c5: 0 };
+    start := Machine { tape: start_tape, head: 0, state: 0, halted: false };
+    done := run(start, 16);
+
+    ignored := emit_tape(done.tape);
+    ! count_ones(done.tape);
+    ! ignored;
+    ^ 0;
+}
