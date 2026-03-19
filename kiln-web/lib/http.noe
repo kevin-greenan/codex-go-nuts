@@ -317,6 +317,22 @@
     ^ "";
 }
 
+@kiln_http_param_values(payload: text, separator: text, name: text) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx <= count(payload)) {
+        pair := kiln_http_pair_at(payload, idx, separator);
+        ? (count(pair) == 0) {
+            ^ out;
+        }
+        ? (kiln_http_decode_component(kiln_http_pair_name(pair)) == name) {
+            out = out + kiln_http_decode_component(kiln_http_pair_value(pair)) + ";";
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
 @kiln_http_cookie_value(headers: text, name: text) -> text {
     cookies := kiln_http_header_values(headers, "Cookie");
     idx := 0;
@@ -349,6 +365,10 @@
     ^ kiln_http_param_value(kiln_http_query_string(path), "&", name);
 }
 
+@kiln_http_query_values(path: text, name: text) -> text {
+    ^ kiln_http_param_values(kiln_http_query_string(path), "&", name);
+}
+
 @kiln_http_content_type(request: KilnHttpRequest) -> text {
     ^ kiln_http_header_value(request.headers, "Content-Type");
 }
@@ -359,6 +379,18 @@
         ^ "";
     }
     ^ kiln_http_param_value(request.body, "&", name);
+}
+
+@kiln_http_form_values(request: KilnHttpRequest, name: text) -> text {
+    content_type := kiln_http_content_type(request);
+    ? (find(content_type, "application/x-www-form-urlencoded") != 0) {
+        ^ "";
+    }
+    ^ kiln_http_param_values(request.body, "&", name);
+}
+
+@kiln_http_body_text(request: KilnHttpRequest) -> text {
+    ^ request.body;
 }
 
 @kiln_http_response(status: i64, content_type: text, body: text) -> text {

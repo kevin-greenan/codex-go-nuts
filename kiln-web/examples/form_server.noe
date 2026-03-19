@@ -12,8 +12,10 @@
 
     body := "path=" + kiln_http_path_only(request.path);
     body = body + ";query_name=" + kiln_http_query_value(request.path, "name");
+    body = body + ";query_tags=" + kiln_http_query_values(request.path, "tag");
     body = body + ";form_name=" + kiln_http_form_value(request, "name");
     body = body + ";form_note=" + kiln_http_form_value(request, "note");
+    body = body + ";form_tags=" + kiln_http_form_values(request, "tag");
 
     ? (request.version != "HTTP/1.1") {
         ^ 2;
