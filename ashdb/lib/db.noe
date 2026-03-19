@@ -641,6 +641,19 @@
 }
 
 @db_scan_where_field_equals_rows_text(db: DB, table_name: text, field_name: text, expected_value: text, separator: text) -> text {
+    fields_spec := db_table_fields(db, table_name);
+    field_spec := db_schema_field_spec(fields_spec, field_name);
+    ? (count(field_spec) > 0 and db_schema_field_is_unique(field_spec) and db_schema_field_type(field_spec) == "i64" and db_text_is_i64(expected_value)) {
+        primary_key := db_index_get(db, table_name, db_schema_unique_index_name(field_spec), i64_of(expected_value));
+        ? (primary_key < 0) {
+            ^ "";
+        }
+        row0 := db_get(db, table_name, primary_key);
+        ? (count(row0) == 0) {
+            ^ "";
+        }
+        ^ db_result_row(primary_key, row0);
+    }
     key := db_first_key(db, table_name);
     out := "";
     ~ (key >= 0) {
@@ -865,6 +878,19 @@
     }
     ? (current == field_index) {
         ^ slice(fields_spec, start, count(fields_spec) - start);
+    }
+    ^ "";
+}
+
+@db_schema_field_spec(fields_spec: text, field_name: text) -> text {
+    count0 := db_schema_field_count(fields_spec);
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_name(field_spec) == field_name) {
+            ^ field_spec;
+        }
+        idx = idx + 1;
     }
     ^ "";
 }
@@ -1671,6 +1697,15 @@
 }
 
 @db_scan_where_field_equals(db: DB, table_name: text, field_name: text, expected_value: text, separator: text) -> text {
+    fields_spec := db_table_fields(db, table_name);
+    field_spec := db_schema_field_spec(fields_spec, field_name);
+    ? (count(field_spec) > 0 and db_schema_field_is_unique(field_spec) and db_schema_field_type(field_spec) == "i64" and db_text_is_i64(expected_value)) {
+        row0 := db_get_by_index(db, table_name, db_schema_unique_index_name(field_spec), i64_of(expected_value));
+        ? (count(row0) == 0) {
+            ^ "";
+        }
+        ^ row_trim_padding(row0);
+    }
     table := db_bind_table(db, table_name);
     ? (table.root_page < 0 or table.slot_width < 0) {
         ^ "";
