@@ -350,6 +350,22 @@
     ^ table_scan_key_range_text(table, min_key, max_key, separator);
 }
 
+@db_first_key(db: DB, table_name: text) -> i64 {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ -1;
+    }
+    ^ table_first_key_in_order(table);
+}
+
+@db_next_key(db: DB, table_name: text, after_key: i64) -> i64 {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ -1;
+    }
+    ^ table_next_key_in_order(table, after_key);
+}
+
 @db_index_put(db: DB, table_name: text, index_name: text, secondary_key: i64, primary_key: i64) -> i64 {
     index_table := db_index_table_name(table_name, index_name);
     ^ db_put(db, index_table, secondary_key, text_of(primary_key));

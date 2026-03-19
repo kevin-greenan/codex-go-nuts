@@ -90,14 +90,15 @@ What is already working on `codex/ashdb-foundation`:
 27. primary-key range scans
 28. catalog and page-map inspection helpers
 29. secondary-index rebuild helpers from row data
-30. smoke-test coverage through the direct self-hosted compiler
+30. cursor-style first/next key traversal primitives
+31. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
 1. stronger transactional semantics than whole-file rollback snapshots
 2. richer schema constraints beyond basic required-field and scalar-type checks
 3. broader corruption tooling and repair workflows beyond index rebuild
-4. broader query shapes beyond point lookup, equality filtering, and primary-key ranges
+4. broader query shapes beyond point lookup, equality filtering, primary-key ranges, and key-by-key traversal
 5. any SQL surface
 
 ## Production Readiness Checklist
@@ -126,8 +127,9 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 1. richer predicate support beyond exact field equality
 2. range scans over primary and secondary keys
 3. index-assisted field lookups instead of manual index-table wiring in user code
-4. better result-shape APIs than joined text output
-5. explicit query/result conventions for failure cases
+4. stable cursor APIs for incremental iteration
+5. better result-shape APIs than joined text output
+6. explicit query/result conventions for failure cases
 
 ### Integrity and Recovery Tooling
 
