@@ -234,6 +234,15 @@
     ^ db_put(db, index_table, secondary_key, text_of(primary_key));
 }
 
+@db_index_insert_unique(db: DB, table_name: text, index_name: text, secondary_key: i64, primary_key: i64) -> i64 {
+    existing := db_index_get(db, table_name, index_name, secondary_key);
+    ? (existing >= 0 and existing != primary_key) {
+        ^ -2;
+    }
+    index_table := db_index_table_name(table_name, index_name);
+    ^ db_insert(db, index_table, secondary_key, text_of(primary_key));
+}
+
 @db_index_get(db: DB, table_name: text, index_name: text, secondary_key: i64) -> i64 {
     index_table := db_index_table_name(table_name, index_name);
     value := db_get(db, index_table, secondary_key);
@@ -246,6 +255,58 @@
 @db_index_delete(db: DB, table_name: text, index_name: text, secondary_key: i64) -> i64 {
     index_table := db_index_table_name(table_name, index_name);
     ^ db_delete(db, index_table, secondary_key);
+}
+
+@db_insert_with_index(db: DB, table_name: text, index_name: text, primary_key: i64, payload: text, secondary_key: i64) -> i64 {
+    inserted := db_insert(db, table_name, primary_key, payload);
+    ? (inserted < 0) {
+        ^ inserted;
+    }
+    indexed := db_index_insert_unique(db, table_name, index_name, secondary_key, primary_key);
+    ? (indexed < 0) {
+        rollback := db_delete(db, table_name, primary_key);
+        ^ indexed;
+    }
+    ^ 0;
+}
+
+@db_update_with_index(db: DB, table_name: text, index_name: text, primary_key: i64, payload: text, old_secondary_key: i64, new_secondary_key: i64) -> i64 {
+    old_index_primary := db_index_get(db, table_name, index_name, old_secondary_key);
+    ? (old_index_primary != primary_key) {
+        ^ -3;
+    }
+    existing_new := db_index_get(db, table_name, index_name, new_secondary_key);
+    ? (existing_new >= 0 and existing_new != primary_key) {
+        ^ -2;
+    }
+    updated := db_update(db, table_name, primary_key, payload);
+    ? (updated < 0) {
+        ^ updated;
+    }
+    ? (old_secondary_key != new_secondary_key) {
+        deleted := db_index_delete(db, table_name, index_name, old_secondary_key);
+        inserted := db_index_insert_unique(db, table_name, index_name, new_secondary_key, primary_key);
+        ? (deleted < 0 or inserted < 0) {
+            ^ -4;
+        }
+    }
+    ^ 0;
+}
+
+@db_delete_with_index(db: DB, table_name: text, index_name: text, primary_key: i64, secondary_key: i64) -> i64 {
+    indexed_primary := db_index_get(db, table_name, index_name, secondary_key);
+    ? (indexed_primary != primary_key) {
+        ^ -3;
+    }
+    deleted_table := db_delete(db, table_name, primary_key);
+    ? (deleted_table < 0) {
+        ^ deleted_table;
+    }
+    deleted_index := db_index_delete(db, table_name, index_name, secondary_key);
+    ? (deleted_index < 0) {
+        ^ -4;
+    }
+    ^ 0;
 }
 
 @db_sync(db: DB) -> bool {
