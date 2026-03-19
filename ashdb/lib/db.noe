@@ -446,6 +446,32 @@
     ^ db_get(db, table_name, primary_key);
 }
 
+@db_scan_by_index_key_range_text(db: DB, table_name: text, index_name: text, min_secondary_key: i64, max_secondary_key: i64, separator: text) -> text {
+    ? (min_secondary_key > max_secondary_key) {
+        ^ "";
+    }
+    index_table := db_index_table_name(table_name, index_name);
+    secondary_key := db_first_key(db, index_table);
+    out := "";
+    ~ (secondary_key >= 0) {
+        ? (secondary_key >= min_secondary_key and secondary_key <= max_secondary_key) {
+            row0 := db_get_by_index(db, table_name, index_name, secondary_key);
+            normalized := row_trim_padding(row0);
+            ? (count(normalized) > 0) {
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + normalized;
+            }
+        }
+        ? (secondary_key > max_secondary_key) {
+            ^ out;
+        }
+        secondary_key = db_next_key(db, index_table, secondary_key);
+    }
+    ^ out;
+}
+
 @db_index_delete(db: DB, table_name: text, index_name: text, secondary_key: i64) -> i64 {
     index_table := db_index_table_name(table_name, index_name);
     ^ db_delete(db, index_table, secondary_key);
