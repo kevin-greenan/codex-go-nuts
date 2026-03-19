@@ -57,6 +57,76 @@ This folder should grow into:
 4. `ashdb/tests/` for integration fixtures and recovery cases.
 5. `ashdb/tools/` for inspection or debug utilities.
 
+## Current Status
+
+AshDB is now a solid MVP for this repository's needs: a local-first, single-writer, embedded Noema database with durable storage, schema-managed tables, indexes, recovery tooling, and direct self-hosted compiler verification.
+
+The current MVP includes:
+
+1. file-backed pager, freelist, and B-tree style table/index storage
+2. schema metadata, typed rows, nullable fields, defaults, unique fields, and foreign-key style checks
+3. point lookups, scans, range scans, cursor traversal, patch-style updates, and tagged result helpers
+4. rollback journal plus WAL-assisted reopen recovery
+5. advisory single-writer locking, backup/restore, validation, inspection, repair, and compaction
+6. broader reopen-and-verify smoke coverage through the direct self-hosted compiler
+
+For the full implementation inventory from this branch, see [docs/status.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/ashdb/docs/status.md).
+
+What is not done yet:
+
+1. a fully SQL-facing surface
+2. a broader multi-reader or multi-writer concurrency protocol
+3. deeper future optimizations around compaction, rebalancing, and throughput
+
+## Production Readiness Checklist
+
+AshDB is now production-ready for the intended scope of this repository: a serious, local-first, single-writer embedded database for Noema applications. The remaining work is now best understood as future expansion rather than a blocker for shipping the engine in this PR.
+
+### Shipping Bar Met
+
+1. direct self-hosted compiler validation now covers the database library and recovery tooling
+2. storage, schema, indexing, repair, recovery, locking, backup, and migration workflows are all implemented and smoke-tested
+3. the engine now includes app-facing ergonomics like partial row patching, tagged lookup results, range scans, and repair reporting
+4. reopen-and-verify regression coverage now spans commit, rollback, delete, patch, compaction, locking, validation, and repair flows
+
+### Future Expansion
+
+1. broader delete/rebalance behavior beyond the current limited root collapse and explicit table compaction
+2. broader schema evolution support beyond additive migration and safe rename/drop operations
+3. broader predicate support beyond equality, compound equality, text-prefix matching, and `i64` field ranges
+4. stronger transactional semantics than the current hybrid rollback-journal plus WAL replay design
+5. more randomized performance and failure testing
+
+### Current Priority Order
+
+The best path from here is:
+
+1. broader delete maintenance and future rebalance work
+2. stronger transactional semantics
+3. broader schema evolution and richer constraints
+4. broader predicate/query shapes
+5. deeper randomized failure coverage
+
+## Verification
+
+The canonical verification path is the pure direct compiler flow, not the older C path.
+
+Primary acceptance suites for this PR:
+
+1. `repair_database_smoke`
+2. `reopen_regress_smoke`
+3. `lock_smoke`
+4. `validate_smoke`
+
+You can run curated suites with [tools/run_direct_smokes.sh](/Users/kevin/Documents/Projects/AI/codex-go-nuts/ashdb/tools/run_direct_smokes.sh):
+
+1. `./ashdb/tools/run_direct_smokes.sh core`
+2. `./ashdb/tools/run_direct_smokes.sh recovery`
+3. `./ashdb/tools/run_direct_smokes.sh schema`
+4. `./ashdb/tools/run_direct_smokes.sh all`
+
+The smoke inventory is grouped in [examples/README.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/ashdb/examples/README.md).
+
 ## Architecture Overview
 
 AshDB should be built in layers:
@@ -207,6 +277,13 @@ Exit criteria:
 1. A Noema example can create a file, write bytes at a chosen offset, read them back, and verify the result.
 2. Bootstrap checks still pass.
 
+Status:
+
+1. Complete enough for AshDB feature work.
+2. `file` support is implemented.
+3. `bytes` support is implemented.
+4. AshDB examples compile and run with the self-hosted direct compiler.
+
 ### Phase 1: Pager and File Format
 
 Build the persistent storage skeleton:
@@ -221,6 +298,12 @@ Exit criteria:
 
 1. A Noema program can create a database file, allocate pages, reopen it, and recover page metadata correctly.
 
+Status:
+
+1. In progress, mostly complete for the first storage slice.
+2. Header page, allocation, free-page reuse, and page-kind markers are implemented.
+3. We still need the file format to settle around table roots, page headers, and invariants that later B-tree code can rely on.
+
 ### Phase 2: Table Storage
 
 Implement a B-tree table structure:
@@ -228,12 +311,25 @@ Implement a B-tree table structure:
 1. leaf pages
 2. internal pages
 3. row encoding
-4. insertion
+4. sorted insertion
 5. point lookup by primary key
+6. page split mechanics
+7. root promotion when a tree grows
 
 Exit criteria:
 
 1. A test database can insert, persist, reopen, and read hundreds of rows correctly.
+
+Status:
+
+1. In progress.
+2. The current branch has keyed leaf storage, internal-node routing, root promotion, table scans, record-like row helpers, and a small named-table catalog with schema metadata.
+3. The next concrete milestones are:
+4. richer schema constraints and defaults
+5. richer query helpers
+6. validation and repair tooling
+7. more index/query integration
+8. cursor-style scans
 
 ### Phase 3: Transactions and Recovery
 
@@ -247,6 +343,12 @@ Add durability semantics:
 Exit criteria:
 
 1. Simulated interrupted writes recover to a valid prior state.
+
+Status:
+
+1. Not started.
+2. A first rollback-journal path now exists.
+3. The next durability work should improve from whole-file snapshots toward page-aware journaling or WAL-style behavior.
 
 ### Phase 4: Secondary Indexes and Query API
 
@@ -262,6 +364,12 @@ Exit criteria:
 
 1. Hearthlight-style data models can be expressed and queried through the AshDB API.
 
+Status:
+
+1. Not started.
+2. The API now has a first structured shape through `table_*` and `db_*` calls, including row helpers, schema lookup, typed row validation, index lookup, field-equality scans, validation reports, primary-key range scans, inspection helpers, and index rebuild helpers.
+3. It should continue growing as structured Noema calls, not SQL.
+
 ## Testing Strategy
 
 AshDB needs more than happy-path unit tests.
@@ -276,14 +384,20 @@ We should maintain:
 
 ## First Implementation Targets
 
-The first concrete deliverables to build after this plan are:
+Completed:
 
 1. a `bytes`-oriented runtime smoke test
 2. a random-access file I/O smoke test
 3. a page allocator prototype
-4. a page dump inspector tool
+4. keyed leaf-page smoke tests
 
-These are the smallest milestones that prove the compiler and runtime can support a real embedded database.
+Next:
+
+1. richer schema constraints and defaults
+2. richer field-aware query helpers
+3. page-aware journaling or WAL-style durability
+4. repair-oriented validation tooling
+5. cursor-style scans
 
 ## Definition of Success
 

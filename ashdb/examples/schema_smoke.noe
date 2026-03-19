@@ -1,0 +1,79 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: schema_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    users_root := db_define_table(db, "users", 96, "name:text,age:i64,active:bool");
+
+    valid := "";
+    valid = row_append(valid, "name", "alice");
+    valid = row_append(valid, "age", "42");
+    valid = row_append(valid, "active", "true");
+
+    missing_field := "";
+    missing_field = row_append(missing_field, "name", "bob");
+    missing_field = row_append(missing_field, "age", "41");
+
+    bad_type := "";
+    bad_type = row_append(bad_type, "name", "cara");
+    bad_type = row_append(bad_type, "age", "not-a-number");
+    bad_type = row_append(bad_type, "active", "true");
+
+    extra_field := "";
+    extra_field = row_append(extra_field, "name", "dan");
+    extra_field = row_append(extra_field, "age", "33");
+    extra_field = row_append(extra_field, "active", "false");
+    extra_field = row_append(extra_field, "role", "cook");
+
+    good_insert := db_insert_row(db, "users", 1, valid);
+    missing_insert := db_insert_row(db, "users", 2, missing_field);
+    bad_type_insert := db_insert_row(db, "users", 3, bad_type);
+    extra_insert := db_insert_row(db, "users", 4, extra_field);
+
+    update_good := row_put(valid, "age", "43");
+    update_bad := row_put(valid, "active", "maybe");
+    good_update := db_update_row(db, "users", 1, update_good);
+    bad_update := db_update_row(db, "users", 1, update_bad);
+
+    age0 := db_row_get(db, "users", 1, "age");
+    active0 := db_row_get(db, "users", 1, "active");
+    synced0 := db_sync(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    age1 := db_row_get(reopened, "users", 1, "age");
+    active1 := db_row_get(reopened, "users", 1, "active");
+    synced1 := db_sync(reopened);
+    closed1 := db_close(reopened);
+
+    ? (users_root < 0) {
+        ! "root=" + text_of(users_root);
+        ^ 2;
+    }
+    ? (good_insert < 0 or missing_insert != -2 or bad_type_insert != -2 or extra_insert != -2) {
+        ! "insert=" + text_of(good_insert) + ":" + text_of(missing_insert) + ":" + text_of(bad_type_insert) + ":" + text_of(extra_insert);
+        ^ 3;
+    }
+    ? (good_update < 0 or bad_update != -2) {
+        ! "update=" + text_of(good_update) + ":" + text_of(bad_update);
+        ^ 4;
+    }
+    ? (age0 != "43" or active0 != "true") {
+        ! "row0=" + age0 + ":" + active0;
+        ^ 5;
+    }
+    ? (age1 != "43" or active1 != "true") {
+        ! "row1=" + age1 + ":" + active1;
+        ^ 6;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 7;
+    }
+
+    ! "ashdb schema smoke ok";
+    ^ 0;
+}

@@ -1,0 +1,67 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: drop_field_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 256);
+    defined := db_define_table(db, "users", 96, "name:text,role:text,note:text?,active:bool=false");
+
+    row0 := "";
+    row0 = row_append(row0, "name", "alice");
+    row0 = row_append(row0, "role", "cook");
+    row0 = row_append(row0, "note", "hello");
+    row0 = row_append(row0, "active", "true");
+
+    row1 := "";
+    row1 = row_append(row1, "name", "bob");
+    row1 = row_append(row1, "role", "shop");
+    row1 = row_append(row1, "note", "null");
+    row1 = row_append(row1, "active", "false");
+
+    ins0 := db_insert_row(db, "users", 10, row0);
+    ins1 := db_insert_row(db, "users", 20, row1);
+
+    dropped := db_alter_table_drop_field(db, "users", "note");
+    schema0 := db_table_fields(db, "users");
+    stored0 := db_get(db, "users", 10);
+    stored1 := db_get(db, "users", 20);
+    range0 := db_scan_where_field_equals(db, "users", "role", "cook", "|");
+
+    bad0 := db_alter_table_drop_field(db, "users", "missing");
+    validate0 := db_validate_report(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 256);
+    schema1 := db_table_fields(reopened, "users");
+    stored2 := db_get(reopened, "users", 10);
+    range1 := db_scan_where_field_equals(reopened, "users", "role", "shop", "|");
+    validate1 := db_validate_report(reopened);
+    closed1 := db_close(reopened);
+
+    ? (defined <= 0 or ins0 < 0 or ins1 < 0) {
+        ! "setup=" + text_of(defined) + ":" + text_of(ins0) + ":" + text_of(ins1);
+        ^ 2;
+    }
+    ? (dropped != 2 or schema0 != "name:text,role:text,active:bool=false") {
+        ! "schema0=" + text_of(dropped) + ":" + schema0;
+        ^ 3;
+    }
+    ? (row_get(stored0, "note") != "" or row_get(stored0, "role") != "cook" or row_get(stored1, "active") != "false") {
+        ! "stored=" + stored0 + ":" + stored1;
+        ^ 4;
+    }
+    ? (range0 != "name=alice;role=cook;active=true;" or bad0 != -3 or validate0 != "ok") {
+        ! "state=" + range0 + ":" + text_of(bad0) + ":" + validate0;
+        ^ 5;
+    }
+    ? (schema1 != schema0 or row_get(stored2, "note") != "" or range1 != "name=bob;role=shop;active=false;" or validate1 != "ok" or not closed0 or not closed1) {
+        ! "reopen=" + schema1 + ":" + stored2 + ":" + range1 + ":" + validate1;
+        ^ 6;
+    }
+
+    ! "ashdb drop field smoke ok";
+    ^ 0;
+}

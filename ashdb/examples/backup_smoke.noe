@@ -1,0 +1,64 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 3) {
+        ! "usage: backup_smoke <db-path> <backup-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    users_root := db_define_table(db, "users", 96, "name:text,email_key:i64!,role:text");
+
+    row10 := "";
+    row10 = row_append(row10, "name", "alice");
+    row10 = row_append(row10, "email_key", "1001");
+    row10 = row_append(row10, "role", "cook");
+
+    row20 := "";
+    row20 = row_append(row20, "name", "bob");
+    row20 = row_append(row20, "email_key", "1002");
+    row20 = row_append(row20, "role", "shop");
+
+    ins0 := db_insert_row(db, "users", 10, row10);
+    ins1 := db_insert_row(db, "users", 20, row20);
+    backup0 := db_backup(db, arg(2));
+
+    row20b := "";
+    row20b = row_append(row20b, "name", "bobby");
+    row20b = row_append(row20b, "email_key", "1002");
+    row20b = row_append(row20b, "role", "plan");
+
+    upd0 := db_update_row(db, "users", 20, row20b);
+    after_update := db_get(db, "users", 20);
+    closed0 := db_close(db);
+
+    restore_ok := db_restore_copy(arg(2), arg(1) + ".restored");
+    restored := db_open(arg(1) + ".restored", 128);
+    users_root1 := db_table_root(restored, "users");
+    restored_row := db_get(restored, "users", 20);
+    restored_idx := db_index_get(restored, "users", "email_key", 1002);
+    closed1 := db_close(restored);
+
+    ? (users_root < 0 or users_root1 != users_root) {
+        ! "root=" + text_of(users_root) + ":" + text_of(users_root1);
+        ^ 2;
+    }
+    ? (ins0 < 0 or ins1 < 0 or not backup0 or upd0 < 0 or not restore_ok) {
+        ! "ops=" + text_of(ins0) + ":" + text_of(ins1) + ":" + text_of(upd0);
+        ^ 3;
+    }
+    ? (row_get(after_update, "name") != "bobby") {
+        ! "after=" + after_update;
+        ^ 4;
+    }
+    ? (row_get(restored_row, "name") != "bob" or row_get(restored_row, "role") != "shop" or restored_idx != 20) {
+        ! "restored=" + restored_row + ":" + text_of(restored_idx);
+        ^ 5;
+    }
+    ? (not closed0 or not closed1) {
+        ^ 6;
+    }
+
+    ! "ashdb backup smoke ok";
+    ^ 0;
+}

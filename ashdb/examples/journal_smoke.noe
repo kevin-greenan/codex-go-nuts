@@ -1,0 +1,61 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: journal_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    created := db_create_table(db, "users", 20);
+    inserted0 := db_insert(db, "users", 10, "alice");
+    inserted1 := db_insert(db, "users", 20, "bob");
+    total_pages := pager_total_pages(db.pager);
+
+    began := db_begin(db);
+    journal0 := file_open(db_journal_path(db));
+    header0 := file_read(journal0, 0, db_journal_header_size());
+    closed0 := file_close(journal0);
+
+    updated := db_update(db, "users", 10, "alicia");
+
+    journal1 := file_open(db_journal_path(db));
+    header1 := file_read(journal1, 0, db_journal_header_size());
+    closed1 := file_close(journal1);
+
+    rolled := db_rollback(db);
+    value0 := db_get(db, "users", 10);
+    closed_db := db_close(db);
+
+    ? (created != 2 and created != -2) {
+        ! "created=" + text_of(created);
+        ^ 2;
+    }
+    ? (inserted0 < 0 or inserted1 < 0) {
+        ! "inserted=" + text_of(inserted0) + ":" + text_of(inserted1);
+        ^ 3;
+    }
+    ? (not began or not closed0) {
+        ^ 4;
+    }
+    ? (db_journal_entry_count(header0) != 0) {
+        ! "entry_count_begin=" + text_of(db_journal_entry_count(header0));
+        ^ 5;
+    }
+    ? (updated < 0 or not closed1) {
+        ! "updated=" + text_of(updated);
+        ^ 6;
+    }
+    entry_count := db_journal_entry_count(header1);
+    ? (entry_count <= 0 or entry_count >= total_pages) {
+        ! "entry_count_after=" + text_of(entry_count) + ":" + text_of(total_pages);
+        ^ 7;
+    }
+    ? (not rolled or slice(value0, 0, 5) != "alice" or not closed_db) {
+        ! "rolled=" + value0;
+        ^ 8;
+    }
+
+    ! "ashdb journal smoke ok";
+    ^ 0;
+}

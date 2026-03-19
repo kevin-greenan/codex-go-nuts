@@ -1,0 +1,76 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: predicate_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 256);
+    defined := db_define_table(db, "users", 96, "name:text,age:i64,role:text");
+
+    row10 := "";
+    row10 = row_append(row10, "name", "alice");
+    row10 = row_append(row10, "age", "31");
+    row10 = row_append(row10, "role", "cook");
+
+    row20 := "";
+    row20 = row_append(row20, "name", "bob");
+    row20 = row_append(row20, "age", "44");
+    row20 = row_append(row20, "role", "shop");
+
+    row30 := "";
+    row30 = row_append(row30, "name", "cara");
+    row30 = row_append(row30, "age", "29");
+    row30 = row_append(row30, "role", "cook");
+
+    row40 := "";
+    row40 = row_append(row40, "name", "drew");
+    row40 = row_append(row40, "age", "52");
+    row40 = row_append(row40, "role", "clean");
+
+    ins0 := db_insert_row(db, "users", 10, row10);
+    ins1 := db_insert_row(db, "users", 20, row20);
+    ins2 := db_insert_row(db, "users", 30, row30);
+    ins3 := db_insert_row(db, "users", 40, row40);
+
+    range0 := db_scan_where_field_i64_range_text(db, "users", "age", 30, 50, "|");
+    range1 := db_scan_where_field_i64_range_text(db, "users", "age", 44, 44, "|");
+    range2 := db_scan_where_field_i64_range_text(db, "users", "age", 60, 90, "|");
+    range3 := db_scan_where_field_i64_range_text(db, "users", "role", 1, 9, "|");
+    rows0 := db_scan_where_field_i64_range_rows_text(db, "users", "age", 29, 31, "|");
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 256);
+    range4 := db_scan_where_field_i64_range_text(reopened, "users", "age", 25, 40, "|");
+    rows1 := db_scan_where_field_i64_range_rows_text(reopened, "users", "age", 50, 60, "|");
+    closed1 := db_close(reopened);
+
+    ? (defined <= 0 or ins0 < 0 or ins1 < 0 or ins2 < 0 or ins3 < 0) {
+        ! "setup=" + text_of(defined) + ":" + text_of(ins0) + ":" + text_of(ins1) + ":" + text_of(ins2) + ":" + text_of(ins3);
+        ^ 2;
+    }
+    ? (range0 != "name=alice;age=31;role=cook;|name=bob;age=44;role=shop;") {
+        ! "range0=" + range0;
+        ^ 3;
+    }
+    ? (range1 != "name=bob;age=44;role=shop;" or range2 != "" or range3 != "") {
+        ! "range1=" + range1 + ":" + range2 + ":" + range3;
+        ^ 4;
+    }
+    ? (find(rows0, "name=alice;age=31;role=cook;__key=10;") < 0 or find(rows0, "name=cara;age=29;role=cook;__key=30;") < 0) {
+        ! "rows0=" + rows0;
+        ^ 5;
+    }
+    ? (range4 != "name=alice;age=31;role=cook;|name=cara;age=29;role=cook;" and range4 != "name=cara;age=29;role=cook;|name=alice;age=31;role=cook;") {
+        ! "range4=" + range4;
+        ^ 6;
+    }
+    ? (find(rows1, "name=drew;age=52;role=clean;__key=40;") < 0 or not closed0 or not closed1) {
+        ! "rows1=" + rows1;
+        ^ 7;
+    }
+
+    ! "ashdb predicate smoke ok";
+    ^ 0;
+}

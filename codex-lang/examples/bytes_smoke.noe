@@ -1,0 +1,41 @@
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: bytes_smoke <file>";
+        ^ 1;
+    }
+
+    file := file_open(arg(1));
+    payload :: bytes := bytes_of_text("abc");
+    mask :: bytes := bytes_of_text("abc");
+    zeroed := bytes_xor(payload, mask);
+    wrote0 := file_write(file, 0, payload);
+    wrote1 := file_write(file, 3, zeroed);
+    synced := file_sync(file);
+    read_back := file_read_bytes(file, 0, 6);
+    prefix := slice(read_back, 0, 3);
+    suffix := slice(read_back, 3, 3);
+    joined := prefix + bytes_of_text("!");
+    closed := file_close(file);
+
+    ? (wrote0 != 3 or wrote1 != 3) {
+        ^ 2;
+    }
+    ? (not synced or not closed) {
+        ^ 3;
+    }
+    ? (count(read_back) != 6) {
+        ^ 4;
+    }
+    ? (text_of_bytes(prefix) != "abc") {
+        ^ 5;
+    }
+    ? (suffix != zeroed) {
+        ^ 6;
+    }
+    ? (text_of_bytes(joined) != "abc!") {
+        ^ 7;
+    }
+
+    ! "bytes smoke ok";
+    ^ 0;
+}

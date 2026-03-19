@@ -1,0 +1,62 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: recovery_state_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    created := db_create_table(db, "users", 24);
+    inserted := db_insert(db, "users", 10, "alice");
+
+    state0 := db_recovery_state_text(db);
+    began0 := db_begin(db);
+    state1 := db_recovery_state_text(db);
+    updated0 := db_update(db, "users", 10, "ava");
+    state2 := db_recovery_state_text(db);
+    wrote_wal0 := db_write_wal_for_commit(db);
+    state3 := db_recovery_state_text(db);
+    closed0 := db_close(db);
+
+    reopened0 := db_open(arg(1), 128);
+    value0 := db_get(reopened0, "users", 10);
+    state4 := db_recovery_state_text(reopened0);
+    began1 := db_begin(reopened0);
+    updated1 := db_update(reopened0, "users", 10, "amber");
+    rolled1 := db_rollback(reopened0);
+    state5 := db_recovery_state_text(reopened0);
+    closed1 := db_close(reopened0);
+
+    ? (created != 2 and created != -2) {
+        ! "created=" + text_of(created);
+        ^ 2;
+    }
+    ? (inserted < 0 or row_get(state0, "journal_active") != "false" or row_get(state0, "wal_committed") != "false") {
+        ! "state0=" + state0;
+        ^ 3;
+    }
+    ? (not began0 or row_get(state1, "journal_active") != "true" or row_get(state1, "journal_entries") != "0") {
+        ! "state1=" + state1;
+        ^ 4;
+    }
+    ? (updated0 < 0 or row_get(state2, "journal_active") != "true" or i64_of(row_get(state2, "journal_entries")) <= 0) {
+        ! "state2=" + state2;
+        ^ 5;
+    }
+    ? (not wrote_wal0 or row_get(state3, "journal_active") != "true" or row_get(state3, "wal_committed") != "true" or i64_of(row_get(state3, "wal_entries")) <= 0 or not closed0) {
+        ! "state3=" + state3;
+        ^ 6;
+    }
+    ? (slice(value0, 0, 3) != "ava" or row_get(state4, "journal_active") != "false" or row_get(state4, "wal_committed") != "false") {
+        ! "state4=" + state4 + ":" + value0;
+        ^ 7;
+    }
+    ? (not began1 or updated1 < 0 or not rolled1 or row_get(state5, "journal_active") != "false" or row_get(state5, "wal_committed") != "false" or not closed1) {
+        ! "state5=" + state5;
+        ^ 8;
+    }
+
+    ! "ashdb recovery state smoke ok";
+    ^ 0;
+}

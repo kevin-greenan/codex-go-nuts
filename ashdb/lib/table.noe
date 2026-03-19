@@ -1,0 +1,935 @@
+& "table_leaf.noe";
+
+%Table {
+    pager: Pager;
+    root_page: i64;
+    slot_width: i64;
+}
+
+@table_internal_count_width() -> i64 {
+    ^ 8;
+}
+
+@table_internal_child_width() -> i64 {
+    ^ 8;
+}
+
+@table_internal_key_width() -> i64 {
+    ^ 8;
+}
+
+@table_internal_cell_width() -> i64 {
+    ^ table_internal_key_width() + table_internal_child_width();
+}
+
+@table_internal_header_size() -> i64 {
+    ^ 1 + table_internal_count_width() + table_internal_child_width();
+}
+
+@table_internal_capacity(page_size: i64) -> i64 {
+    ^ (page_size - 1 - table_internal_header_size()) / table_internal_cell_width();
+}
+
+@table_internal_page_text(page_size: i64, key_count: i64, left_child: i64, cells: text) -> text {
+    body := "I" + pad_left_i64(key_count, table_internal_count_width()) + pad_left_i64(left_child, table_internal_child_width()) + cells;
+    max_body := page_size - 1;
+    ^ pad_right(body, max_body, ".");
+}
+
+@table_internal_empty_cell() -> text {
+    ^ repeat_unit(".", table_internal_cell_width());
+}
+
+@table_internal_build_cells(capacity: i64, used_cells: text, key_count: i64) -> text {
+    ^ used_cells + repeat_unit(table_internal_empty_cell(), capacity - key_count);
+}
+
+@table_internal_key_count(page: text) -> i64 {
+    ^ i64_of(slice(page, 2, table_internal_count_width()));
+}
+
+@table_internal_left_child(page: text) -> i64 {
+    ^ i64_of(slice(page, 2 + table_internal_count_width(), table_internal_child_width()));
+}
+
+@table_internal_used_cells(page: text) -> text {
+    key_count := table_internal_key_count(page);
+    start := 1 + table_internal_header_size();
+    cells := slice(page, start, count(page) - start);
+    ^ slice(cells, 0, key_count * table_internal_cell_width());
+}
+
+@table_internal_cell_text(key: i64, right_child: i64) -> text {
+    ^ pad_left_i64(key, table_internal_key_width()) + pad_left_i64(right_child, table_internal_child_width());
+}
+
+@table_internal_cell_at(cells: text, cell_index: i64) -> text {
+    ^ slice(cells, cell_index * table_internal_cell_width(), table_internal_cell_width());
+}
+
+@table_internal_cell_key(cell: text) -> i64 {
+    ^ i64_of(slice(cell, 0, table_internal_key_width()));
+}
+
+@table_internal_cell_child(cell: text) -> i64 {
+    ^ i64_of(slice(cell, table_internal_key_width(), table_internal_child_width()));
+}
+
+@table_internal_insert_used(used_cells: text, key_count: i64, cell_index: i64, cell_text: text) -> text {
+    prefix := slice(used_cells, 0, cell_index * table_internal_cell_width());
+    moved := slice(used_cells, cell_index * table_internal_cell_width(), (key_count - cell_index) * table_internal_cell_width());
+    ^ prefix + cell_text + moved;
+}
+
+@table_internal_find_insert_index_in_page(table: Table, page_id: i64, key: i64) -> i64 {
+    page := pager_read_page(table.pager, page_id);
+    key_count := table_internal_key_count(page);
+    used_cells := table_internal_used_cells(page);
+    cell_index := 0;
+    ~ (cell_index < key_count) {
+        cell := table_internal_cell_at(used_cells, cell_index);
+        ? (table_internal_cell_key(cell) >= key) {
+            ^ cell_index;
+        }
+        cell_index = cell_index + 1;
+    }
+    ^ key_count;
+}
+
+@table_internal_find_insert_index(table: Table, key: i64) -> i64 {
+    ^ table_internal_find_insert_index_in_page(table, table.root_page, key);
+}
+
+@table_internal_init_page(table: Table, page_id: i64, left_child: i64) -> i64 {
+    capacity := table_internal_capacity(table.pager.page_size);
+    cells := table_internal_build_cells(capacity, "", 0);
+    ^ pager_write_page(table.pager, page_id, table_internal_page_text(table.pager.page_size, 0, left_child, cells));
+}
+
+@table_internal_init_root(table: Table, left_child: i64) -> i64 {
+    ^ table_internal_init_page(table, table.root_page, left_child);
+}
+
+@table_internal_insert_separator_in_page(table: Table, page_id: i64, key: i64, right_child: i64) -> i64 {
+    page := pager_read_page(table.pager, page_id);
+    key_count := table_internal_key_count(page);
+    capacity := table_internal_capacity(table.pager.page_size);
+    left_child := table_internal_left_child(page);
+    used_cells := table_internal_used_cells(page);
+    insert_index := table_internal_find_insert_index_in_page(table, page_id, key);
+    ? (insert_index < key_count) {
+        existing := table_internal_cell_at(used_cells, insert_index);
+        ? (table_internal_cell_key(existing) == key) {
+            ^ -2;
+        }
+    }
+    ? (key_count >= capacity) {
+        ^ -1;
+    }
+    updated_used := table_internal_insert_used(used_cells, key_count, insert_index, table_internal_cell_text(key, right_child));
+    updated_cells := table_internal_build_cells(capacity, updated_used, key_count + 1);
+    wrote := pager_write_page(table.pager, page_id, table_internal_page_text(table.pager.page_size, key_count + 1, left_child, updated_cells));
+    ? (wrote == table.pager.page_size) {
+        ^ insert_index;
+    }
+    ^ -1;
+}
+
+@table_internal_insert_separator(table: Table, key: i64, right_child: i64) -> i64 {
+    ^ table_internal_insert_separator_in_page(table, table.root_page, key, right_child);
+}
+
+@table_internal_child_for_key_in_page(table: Table, page_id: i64, key: i64) -> i64 {
+    page := pager_read_page(table.pager, page_id);
+    key_count := table_internal_key_count(page);
+    child := table_internal_left_child(page);
+    used_cells := table_internal_used_cells(page);
+    cell_index := 0;
+    ~ (cell_index < key_count) {
+        cell := table_internal_cell_at(used_cells, cell_index);
+        ? (key < table_internal_cell_key(cell)) {
+            ^ child;
+        }
+        child = table_internal_cell_child(cell);
+        cell_index = cell_index + 1;
+    }
+    ^ child;
+}
+
+@table_internal_child_for_key(table: Table, key: i64) -> i64 {
+    ^ table_internal_child_for_key_in_page(table, table.root_page, key);
+}
+
+@table_internal_result_ok() -> text {
+    ^ "ok";
+}
+
+@table_internal_result_err(code: i64) -> text {
+    ^ "err:" + text_of(code);
+}
+
+@table_internal_result_split(separator_key: i64, right_page: i64) -> text {
+    ^ "split:" + text_of(separator_key) + ":" + text_of(right_page);
+}
+
+@table_internal_result_is_split(result: text) -> bool {
+    ^ count(result) >= 6 and slice(result, 0, 6) == "split:";
+}
+
+@table_internal_result_separator(result: text) -> i64 {
+    first_colon := find(result, ":");
+    rest := slice(result, first_colon + 1, count(result) - (first_colon + 1));
+    second_colon := find(rest, ":");
+    ^ i64_of(slice(rest, 0, second_colon));
+}
+
+@table_internal_result_right_page(result: text) -> i64 {
+    first_colon := find(result, ":");
+    rest := slice(result, first_colon + 1, count(result) - (first_colon + 1));
+    second_colon := find(rest, ":");
+    right_text := slice(rest, second_colon + 1, count(rest) - (second_colon + 1));
+    ^ i64_of(right_text);
+}
+
+@table_internal_used_delete_cell(used_cells: text, key_count: i64, cell_index: i64) -> text {
+    prefix := slice(used_cells, 0, cell_index * table_internal_cell_width());
+    suffix_start := (cell_index + 1) * table_internal_cell_width();
+    moved := slice(used_cells, suffix_start, (key_count - cell_index - 1) * table_internal_cell_width());
+    ^ prefix + moved;
+}
+
+@table_internal_split_insert_separator_in_page(table: Table, page_id: i64, key: i64, right_child: i64) -> text {
+    page := pager_read_page(table.pager, page_id);
+    key_count := table_internal_key_count(page);
+    capacity := table_internal_capacity(table.pager.page_size);
+    left_child := table_internal_left_child(page);
+    used_cells := table_internal_used_cells(page);
+    insert_index := table_internal_find_insert_index_in_page(table, page_id, key);
+    ? (insert_index < key_count) {
+        existing := table_internal_cell_at(used_cells, insert_index);
+        ? (table_internal_cell_key(existing) == key) {
+            ^ table_internal_result_err(-2);
+        }
+    }
+    ? (key_count < capacity) {
+        ^ table_internal_result_err(-1);
+    }
+    combined_used := table_internal_insert_used(used_cells, key_count, insert_index, table_internal_cell_text(key, right_child));
+    total_keys := key_count + 1;
+    middle_index := total_keys / 2;
+    separator_cell := table_internal_cell_at(combined_used, middle_index);
+    separator_key := table_internal_cell_key(separator_cell);
+    right_left_child := table_internal_cell_child(separator_cell);
+    left_used := slice(combined_used, 0, middle_index * table_internal_cell_width());
+    right_used_start := (middle_index + 1) * table_internal_cell_width();
+    right_used_count := total_keys - middle_index - 1;
+    right_used := slice(combined_used, right_used_start, right_used_count * table_internal_cell_width());
+    right_page := pager_alloc_page(table.pager);
+    left_cells := table_internal_build_cells(capacity, left_used, middle_index);
+    right_cells := table_internal_build_cells(capacity, right_used, right_used_count);
+    left_write := pager_write_page(table.pager, page_id, table_internal_page_text(table.pager.page_size, middle_index, left_child, left_cells));
+    right_write := pager_write_page(table.pager, right_page, table_internal_page_text(table.pager.page_size, right_used_count, right_left_child, right_cells));
+    ? (left_write == table.pager.page_size and right_write == table.pager.page_size) {
+        ^ table_internal_result_split(separator_key, right_page);
+    }
+    ^ table_internal_result_err(-3);
+}
+
+@table_page_kind(table: Table, page_id: i64) -> text {
+    page := pager_read_page(table.pager, page_id);
+    ^ slice(page, 1, 1);
+}
+
+@table_root_page() -> i64 {
+    ^ 1;
+}
+
+@table_bind(pager: Pager, root_page: i64, slot_width: i64) -> Table {
+    ^ Table { pager: pager, root_page: root_page, slot_width: slot_width };
+}
+
+@table_open(path: text, page_size: i64, slot_width: i64) -> Table {
+    pager := pager_open(path, page_size);
+    total_pages := pager_total_pages(pager);
+    root_page := table_root_page();
+    ? (total_pages == 1) {
+        allocated := pager_alloc_page(pager);
+        initialized := leaf_init_page(pager, root_page, slot_width);
+    }
+    ^ table_bind(pager, root_page, slot_width);
+}
+
+@table_root_kind(table: Table) -> text {
+    ^ table_page_kind(table, table.root_page);
+}
+
+@table_promote_root_split(table: Table, separator_key: i64, right_page: i64) -> i64 {
+    left_page := pager_alloc_page(table.pager);
+    left_text := pager_read_page(table.pager, table.root_page);
+    left_copy := pager_raw_write_page(table.pager, left_page, left_text);
+    root_init := table_internal_init_root(table, left_page);
+    inserted := table_internal_insert_separator(table, separator_key, right_page);
+    ? (left_copy == table.pager.page_size and root_init == table.pager.page_size and inserted >= 0) {
+        ^ 0;
+    }
+    ^ -3;
+}
+
+@table_insert_page(table: Table, page_id: i64, key: i64, payload: text) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        wrote := leaf_insert_key(table.pager, page_id, key, payload);
+        ? (wrote >= 0) {
+            ^ table_internal_result_ok();
+        }
+        ? (wrote == -1) {
+            split_right := leaf_split_insert_key(table.pager, page_id, key, payload);
+            ? (split_right >= 0) {
+                separator_key := leaf_first_key(table.pager, split_right);
+                ^ table_internal_result_split(separator_key, split_right);
+            }
+        }
+        ^ table_internal_result_err(wrote);
+    }
+    ? (page_kind == "I") {
+        child_page := table_internal_child_for_key_in_page(table, page_id, key);
+        child_result := table_insert_page(table, child_page, key, payload);
+        ? (child_result == "ok") {
+            ^ child_result;
+        }
+        ? (table_internal_result_is_split(child_result)) {
+            separator_key := table_internal_result_separator(child_result);
+            split_right := table_internal_result_right_page(child_result);
+            inserted := table_internal_insert_separator_in_page(table, page_id, separator_key, split_right);
+            ? (inserted >= 0) {
+                ^ table_internal_result_ok();
+            }
+            ? (inserted == -1) {
+                ^ table_internal_split_insert_separator_in_page(table, page_id, separator_key, split_right);
+            }
+            ^ table_internal_result_err(inserted);
+        }
+        ^ child_result;
+    }
+    ^ table_internal_result_err(-5);
+}
+
+@table_insert(table: Table, key: i64, payload: text) -> i64 {
+    result := table_insert_page(table, table.root_page, key, payload);
+    ? (result == "ok") {
+        ^ 0;
+    }
+    ? (table_internal_result_is_split(result)) {
+        separator_key := table_internal_result_separator(result);
+        right_page := table_internal_result_right_page(result);
+        ^ table_promote_root_split(table, separator_key, right_page);
+    }
+    first_colon := find(result, ":");
+    ? (first_colon >= 0) {
+        code_text := slice(result, first_colon + 1, count(result) - (first_colon + 1));
+        ^ i64_of(code_text);
+    }
+    ^ -9;
+}
+
+@table_update_page(table: Table, page_id: i64, key: i64, payload: text) -> i64 {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ leaf_update_key(table.pager, page_id, key, payload);
+    }
+    ? (page_kind == "I") {
+        child_page := table_internal_child_for_key_in_page(table, page_id, key);
+        ^ table_update_page(table, child_page, key, payload);
+    }
+    ^ -1;
+}
+
+@table_update(table: Table, key: i64, payload: text) -> i64 {
+    ^ table_update_page(table, table.root_page, key, payload);
+}
+
+@table_put_page(table: Table, page_id: i64, key: i64, payload: text) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        wrote := leaf_put_key(table.pager, page_id, key, payload);
+        ? (wrote >= 0) {
+            ^ table_internal_result_ok();
+        }
+        ? (wrote == -1) {
+            split_right := leaf_split_insert_key(table.pager, page_id, key, payload);
+            ? (split_right >= 0) {
+                separator_key := leaf_first_key(table.pager, split_right);
+                ^ table_internal_result_split(separator_key, split_right);
+            }
+        }
+        ^ table_internal_result_err(wrote);
+    }
+    ? (page_kind == "I") {
+        child_page := table_internal_child_for_key_in_page(table, page_id, key);
+        child_result := table_put_page(table, child_page, key, payload);
+        ? (child_result == "ok") {
+            ^ child_result;
+        }
+        ? (table_internal_result_is_split(child_result)) {
+            separator_key := table_internal_result_separator(child_result);
+            split_right := table_internal_result_right_page(child_result);
+            inserted := table_internal_insert_separator_in_page(table, page_id, separator_key, split_right);
+            ? (inserted >= 0) {
+                ^ table_internal_result_ok();
+            }
+            ? (inserted == -1) {
+                ^ table_internal_split_insert_separator_in_page(table, page_id, separator_key, split_right);
+            }
+            ^ table_internal_result_err(inserted);
+        }
+        ^ child_result;
+    }
+    ^ table_internal_result_err(-5);
+}
+
+@table_put(table: Table, key: i64, payload: text) -> i64 {
+    result := table_put_page(table, table.root_page, key, payload);
+    ? (result == "ok") {
+        ^ 0;
+    }
+    ? (table_internal_result_is_split(result)) {
+        separator_key := table_internal_result_separator(result);
+        right_page := table_internal_result_right_page(result);
+        ^ table_promote_root_split(table, separator_key, right_page);
+    }
+    first_colon := find(result, ":");
+    ? (first_colon >= 0) {
+        code_text := slice(result, first_colon + 1, count(result) - (first_colon + 1));
+        ^ i64_of(code_text);
+    }
+    ^ -9;
+}
+
+@table_get_page(table: Table, page_id: i64, key: i64) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ leaf_read_by_key(table.pager, page_id, key);
+    }
+    ? (page_kind == "I") {
+        child_page := table_internal_child_for_key_in_page(table, page_id, key);
+        ^ table_get_page(table, child_page, key);
+    }
+    ^ "";
+}
+
+@table_get(table: Table, key: i64) -> text {
+    ^ table_get_page(table, table.root_page, key);
+}
+
+@table_delete_page(table: Table, page_id: i64, key: i64) -> i64 {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ leaf_delete_key(table.pager, page_id, key);
+    }
+    ? (page_kind == "I") {
+        child_page := table_internal_child_for_key_in_page(table, page_id, key);
+        ^ table_delete_page(table, child_page, key);
+    }
+    ^ -1;
+}
+
+@table_try_collapse_root_after_delete(table: Table) -> bool {
+    ? (table_root_kind(table) != "I") {
+        ^ false;
+    }
+    root_raw := pager_read_page(table.pager, table.root_page);
+    key_count := table_internal_key_count(root_raw);
+    ? (key_count != 1) {
+        ^ false;
+    }
+    left_child := table_internal_left_child(root_raw);
+    used_cells := table_internal_used_cells(root_raw);
+    first_cell := table_internal_cell_at(used_cells, 0);
+    right_child := table_internal_cell_child(first_cell);
+    ? (table_page_kind(table, left_child) != "L" or table_page_kind(table, right_child) != "L") {
+        ^ false;
+    }
+    left_page := leaf_read_page(table.pager, left_child);
+    right_page := leaf_read_page(table.pager, right_child);
+    left_count := leaf_slot_count(left_page);
+    right_count := leaf_slot_count(right_page);
+    ? (left_count > 0 and right_count > 0) {
+        ^ false;
+    }
+    replacement_page := left_child;
+    ? (left_count == 0 and right_count > 0) {
+        replacement_page = right_child;
+    }
+    replacement_raw := pager_read_page(table.pager, replacement_page);
+    wrote_root := pager_raw_write_page(table.pager, table.root_page, replacement_raw);
+    ? (wrote_root != table.pager.page_size) {
+        ^ false;
+    }
+    freed_left := pager_free_page(table.pager, left_child);
+    freed_right := pager_free_page(table.pager, right_child);
+    ^ freed_left and freed_right;
+}
+
+@table_delete(table: Table, key: i64) -> i64 {
+    deleted := table_delete_page(table, table.root_page, key);
+    ? (deleted >= 0) {
+        collapsed := table_try_collapse_root_after_delete(table);
+    }
+    ^ deleted;
+}
+
+@table_scan_leaf_text(table: Table, page_id: i64, separator: text) -> text {
+    page := leaf_read_page(table.pager, page_id);
+    slot_count := leaf_slot_count(page);
+    out := "";
+    slot_index := 0;
+    ~ (slot_index < slot_count) {
+        value := leaf_read_slot(table.pager, page_id, slot_index);
+        ? (count(value) > 0) {
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + value;
+        }
+        slot_index = slot_index + 1;
+    }
+    ^ out;
+}
+
+@table_trim_payload(value: text) -> text {
+    end0 := count(value);
+    ~ (end0 > 0 and slice(value, end0 - 1, 1) == ".") {
+        end0 = end0 - 1;
+    }
+    ^ slice(value, 0, end0);
+}
+
+@table_scan_leaf_key_range_text(table: Table, page_id: i64, min_key: i64, max_key: i64, separator: text) -> text {
+    page := leaf_read_page(table.pager, page_id);
+    slot_count := leaf_slot_count(page);
+    slot_width := leaf_slot_width(page);
+    entries := leaf_entries_region(page);
+    out := "";
+    slot_index := 0;
+    ~ (slot_index < slot_count) {
+        slot := leaf_slot_text_at(entries, slot_width, slot_index);
+        key := leaf_slot_key(slot);
+        ? (key >= min_key and key <= max_key) {
+            value := table_trim_payload(leaf_slot_payload(slot));
+            ? (count(value) > 0) {
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + value;
+            }
+        }
+        slot_index = slot_index + 1;
+    }
+    ^ out;
+}
+
+@table_scan_page_text(table: Table, page_id: i64, separator: text) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ table_scan_leaf_text(table, page_id, separator);
+    }
+    ? (page_kind == "I") {
+        page := pager_read_page(table.pager, page_id);
+        key_count := table_internal_key_count(page);
+        used_cells := table_internal_used_cells(page);
+        out := table_scan_page_text(table, table_internal_left_child(page), separator);
+        cell_index := 0;
+        ~ (cell_index < key_count) {
+            cell := table_internal_cell_at(used_cells, cell_index);
+            child_text := table_scan_page_text(table, table_internal_cell_child(cell), separator);
+            ? (count(child_text) > 0) {
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + child_text;
+            }
+            cell_index = cell_index + 1;
+        }
+        ^ out;
+    }
+    ^ "";
+}
+
+@table_scan_text(table: Table, separator: text) -> text {
+    ^ table_scan_page_text(table, table.root_page, separator);
+}
+
+@table_scan_page_key_range_text(table: Table, page_id: i64, min_key: i64, max_key: i64, separator: text) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ table_scan_leaf_key_range_text(table, page_id, min_key, max_key, separator);
+    }
+    ? (page_kind == "I") {
+        page := pager_read_page(table.pager, page_id);
+        key_count := table_internal_key_count(page);
+        used_cells := table_internal_used_cells(page);
+        out := table_scan_page_key_range_text(table, table_internal_left_child(page), min_key, max_key, separator);
+        cell_index := 0;
+        ~ (cell_index < key_count) {
+            cell := table_internal_cell_at(used_cells, cell_index);
+            child_text := table_scan_page_key_range_text(table, table_internal_cell_child(cell), min_key, max_key, separator);
+            ? (count(child_text) > 0) {
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + child_text;
+            }
+            cell_index = cell_index + 1;
+        }
+        ^ out;
+    }
+    ^ "";
+}
+
+@table_scan_key_range_text(table: Table, min_key: i64, max_key: i64, separator: text) -> text {
+    ? (min_key > max_key) {
+        ^ "";
+    }
+    ^ table_scan_page_key_range_text(table, table.root_page, min_key, max_key, separator);
+}
+
+@table_scan_leaf_keys_text(table: Table, page_id: i64, separator: text) -> text {
+    page := leaf_read_page(table.pager, page_id);
+    slot_count := leaf_slot_count(page);
+    slot_width := leaf_slot_width(page);
+    entries := leaf_entries_region(page);
+    out := "";
+    slot_index := 0;
+    ~ (slot_index < slot_count) {
+        slot := leaf_slot_text_at(entries, slot_width, slot_index);
+        key := leaf_slot_key(slot);
+        ? (count(out) > 0) {
+            out = out + separator;
+        }
+        out = out + text_of(key);
+        slot_index = slot_index + 1;
+    }
+    ^ out;
+}
+
+@table_scan_page_keys_text(table: Table, page_id: i64, separator: text) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ table_scan_leaf_keys_text(table, page_id, separator);
+    }
+    ? (page_kind == "I") {
+        page := pager_read_page(table.pager, page_id);
+        key_count := table_internal_key_count(page);
+        used_cells := table_internal_used_cells(page);
+        out := table_scan_page_keys_text(table, table_internal_left_child(page), separator);
+        cell_index := 0;
+        ~ (cell_index < key_count) {
+            cell := table_internal_cell_at(used_cells, cell_index);
+            child_text := table_scan_page_keys_text(table, table_internal_cell_child(cell), separator);
+            ? (count(child_text) > 0) {
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + child_text;
+            }
+            cell_index = cell_index + 1;
+        }
+        ^ out;
+    }
+    ^ "";
+}
+
+@table_scan_keys_text(table: Table, separator: text) -> text {
+    ^ table_scan_page_keys_text(table, table.root_page, separator);
+}
+
+@table_first_key_page(table: Table, page_id: i64) -> i64 {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ leaf_first_key(table.pager, page_id);
+    }
+    ? (page_kind == "I") {
+        page := pager_read_page(table.pager, page_id);
+        first_left := table_first_key_page(table, table_internal_left_child(page));
+        ? (first_left >= 0) {
+            ^ first_left;
+        }
+        key_count := table_internal_key_count(page);
+        used_cells := table_internal_used_cells(page);
+        cell_index := 0;
+        ~ (cell_index < key_count) {
+            cell := table_internal_cell_at(used_cells, cell_index);
+            first_child := table_first_key_page(table, table_internal_cell_child(cell));
+            ? (first_child >= 0) {
+                ^ first_child;
+            }
+            cell_index = cell_index + 1;
+        }
+    }
+    ^ -1;
+}
+
+@table_first_key_in_order(table: Table) -> i64 {
+    ^ table_first_key_page(table, table.root_page);
+}
+
+@table_next_key_in_leaf(table: Table, page_id: i64, after_key: i64) -> i64 {
+    page := leaf_read_page(table.pager, page_id);
+    slot_count := leaf_slot_count(page);
+    slot_width := leaf_slot_width(page);
+    entries := leaf_entries_region(page);
+    slot_index := 0;
+    ~ (slot_index < slot_count) {
+        slot := leaf_slot_text_at(entries, slot_width, slot_index);
+        key := leaf_slot_key(slot);
+        ? (key > after_key) {
+            ^ key;
+        }
+        slot_index = slot_index + 1;
+    }
+    ^ -1;
+}
+
+@table_next_key_page(table: Table, page_id: i64, after_key: i64) -> i64 {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ table_next_key_in_leaf(table, page_id, after_key);
+    }
+    ? (page_kind == "I") {
+        page := pager_read_page(table.pager, page_id);
+        next_left := table_next_key_page(table, table_internal_left_child(page), after_key);
+        ? (next_left >= 0) {
+            ^ next_left;
+        }
+        key_count := table_internal_key_count(page);
+        used_cells := table_internal_used_cells(page);
+        cell_index := 0;
+        ~ (cell_index < key_count) {
+            cell := table_internal_cell_at(used_cells, cell_index);
+            next_child := table_next_key_page(table, table_internal_cell_child(cell), after_key);
+            ? (next_child >= 0) {
+                ^ next_child;
+            }
+            cell_index = cell_index + 1;
+        }
+    }
+    ^ -1;
+}
+
+@table_next_key_in_order(table: Table, after_key: i64) -> i64 {
+    ^ table_next_key_page(table, table.root_page, after_key);
+}
+
+@table_validate_leaf_page(table: Table, page_id: i64) -> bool {
+    page := leaf_read_page(table.pager, page_id);
+    slot_count := leaf_slot_count(page);
+    slot_width := leaf_slot_width(page);
+    entries := leaf_entries_region(page);
+    idx := 0;
+    prev_key := 0;
+    have_prev := false;
+    ~ (idx < slot_count) {
+        slot := leaf_slot_text_at(entries, slot_width, idx);
+        ? (not leaf_slot_is_used(slot)) {
+            ^ false;
+        }
+        key := leaf_slot_key(slot);
+        ? (have_prev and key <= prev_key) {
+            ^ false;
+        }
+        prev_key = key;
+        have_prev = true;
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@table_validate_leaf_page_report(table: Table, page_id: i64) -> text {
+    page := leaf_read_page(table.pager, page_id);
+    slot_count := leaf_slot_count(page);
+    slot_width := leaf_slot_width(page);
+    entries := leaf_entries_region(page);
+    idx := 0;
+    prev_key := 0;
+    have_prev := false;
+    ~ (idx < slot_count) {
+        slot := leaf_slot_text_at(entries, slot_width, idx);
+        ? (not leaf_slot_is_used(slot)) {
+            ^ "leaf " + text_of(page_id) + " has unused slot inside used range";
+        }
+        key := leaf_slot_key(slot);
+        ? (have_prev and key <= prev_key) {
+            ^ "leaf " + text_of(page_id) + " keys are not strictly increasing";
+        }
+        prev_key = key;
+        have_prev = true;
+        idx = idx + 1;
+    }
+    ^ "ok";
+}
+
+@table_validate_internal_page(table: Table, page_id: i64) -> bool {
+    page := pager_read_page(table.pager, page_id);
+    key_count := table_internal_key_count(page);
+    total_pages := pager_total_pages(table.pager);
+    left_child := table_internal_left_child(page);
+    ? (left_child <= 0 or left_child >= total_pages) {
+        ^ false;
+    }
+    used_cells := table_internal_used_cells(page);
+    idx := 0;
+    prev_key := 0;
+    have_prev := false;
+    ? (not table_validate_page(table, left_child)) {
+        ^ false;
+    }
+    ~ (idx < key_count) {
+        cell := table_internal_cell_at(used_cells, idx);
+        key := table_internal_cell_key(cell);
+        child := table_internal_cell_child(cell);
+        ? (have_prev and key <= prev_key) {
+            ^ false;
+        }
+        ? (child <= 0 or child >= total_pages) {
+            ^ false;
+        }
+        ? (not table_validate_page(table, child)) {
+            ^ false;
+        }
+        prev_key = key;
+        have_prev = true;
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@table_validate_internal_page_report(table: Table, page_id: i64) -> text {
+    page := pager_read_page(table.pager, page_id);
+    key_count := table_internal_key_count(page);
+    total_pages := pager_total_pages(table.pager);
+    left_child := table_internal_left_child(page);
+    ? (left_child <= 0 or left_child >= total_pages) {
+        ^ "internal " + text_of(page_id) + " has invalid left child";
+    }
+    left_report := table_validate_page_report(table, left_child);
+    ? (left_report != "ok") {
+        ^ left_report;
+    }
+    used_cells := table_internal_used_cells(page);
+    idx := 0;
+    prev_key := 0;
+    have_prev := false;
+    ~ (idx < key_count) {
+        cell := table_internal_cell_at(used_cells, idx);
+        key := table_internal_cell_key(cell);
+        child := table_internal_cell_child(cell);
+        ? (have_prev and key <= prev_key) {
+            ^ "internal " + text_of(page_id) + " separator keys are not strictly increasing";
+        }
+        ? (child <= 0 or child >= total_pages) {
+            ^ "internal " + text_of(page_id) + " has invalid child pointer";
+        }
+        child_report := table_validate_page_report(table, child);
+        ? (child_report != "ok") {
+            ^ child_report;
+        }
+        prev_key = key;
+        have_prev = true;
+        idx = idx + 1;
+    }
+    ^ "ok";
+}
+
+@table_validate_page_report(table: Table, page_id: i64) -> text {
+    kind := table_page_kind(table, page_id);
+    ? (kind == "L") {
+        ^ table_validate_leaf_page_report(table, page_id);
+    }
+    ? (kind == "I") {
+        ^ table_validate_internal_page_report(table, page_id);
+    }
+    ^ "page " + text_of(page_id) + " has unknown kind";
+}
+
+@table_validate_page(table: Table, page_id: i64) -> bool {
+    kind := table_page_kind(table, page_id);
+    ? (kind == "L") {
+        ^ table_validate_leaf_page(table, page_id);
+    }
+    ? (kind == "I") {
+        ^ table_validate_internal_page(table, page_id);
+    }
+    ^ false;
+}
+
+@table_validate(table: Table) -> bool {
+    total_pages := pager_total_pages(table.pager);
+    ? (table.root_page <= 0 or table.root_page >= total_pages) {
+        ^ false;
+    }
+    ^ table_validate_page(table, table.root_page);
+}
+
+@table_validate_report(table: Table) -> text {
+    total_pages := pager_total_pages(table.pager);
+    ? (table.root_page <= 0 or table.root_page >= total_pages) {
+        ^ "root page is out of range";
+    }
+    ^ table_validate_page_report(table, table.root_page);
+}
+
+@table_layout_page_text(table: Table, page_id: i64, depth: i64, separator: text) -> text {
+    indent := repeat_unit("  ", depth);
+    kind := table_page_kind(table, page_id);
+    ? (kind == "L") {
+        page := leaf_read_page(table.pager, page_id);
+        slot_count := leaf_slot_count(page);
+        first_key := leaf_first_key(table.pager, page_id);
+        last_key := -1;
+        ? (slot_count > 0) {
+            last_key = leaf_slot_key(leaf_slot_text_at(leaf_entries_region(page), leaf_slot_width(page), slot_count - 1));
+        }
+        ^ indent + "leaf page=" + text_of(page_id) + " slots=" + text_of(slot_count) + " first=" + text_of(first_key) + " last=" + text_of(last_key);
+    }
+    ? (kind == "I") {
+        page := pager_read_page(table.pager, page_id);
+        key_count := table_internal_key_count(page);
+        left_child := table_internal_left_child(page);
+        used_cells := table_internal_used_cells(page);
+        out := indent + "internal page=" + text_of(page_id) + " keys=" + text_of(key_count) + " left=" + text_of(left_child);
+        child_text := table_layout_page_text(table, left_child, depth + 1, separator);
+        ? (count(child_text) > 0) {
+            out = out + separator + child_text;
+        }
+        idx := 0;
+        ~ (idx < key_count) {
+            cell := table_internal_cell_at(used_cells, idx);
+            key := table_internal_cell_key(cell);
+            child := table_internal_cell_child(cell);
+            out = out + separator + indent + "  sep key=" + text_of(key) + " child=" + text_of(child);
+            child_text = table_layout_page_text(table, child, depth + 1, separator);
+            ? (count(child_text) > 0) {
+                out = out + separator + child_text;
+            }
+            idx = idx + 1;
+        }
+        ^ out;
+    }
+    ^ indent + "unknown page=" + text_of(page_id) + " kind=" + kind;
+}
+
+@table_layout_text(table: Table, separator: text) -> text {
+    total_pages := pager_total_pages(table.pager);
+    ? (table.root_page <= 0 or table.root_page >= total_pages) {
+        ^ "root page is out of range";
+    }
+    ^ table_layout_page_text(table, table.root_page, 0, separator);
+}
+
+@table_sync(table: Table) -> bool {
+    ^ pager_sync(table.pager);
+}
+
+@table_close(table: Table) -> bool {
+    ^ pager_close(table.pager);
+}

@@ -1,0 +1,65 @@
+& "../lib/table.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: root_collapse_smoke <db-path>";
+        ^ 1;
+    }
+
+    table := table_open(arg(1), 64, 20);
+    put0 := table_put(table, 10, "alpha");
+    put1 := table_put(table, 20, "bravo");
+    put2 := table_put(table, 30, "charlie");
+    root0 := table_root_kind(table);
+
+    del0 := table_delete(table, 30);
+    del1 := table_delete(table, 20);
+    root1 := table_root_kind(table);
+    get0 := table_get(table, 10);
+    get1 := table_get(table, 20);
+    get2 := table_get(table, 30);
+    scan0 := table_scan_text(table, "|");
+    validate0 := table_validate_report(table);
+    synced0 := table_sync(table);
+    closed0 := table_close(table);
+
+    reopened := table_open(arg(1), 64, 20);
+    root2 := table_root_kind(reopened);
+    scan1 := table_scan_text(reopened, "|");
+    validate1 := table_validate_report(reopened);
+    get3 := table_get(reopened, 10);
+    get4 := table_get(reopened, 20);
+    closed1 := table_close(reopened);
+
+    ? (put0 < 0 or put1 < 0 or put2 < 0) {
+        ! "puts=" + text_of(put0) + ":" + text_of(put1) + ":" + text_of(put2);
+        ^ 2;
+    }
+    ? (root0 != "I") {
+        ! "root0=" + root0;
+        ^ 3;
+    }
+    ? (del0 < 0 or del1 < 0) {
+        ! "deletes=" + text_of(del0) + ":" + text_of(del1);
+        ^ 4;
+    }
+    ? (root1 != "L" or root2 != "L") {
+        ! "root1=" + root1 + ":" + root2;
+        ^ 5;
+    }
+    ? (slice(get0, 0, 5) != "alpha" or get1 != "" or get2 != "") {
+        ! "get=" + get0 + ":" + get1 + ":" + get2;
+        ^ 6;
+    }
+    ? (scan0 != "alpha......" or scan1 != scan0) {
+        ! "scan=" + scan0 + ":" + scan1;
+        ^ 7;
+    }
+    ? (validate0 != "ok" or validate1 != "ok" or slice(get3, 0, 5) != "alpha" or get4 != "" or not synced0 or not closed0 or not closed1) {
+        ! "validate=" + validate0 + ":" + validate1 + ":" + get3 + ":" + get4;
+        ^ 8;
+    }
+
+    ! "ashdb root collapse smoke ok";
+    ^ 0;
+}

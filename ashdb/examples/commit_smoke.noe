@@ -1,0 +1,47 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: commit_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    created := db_create_table(db, "users", 24);
+    inserted := db_insert(db, "users", 10, "alice");
+
+    began := db_begin(db);
+    updated := db_update(db, "users", 10, "ava");
+    active0 := db_journal_is_active(db);
+    committed := db_commit(db);
+    active1 := db_journal_is_active(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    value0 := db_get(reopened, "users", 10);
+    active2 := db_journal_is_active(reopened);
+    closed1 := db_close(reopened);
+
+    ? (created != 2 and created != -2) {
+        ! "created=" + text_of(created);
+        ^ 2;
+    }
+    ? (inserted < 0 or not began or updated < 0) {
+        ! "write_path=" + text_of(inserted) + ":" + text_of(updated);
+        ^ 3;
+    }
+    ? (not active0) {
+        ^ 4;
+    }
+    ? (not committed or active1) {
+        ! "commit=" + text_of(committed) + ":" + text_of(active1);
+        ^ 5;
+    }
+    ? (slice(value0, 0, 3) != "ava" or active2 or not closed0 or not closed1) {
+        ! "reopen=" + value0 + ":" + text_of(active2);
+        ^ 6;
+    }
+
+    ! "ashdb commit smoke ok";
+    ^ 0;
+}

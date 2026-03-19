@@ -1,0 +1,59 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: validate_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    users_root := db_create_table(db, "users", 20);
+    email_index := db_create_index(db, "users", "email");
+    ins0 := db_insert_with_index(db, "users", "email", 10, "alice", 1001);
+    ins1 := db_insert_with_index(db, "users", "email", 20, "bob", 1002);
+    ins2 := db_insert_with_index(db, "users", "email", 30, "carol", 1003);
+    upd0 := db_update_with_index(db, "users", "email", 20, "bobby", 1002, 1004);
+    del0 := db_delete_with_index(db, "users", "email", 10, 1001);
+    valid0 := db_validate(db);
+    report0 := db_validate_report(db);
+    synced0 := db_sync(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    valid1 := db_validate(reopened);
+    report1 := db_validate_report(reopened);
+    user0 := db_get(reopened, "users", 20);
+    idx0 := db_index_get(reopened, "users", "email", 1004);
+    idx1 := db_index_get(reopened, "users", "email", 1001);
+    synced1 := db_sync(reopened);
+    closed1 := db_close(reopened);
+
+    ? (users_root != 2 or email_index != 3) {
+        ^ 2;
+    }
+    ? (ins0 < 0 or ins1 < 0 or ins2 < 0 or upd0 < 0 or del0 < 0) {
+        ! "ops=" + text_of(ins0) + ":" + text_of(ins1) + ":" + text_of(ins2) + ":" + text_of(upd0) + ":" + text_of(del0);
+        ^ 3;
+    }
+    ? (not valid0 or not valid1) {
+        ^ 4;
+    }
+    ? (report0 != "ok" or report1 != "ok") {
+        ! "report=" + report0 + ":" + report1;
+        ^ 8;
+    }
+    ? (slice(user0, 0, 5) != "bobby") {
+        ! "user=" + user0;
+        ^ 5;
+    }
+    ? (idx0 != 20 or idx1 != -1) {
+        ! "index=" + text_of(idx0) + ":" + text_of(idx1);
+        ^ 6;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 7;
+    }
+
+    ! "ashdb validate smoke ok";
+    ^ 0;
+}

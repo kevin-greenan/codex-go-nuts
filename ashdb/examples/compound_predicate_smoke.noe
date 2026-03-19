@@ -1,0 +1,68 @@
+& "../lib/db.noe";
+
+@user_row(name: text, role: text, active: text, age: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "role", role);
+    payload = row_append(payload, "active", active);
+    payload = row_append(payload, "age", age);
+    ^ payload;
+}
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: compound_predicate_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 256);
+    defined := db_define_table(db, "users", 96, "name:text,role:text,active:bool=false,age:i64");
+    ins0 := db_insert_row(db, "users", 10, user_row("alice", "cook", "true", "31"));
+    ins1 := db_insert_row(db, "users", 20, user_row("bob", "cook", "false", "41"));
+    ins2 := db_insert_row(db, "users", 30, user_row("cara", "shop", "true", "31"));
+    ins3 := db_insert_row(db, "users", 40, user_row("drew", "cook", "true", "44"));
+
+    match0 := db_scan_where_all_equals_text(db, "users", "role=cook,active=true", "|");
+    match1 := db_scan_where_all_equals_rows_text(db, "users", "role=cook,age=31", "|");
+    match2 := db_scan_where_all_equals_rows_text(db, "users", "", "|");
+    match3 := db_scan_where_all_equals_text(db, "users", "role=shop,active=false", "|");
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 256);
+    match4 := db_scan_where_all_equals_text(reopened, "users", "active=true,age=31", "|");
+    match5 := db_scan_where_all_equals_rows_text(reopened, "users", "role=cook,active=true", "|");
+    validate0 := db_validate_report(reopened);
+    closed1 := db_close(reopened);
+
+    ? (defined <= 0 or ins0 < 0 or ins1 < 0 or ins2 < 0 or ins3 < 0) {
+        ! "setup=" + text_of(defined) + ":" + text_of(ins0) + ":" + text_of(ins1) + ":" + text_of(ins2) + ":" + text_of(ins3);
+        ^ 2;
+    }
+    ? (find(match0, "name=alice;") < 0 or find(match0, "name=drew;") < 0 or find(match0, "name=bob;") >= 0 or find(match0, "name=cara;") >= 0) {
+        ! "match0=" + match0;
+        ^ 3;
+    }
+    ? (find(match1, "__key=10;") < 0 or find(match1, "name=alice;") < 0 or find(match1, "__key=20;") >= 0 or find(match1, "__key=40;") >= 0) {
+        ! "match1=" + match1;
+        ^ 4;
+    }
+    ? (find(match2, "__key=10;") < 0 or find(match2, "__key=40;") < 0) {
+        ! "match2=" + match2;
+        ^ 5;
+    }
+    ? (count(match3) != 0) {
+        ! "match3=" + match3;
+        ^ 6;
+    }
+    ? (find(match4, "name=alice;") < 0 or find(match4, "name=cara;") < 0 or find(match4, "name=drew;") >= 0) {
+        ! "match4=" + match4;
+        ^ 7;
+    }
+    ? (find(match5, "__key=10;") < 0 or find(match5, "__key=40;") < 0 or find(match5, "__key=20;") >= 0 or validate0 != "ok" or not closed0 or not closed1) {
+        ! "match5=" + match5 + ":" + validate0;
+        ^ 8;
+    }
+
+    ! "ashdb compound predicate smoke ok";
+    ^ 0;
+}

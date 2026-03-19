@@ -1,0 +1,74 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: index_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    users_root := db_create_table(db, "users", 20);
+    email_index := db_create_index(db, "users", "email");
+    dup_index := db_create_index(db, "users", "email");
+    user0 := db_insert_with_index(db, "users", "email", 10, "alice", 1001);
+    user1 := db_insert_with_index(db, "users", "email", 20, "bob", 1002);
+    dup_secondary := db_insert_with_index(db, "users", "email", 30, "carol", 1002);
+    updated := db_update_with_index(db, "users", "email", 20, "bobby", 1002, 1003);
+    bad_update := db_update_with_index(db, "users", "email", 20, "broken", 1002, 1004);
+    found0 := db_index_get(db, "users", "email", 1001);
+    found1 := db_index_get(db, "users", "email", 1002);
+    found2 := db_index_get(db, "users", "email", 1003);
+    found_missing := db_index_get(db, "users", "email", 9999);
+    deleted := db_delete_with_index(db, "users", "email", 10, 1001);
+    found_deleted := db_index_get(db, "users", "email", 1001);
+    synced0 := db_sync(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    users_root1 := db_table_root(reopened, "users");
+    email_index1 := db_table_root(reopened, "idx.users.email");
+    found_again := db_index_get(reopened, "users", "email", 1003);
+    user_again := db_get(reopened, "users", 20);
+    scan_index := db_scan_text(reopened, "idx.users.email", "|");
+    synced1 := db_sync(reopened);
+    closed1 := db_close(reopened);
+
+    ? (users_root != 2 or email_index != 3 or dup_index != -2) {
+        ! "roots=" + text_of(users_root) + ":" + text_of(email_index) + ":" + text_of(dup_index);
+        ^ 2;
+    }
+    ? (user0 < 0 or user1 < 0) {
+        ! "users=" + text_of(user0) + ":" + text_of(user1);
+        ^ 3;
+    }
+    ? (dup_secondary != -2 or updated < 0 or bad_update != -3) {
+        ! "mut=" + text_of(dup_secondary) + ":" + text_of(updated) + ":" + text_of(bad_update);
+        ^ 4;
+    }
+    ? (found0 != 10 or found1 != -1 or found2 != 20 or found_missing != -1) {
+        ! "found=" + text_of(found0) + ":" + text_of(found1) + ":" + text_of(found2) + ":" + text_of(found_missing);
+        ^ 5;
+    }
+    ? (deleted < 0 or found_deleted != -1) {
+        ! "delete=" + text_of(deleted) + ":" + text_of(found_deleted);
+        ^ 6;
+    }
+    ? (users_root1 != 2 or email_index1 != 3) {
+        ! "roots1=" + text_of(users_root1) + ":" + text_of(email_index1);
+        ^ 7;
+    }
+    ? (found_again != 20 or slice(user_again, 0, 5) != "bobby") {
+        ! "again=" + text_of(found_again) + ":" + user_again;
+        ^ 8;
+    }
+    ? (scan_index != "20.........") {
+        ! "scan=" + scan_index;
+        ^ 9;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 10;
+    }
+
+    ! "ashdb index smoke ok";
+    ^ 0;
+}

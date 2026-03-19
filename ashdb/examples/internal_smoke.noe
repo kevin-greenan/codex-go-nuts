@@ -1,0 +1,49 @@
+& "../lib/table_internal.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: internal_smoke <db-path>";
+        ^ 1;
+    }
+
+    pager := pager_open(arg(1), 96);
+    page_id := pager_alloc_page(pager);
+    initialized := internal_init_page(pager, page_id, 11);
+    insert0 := internal_insert_separator(pager, page_id, 20, 22);
+    insert1 := internal_insert_separator(pager, page_id, 40, 33);
+    insert_dup := internal_insert_separator(pager, page_id, 20, 44);
+    page := pager_read_page(pager, page_id);
+    key_count := internal_key_count(page);
+    left_child := internal_left_child(page);
+    child0 := internal_child_for_key(pager, page_id, 10);
+    child1 := internal_child_for_key(pager, page_id, 20);
+    child2 := internal_child_for_key(pager, page_id, 35);
+    child3 := internal_child_for_key(pager, page_id, 50);
+    synced := pager_sync(pager);
+    closed := pager_close(pager);
+
+    ? (page_id != 1 or initialized != 96) {
+        ^ 2;
+    }
+    ? (insert0 != 0 or insert1 != 1 or insert_dup != -2) {
+        ^ 3;
+    }
+    ? (slice(page, 0, 2) != "DI") {
+        ! "page=" + page;
+        ^ 4;
+    }
+    ? (key_count != 2 or left_child != 11) {
+        ! "meta=" + text_of(key_count) + ":" + text_of(left_child);
+        ^ 5;
+    }
+    ? (child0 != 11 or child1 != 22 or child2 != 22 or child3 != 33) {
+        ! "children=" + text_of(child0) + ":" + text_of(child1) + ":" + text_of(child2) + ":" + text_of(child3);
+        ^ 6;
+    }
+    ? (not synced or not closed) {
+        ^ 7;
+    }
+
+    ! "ashdb internal smoke ok";
+    ^ 0;
+}

@@ -1,0 +1,96 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: row_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    users_root := db_define_table(db, "users", 96, "name:text,email:text,role:text");
+    dup_users := db_define_table(db, "users", 96, "name:text");
+
+    alice := "";
+    alice = row_append(alice, "name", "alice");
+    alice = row_append(alice, "email", "alice@home");
+    alice = row_append(alice, "role", "cook");
+
+    bob := "";
+    bob = row_append(bob, "name", "bob");
+    bob = row_append(bob, "email", "bob@home");
+    bob = row_append(bob, "role", "shop");
+
+    put0 := db_insert(db, "users", 1, alice);
+    put1 := db_insert(db, "users", 2, bob);
+    email0 := db_row_get(db, "users", 1, "email");
+    update0 := db_row_put(db, "users", 1, "role", "admin");
+    update1 := db_row_put(db, "users", 1, "phone", "555");
+    role0 := db_row_get(db, "users", 1, "role");
+    phone0 := db_row_get(db, "users", 1, "phone");
+    fields0 := db_table_fields(db, "users");
+    schema0 := db_table_schema(db, "users");
+    synced0 := db_sync(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    users_root1 := db_table_root(reopened, "users");
+    email1 := db_row_get(reopened, "users", 1, "email");
+    role1 := db_row_get(reopened, "users", 1, "role");
+    phone1 := db_row_get(reopened, "users", 1, "phone");
+    fields1 := db_table_fields(reopened, "users");
+    schema1 := db_table_schema(reopened, "users");
+    schema_table_fields := db_table_fields(reopened, "__schema");
+    synced1 := db_sync(reopened);
+    closed1 := db_close(reopened);
+
+    ? (users_root < 0 or dup_users != -2) {
+        ! "roots=" + text_of(users_root) + ":" + text_of(dup_users);
+        ^ 2;
+    }
+    ? (put0 < 0 or put1 < 0) {
+        ! "puts=" + text_of(put0) + ":" + text_of(put1);
+        ^ 3;
+    }
+    ? (email0 != "alice@home" or update0 < 0 or update1 < 0) {
+        ! "row0=" + email0 + ":" + text_of(update0) + ":" + text_of(update1);
+        ^ 4;
+    }
+    ? (role0 != "admin" or phone0 != "555") {
+        ! "fields0=" + role0 + ":" + phone0;
+        ^ 5;
+    }
+    ? (fields0 != "name:text,email:text,role:text") {
+        ! "schema_fields0=" + fields0;
+        ^ 6;
+    }
+    ? (row_get(schema0, "name") != "users" or row_get(schema0, "slot_width") != "96") {
+        ! "schema0=" + schema0;
+        ^ 7;
+    }
+    ? (users_root1 != users_root) {
+        ! "root1=" + text_of(users_root1);
+        ^ 8;
+    }
+    ? (email1 != "alice@home" or role1 != "admin" or phone1 != "555") {
+        ! "row1=" + email1 + ":" + role1 + ":" + phone1;
+        ^ 9;
+    }
+    ? (fields1 != "name:text,email:text,role:text") {
+        ! "fields1=" + fields1;
+        ^ 10;
+    }
+    ? (row_get(schema1, "name") != "users" or row_get(schema1, "slot_width") != "96") {
+        ! "schema1=" + schema1;
+        ^ 11;
+    }
+    ? (schema_table_fields != "name:text,slot_width:i64,fields:text") {
+        ! "schema_table=" + schema_table_fields;
+        ^ 12;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 13;
+    }
+
+    ! "ashdb row smoke ok";
+    ^ 0;
+}

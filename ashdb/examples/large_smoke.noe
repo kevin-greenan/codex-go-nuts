@@ -1,0 +1,118 @@
+& "../lib/db.noe";
+
+@user_payload(name: text, age: i64, email_key: i64) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "age", text_of(age));
+    payload = row_append(payload, "email_key", text_of(email_key));
+    ^ payload;
+}
+
+@table_key_count(db: DB, table_name: text) -> i64 {
+    cursor := db_cursor_open(db, table_name);
+    total := 0;
+    ~ (db_cursor_valid(cursor)) {
+        total = total + 1;
+        cursor = db_cursor_next(db, cursor);
+    }
+    ^ total;
+}
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: large_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 512);
+    defined := db_define_table(db, "users", 80, "name:text,age:i64,email_key:i64!");
+
+    inserted := 0;
+    key := 1;
+    ~ (key <= 1200) {
+        wrote := db_insert_row(db, "users", key, user_payload("user" + text_of(key), 18 + (key / 10), 10000 + key));
+        ? (wrote < 0) {
+            ! "insert=" + text_of(key) + ":" + text_of(wrote);
+            ^ 2;
+        }
+        inserted = inserted + 1;
+        key = key + 1;
+    }
+
+    validate0 := db_validate_report(db);
+    count0 := table_key_count(db, "users");
+    lookup0 := db_get_by_index_result(db, "users", "email_key", 10888);
+
+    deleted := 0;
+    key = 3;
+    ~ (key <= 900) {
+        removed := db_delete_row(db, "users", key);
+        ? (removed < 0) {
+            ! "delete=" + text_of(key) + ":" + text_of(removed);
+            ^ 3;
+        }
+        deleted = deleted + 1;
+        key = key + 3;
+    }
+
+    validate1 := db_validate_report(db);
+    count1 := table_key_count(db, "users");
+    range0 := db_scan_where_field_i64_range_rows_text(db, "users", "age", 100, 105, "|");
+    compacted := db_compact_database(db);
+    validate2 := db_validate_report(db);
+    count2 := table_key_count(db, "users");
+    free0 := pager_free_head(db.pager);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 512);
+    validate3 := db_validate_report(reopened);
+    count3 := table_key_count(reopened, "users");
+    row1 := db_get_result(reopened, "users", 1);
+    row3 := db_get_result(reopened, "users", 3);
+    row1200 := db_get_result(reopened, "users", 1200);
+    idx1 := db_get_by_index_result(reopened, "users", "email_key", 10001);
+    idx3 := db_get_by_index_result(reopened, "users", "email_key", 10003);
+    idx1200 := db_get_by_index_result(reopened, "users", "email_key", 11200);
+    range1 := db_scan_where_field_i64_range_text(reopened, "users", "age", 130, 135, "|");
+    closed1 := db_close(reopened);
+
+    ? (defined <= 0 or inserted != 1200) {
+        ! "defined=" + text_of(defined) + ":" + text_of(inserted);
+        ^ 4;
+    }
+    ? (validate0 != "ok" or count0 != 1200 or row_get(lookup0, "ok") != "true" or row_get(lookup0, "__key") != "888") {
+        ! "initial=" + validate0 + ":" + text_of(count0) + ":" + lookup0;
+        ^ 5;
+    }
+    ? (deleted != 300 or validate1 != "ok" or count1 != 900) {
+        ! "after_delete=" + text_of(deleted) + ":" + validate1 + ":" + text_of(count1);
+        ^ 6;
+    }
+    ? (find(range0, "__key=820;") < 0 or compacted != 1 or validate2 != "ok" or count2 != 900) {
+        ! "compact=" + range0 + ":" + text_of(compacted) + ":" + validate2 + ":" + text_of(count2);
+        ^ 7;
+    }
+    ? (free0 <= 0 or not closed0) {
+        ! "free0=" + text_of(free0);
+        ^ 8;
+    }
+    ? (validate3 != "ok" or count3 != 900) {
+        ! "reopen_validate=" + validate3 + ":" + text_of(count3);
+        ^ 9;
+    }
+    ? (row_get(row1, "found") != "true" or row_get(row3, "found") != "false" or row_get(row1200, "found") != "true") {
+        ! "rows=" + row1 + ":" + row3 + ":" + row1200;
+        ^ 10;
+    }
+    ? (row_get(idx1, "found") != "true" or row_get(idx3, "found") != "false" or row_get(idx1200, "__key") != "1200") {
+        ! "index=" + idx1 + ":" + idx3 + ":" + idx1200;
+        ^ 11;
+    }
+    ? (find(range1, "name=user1120;") < 0 or not closed1) {
+        ! "range1=" + range1;
+        ^ 12;
+    }
+
+    ! "ashdb large smoke ok";
+    ^ 0;
+}

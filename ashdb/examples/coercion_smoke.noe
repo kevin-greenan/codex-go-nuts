@@ -1,0 +1,93 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: coercion_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 256);
+    defined := db_define_table(db, "users", 112, "name:text,age:i64,active:bool=true,note:text?");
+
+    row0 := "";
+    row0 = row_append(row0, "name", "alice");
+    row0 = row_append(row0, "age", "0012");
+    row0 = row_append(row0, "active", "TRUE");
+
+    inserted0 := db_insert_row(db, "users", 10, row0);
+    stored0 := db_get(db, "users", 10);
+
+    row1 := "";
+    row1 = row_append(row1, "name", "bob");
+    row1 = row_append(row1, "age", " +27 ");
+    inserted1 := db_insert_row(db, "users", 20, row1);
+    stored1 := db_get(db, "users", 20);
+
+    row2 := "";
+    row2 = row_append(row2, "name", "cara");
+    row2 = row_append(row2, "age", "44");
+    row2 = row_append(row2, "active", "0");
+    row2 = row_append(row2, "note", "null");
+    inserted2 := db_insert_row(db, "users", 30, row2);
+    stored2 := db_get(db, "users", 30);
+
+    bad0 := "";
+    bad0 = row_append(bad0, "name", "drew");
+    bad0 = row_append(bad0, "age", "abc");
+    inserted_bad0 := db_insert_row(db, "users", 40, bad0);
+
+    updated0 := "";
+    updated0 = row_append(updated0, "name", "alice");
+    updated0 = row_append(updated0, "age", "+99");
+    updated0 = row_append(updated0, "active", "False");
+    updated0 = row_append(updated0, "note", "null");
+    updated1 := db_update_row(db, "users", 10, updated0);
+    stored3 := db_get(db, "users", 10);
+
+    migrated := db_alter_table_add_field(db, "users", "level:i64=0007");
+    stored4 := db_get(db, "users", 20);
+    validate0 := db_validate_report(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 256);
+    stored5 := db_get(reopened, "users", 10);
+    stored6 := db_get(reopened, "users", 20);
+    validate1 := db_validate_report(reopened);
+    closed1 := db_close(reopened);
+
+    ? (defined <= 0) {
+        ! "defined=" + text_of(defined);
+        ^ 2;
+    }
+    ? (inserted0 < 0 or row_get(stored0, "age") != "12" or row_get(stored0, "active") != "true" or row_get(stored0, "note") != "null") {
+        ! "stored0=" + stored0;
+        ^ 3;
+    }
+    ? (inserted1 < 0 or row_get(stored1, "age") != "27" or row_get(stored1, "active") != "true") {
+        ! "stored1=" + stored1;
+        ^ 4;
+    }
+    ? (inserted2 < 0 or row_get(stored2, "active") != "false" or row_get(stored2, "note") != "null") {
+        ! "stored2=" + stored2;
+        ^ 5;
+    }
+    ? (inserted_bad0 != -2) {
+        ! "inserted_bad0=" + text_of(inserted_bad0);
+        ^ 6;
+    }
+    ? (updated1 < 0 or row_get(stored3, "age") != "99" or row_get(stored3, "active") != "false") {
+        ! "stored3=" + stored3;
+        ^ 7;
+    }
+    ? (migrated < 0 or row_get(stored4, "level") != "7" or validate0 != "ok") {
+        ! "stored4=" + stored4 + ":" + validate0;
+        ^ 8;
+    }
+    ? (row_get(stored5, "age") != "99" or row_get(stored6, "level") != "7" or validate1 != "ok" or not closed0 or not closed1) {
+        ! "reopen=" + stored5 + ":" + stored6 + ":" + validate1;
+        ^ 9;
+    }
+
+    ! "ashdb coercion smoke ok";
+    ^ 0;
+}
