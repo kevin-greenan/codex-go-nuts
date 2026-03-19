@@ -170,6 +170,14 @@ It is not self-hosting yet, but it now has the structural features needed to sta
 
 `Noema` now has a bootstrap compiler written in `Noema` at `selfhost/mini_compiler.noe`.
 
+Parity expectation:
+
+- the Rust compiler is the reference implementation
+- the Noema-written compiler should be updated in parallel as features are added
+- self-hosting validation is part of the normal workflow, not a later cleanup pass
+- `make -C codex-lang selfhost-check` is the current self-hosting gate
+- `make -C codex-lang parity-check` is the broader combined verification target
+
 Current scope of that compiler:
 
 - tokenizes source text itself

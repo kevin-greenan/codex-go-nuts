@@ -156,6 +156,16 @@ There is now also an experimental `native-arm64` backend for `arm64-apple-darwin
 - Higher-level aggregate features such as `%` records, fields, and `list<T>` still fall back to generated C support code inside the same native build.
 - That means every program under `examples/` can now be built and run through `NOEMA_BACKEND=native-arm64` on this Mac, even though the fallback surface is still larger than we want.
 
+## Parity Rule
+
+The Rust compiler and the Noema-written compiler are intended to move in parallel.
+
+- New language/compiler features should be reflected in both compiler tracks, not just the Rust implementation.
+- `make -C codex-lang selfhost-check` is the baseline proof that Noema still compiles Noema.
+- `make -C codex-lang parity-check` is the combined workflow target for self-hosted and native-backend verification.
+
+At the moment the Noema-written compiler is still behind the full Rust compiler surface, so feature parity is not complete yet. But from here forward, parity work is part of the definition of done rather than follow-up work.
+
 There is also now a first self-hosting bridge:
 
 - `selfhost/mini_compiler.noe` is a compiler written in Noema
