@@ -312,6 +312,25 @@
     ^ db_insert_row(db, hearthlight_recipes_table(), hearthlight_next_key(db, hearthlight_recipes_table()), payload);
 }
 
+@hearthlight_add_member(db: DB, name: text, role: text, color: text) -> i64 {
+    payload := hearthlight_member_row(name, role, color);
+    ^ db_insert_row(db, hearthlight_members_table(), hearthlight_next_key(db, hearthlight_members_table()), payload);
+}
+
+@hearthlight_update_household(db: DB, name: text, shopping_day: text, planning_day: text) -> i64 {
+    patch := "";
+    ? (count(name) > 0) {
+        patch = row_append(patch, "name", name);
+    }
+    ? (count(shopping_day) > 0) {
+        patch = row_append(patch, "shopping_day", shopping_day);
+    }
+    ? (count(planning_day) > 0) {
+        patch = row_append(patch, "planning_day", planning_day);
+    }
+    ^ db_patch_row(db, hearthlight_households_table(), 1, patch);
+}
+
 @hearthlight_add_grocery(db: DB, name: text, section: text) -> i64 {
     payload := hearthlight_grocery_row(name, section, "false");
     ^ db_insert_row(db, hearthlight_groceries_table(), hearthlight_next_key(db, hearthlight_groceries_table()), payload);

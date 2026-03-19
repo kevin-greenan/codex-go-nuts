@@ -8,10 +8,13 @@
         kiln_route("GET", "/pantry", "pantry"),
         kiln_route("GET", "/chores", "chores"),
         kiln_route("GET", "/recipes", "recipes"),
+        kiln_route("GET", "/setup", "setup"),
         kiln_route("POST", "/planner/meals", "planner-meal-save"),
         kiln_route("POST", "/planner/recipes", "planner-recipe-apply"),
         kiln_route("POST", "/planner/meals/:id/groceries", "planner-meal-groceries"),
         kiln_route("POST", "/recipes", "recipe-create"),
+        kiln_route("POST", "/setup/household", "setup-household"),
+        kiln_route("POST", "/setup/members", "setup-member"),
         kiln_route("POST", "/groceries", "grocery-create"),
         kiln_route("POST", "/chores", "chore-create"),
         kiln_route("POST", "/groceries/:id/purchase", "grocery-purchase"),
@@ -163,6 +166,60 @@
     ^ kiln_reply_with_flash(kiln_reply_redirect("/planner"), "success", "Added that recipe to the weekly plan.");
 }
 
+@hearthlight_handle_household_update(db: DB, request: KilnHttpRequest) -> KilnReply {
+    name := kiln_http_form_value(request, "name");
+    planning_day := kiln_http_form_value(request, "planning_day");
+    shopping_day := kiln_http_form_value(request, "shopping_day");
+    ? (count(name) == 0) {
+        ^ kiln_reply_with_flash(kiln_reply_redirect("/setup"), "notice", "Add a household name before saving.");
+    }
+
+    began := db_begin(db);
+    ? (not began) {
+        ^ kiln_reply_text(500, "unable to begin household update transaction");
+    }
+    updated := hearthlight_update_household(db, name, shopping_day, planning_day);
+    ? (updated < 0) {
+        rolled := db_rollback(db);
+        ^ kiln_reply_with_flash(kiln_reply_redirect("/setup"), "notice", "Hearthlight could not update the household settings.");
+    }
+    committed := db_commit(db);
+    ? (not committed) {
+        ^ kiln_reply_text(500, "unable to commit household update transaction");
+    }
+    ^ kiln_reply_with_flash(kiln_reply_redirect("/setup"), "success", "Saved household rhythm settings.");
+}
+
+@hearthlight_handle_member_create(db: DB, request: KilnHttpRequest) -> KilnReply {
+    name := kiln_http_form_value(request, "name");
+    role := kiln_http_form_value(request, "role");
+    color := kiln_http_form_value(request, "color");
+    ? (count(name) == 0) {
+        ^ kiln_reply_with_flash(kiln_reply_redirect("/setup"), "notice", "Add a member name before saving.");
+    }
+    ? (count(role) == 0) {
+        role = "Household member";
+    }
+    ? (count(color) == 0) {
+        color = "sage";
+    }
+
+    began := db_begin(db);
+    ? (not began) {
+        ^ kiln_reply_text(500, "unable to begin member create transaction");
+    }
+    inserted := hearthlight_add_member(db, name, role, color);
+    ? (inserted < 0) {
+        rolled := db_rollback(db);
+        ^ kiln_reply_with_flash(kiln_reply_redirect("/setup"), "notice", "Hearthlight could not add that member.");
+    }
+    committed := db_commit(db);
+    ? (not committed) {
+        ^ kiln_reply_text(500, "unable to commit member create transaction");
+    }
+    ^ kiln_reply_with_flash(kiln_reply_redirect("/setup"), "success", "Added " + name + " to the household.");
+}
+
 @hearthlight_handle_chore_complete(db: DB, chore_id_text: text) -> KilnReply {
     ? (count(chore_id_text) == 0) {
         ^ hearthlight_redirect_with_flash("notice", "That chore link was missing an id.");
@@ -278,6 +335,14 @@
     ^ reply;
 }
 
+@hearthlight_setup_reply(db: DB, request: KilnHttpRequest) -> KilnReply {
+    reply := kiln_reply_html(200, hearthlight_setup_page(db, request));
+    ? (count(kiln_flash_value(request)) > 0) {
+        ^ kiln_reply_clear_flash(reply);
+    }
+    ^ reply;
+}
+
 @hearthlight_route_reply(db: DB, dispatch: KilnDispatch, request: KilnHttpRequest) -> KilnReply {
     ? (kiln_dispatch_is(dispatch, "home")) {
         ^ hearthlight_dashboard_reply(db, request);
@@ -294,6 +359,9 @@
     ? (kiln_dispatch_is(dispatch, "recipes")) {
         ^ hearthlight_recipes_reply(db, request);
     }
+    ? (kiln_dispatch_is(dispatch, "setup")) {
+        ^ hearthlight_setup_reply(db, request);
+    }
     ? (kiln_dispatch_is(dispatch, "planner-meal-save")) {
         ^ hearthlight_handle_planner_meal_save(db, request);
     }
@@ -305,6 +373,12 @@
     }
     ? (kiln_dispatch_is(dispatch, "recipe-create")) {
         ^ hearthlight_handle_recipe_create(db, request);
+    }
+    ? (kiln_dispatch_is(dispatch, "setup-household")) {
+        ^ hearthlight_handle_household_update(db, request);
+    }
+    ? (kiln_dispatch_is(dispatch, "setup-member")) {
+        ^ hearthlight_handle_member_create(db, request);
     }
     ? (kiln_dispatch_is(dispatch, "grocery-create")) {
         ^ hearthlight_handle_grocery_create(db, request);

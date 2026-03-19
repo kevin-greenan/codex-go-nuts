@@ -237,12 +237,13 @@ What is already working:
 10. planner meals can now carry ingredient lists and generate grocery items directly into the shared shopping flow
 11. a chores route now supports recurring chore creation, completion history, and completion that advances the next due state instead of just hiding work
 12. a recipes route now stores reusable meals, scores pantry matches, and lets households drop saved recipes directly into the weekly plan
+13. a setup route now lets a real household edit its name and weekly rhythm, and add members without editing seed data
 
 The current goal is a real vertical slice, not a full product:
 
 1. one seeded household
 2. a dashboard plus planner route
-3. a dashboard, planner, grocery, pantry, chores, and recipe workflow with connected write actions
+3. a dashboard, planner, grocery, pantry, chores, recipe, and setup workflow with connected write actions
 4. direct-compiler smoke coverage proving the app stack works end to end
 
 ## Local Development

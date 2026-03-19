@@ -25,6 +25,7 @@ examples_for_suite() {
         hearthlight/examples/pantry_smoke.noe \
         hearthlight/examples/chores_smoke.noe \
         hearthlight/examples/recipes_smoke.noe \
+        hearthlight/examples/setup_smoke.noe \
         hearthlight/examples/grocery_generation_smoke.noe
       ;;
     all)
@@ -35,6 +36,7 @@ examples_for_suite() {
         hearthlight/examples/pantry_smoke.noe \
         hearthlight/examples/chores_smoke.noe \
         hearthlight/examples/recipes_smoke.noe \
+        hearthlight/examples/setup_smoke.noe \
         hearthlight/examples/grocery_generation_smoke.noe
       ;;
     *)

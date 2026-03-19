@@ -1,0 +1,58 @@
+& "../lib/app.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: setup_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := hearthlight_open(arg(1));
+
+    page_request := kiln_http_parse_request("GET /setup HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    page_dispatch := kiln_dispatch(hearthlight_routes(), page_request);
+    page_reply := hearthlight_route_reply(db, page_dispatch, page_request);
+    page_response := kiln_reply_response(page_reply);
+
+    household_request := kiln_http_parse_request("POST /setup/household HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=Elm+House&planning_day=Saturday&shopping_day=Friday");
+    household_dispatch := kiln_dispatch(hearthlight_routes(), household_request);
+    household_reply := hearthlight_route_reply(db, household_dispatch, household_request);
+    household_response := kiln_reply_response(household_reply);
+
+    member_request := kiln_http_parse_request("POST /setup/members HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=Riley&role=Cleanup+captain&color=clay");
+    member_dispatch := kiln_dispatch(hearthlight_routes(), member_request);
+    member_reply := hearthlight_route_reply(db, member_dispatch, member_request);
+    member_response := kiln_reply_response(member_reply);
+
+    household := db_get(db, hearthlight_households_table(), 1);
+    members := db_scan_where_field_equals_rows_text(db, hearthlight_members_table(), "name", "Riley", "|");
+    validate := db_validate_report(db);
+    closed := db_close(db);
+
+    ? (find(page_response, "HTTP/1.1 200 OK") < 0 or find(page_response, "Household Rhythm") < 0 or find(page_response, "Add Member") < 0) {
+        ! "setup page mismatch";
+        ^ 2;
+    }
+    ? (find(household_response, "Saved household rhythm settings.") < 0) {
+        ! "household response mismatch";
+        ^ 3;
+    }
+    ? (find(member_response, "Added Riley to the household.") < 0) {
+        ! "member response mismatch";
+        ^ 4;
+    }
+    ? (row_get(household, "name") != "Elm House" or row_get(household, "planning_day") != "Saturday" or row_get(household, "shopping_day") != "Friday") {
+        ! "household mismatch=" + household;
+        ^ 5;
+    }
+    ? (find(members, "role=Cleanup captain;") < 0 or find(members, "color=clay;") < 0) {
+        ! "member mismatch=" + members;
+        ^ 6;
+    }
+    ? (validate != "ok" or not closed) {
+        ! "validate=" + validate;
+        ^ 7;
+    }
+
+    ! "hearthlight setup smoke ok";
+    ^ 0;
+}
