@@ -70,11 +70,12 @@ What is already working:
 7. handler ergonomics now include dispatch param helpers and a shared `KilnReply` response model
 8. HTTP parsing now supports repeated-header access and cookie lookup helpers
 9. response helpers now support custom headers and `Set-Cookie` emission
+10. a small server wrapper now handles one-shot listen/accept/read/reply/close flow for example apps
 
 What is next:
 
-1. grow handler ergonomics further with small server wrappers and less hand-written request loops
-2. extend request parsing further for richer body handling
+1. extend request parsing further for richer body handling
+2. grow handler ergonomics further with higher-level route app wrappers
 3. add forms, layout helpers, and higher-level page composition patterns
 
 ## Architecture Overview
