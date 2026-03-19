@@ -1,0 +1,48 @@
+& "../lib/app.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: planner_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := hearthlight_open(arg(1));
+
+    planner_request := kiln_http_parse_request("GET /planner HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    planner_dispatch := kiln_dispatch(hearthlight_routes(), planner_request);
+    planner_reply := hearthlight_route_reply(db, planner_dispatch, planner_request);
+    planner_response := kiln_reply_response(planner_reply);
+
+    save_request := kiln_http_parse_request("POST /planner/meals HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nday_key=20260320&title=Pizza+Night&notes=Use+the+dough+from+the+freezer");
+    save_dispatch := kiln_dispatch(hearthlight_routes(), save_request);
+    save_reply := hearthlight_route_reply(db, save_dispatch, save_request);
+    save_response := kiln_reply_response(save_reply);
+    friday_meal := db_get_result(db, hearthlight_meals_table(), 20260320);
+
+    validate := db_validate_report(db);
+    closed := db_close(db);
+
+    ? (find(planner_response, "HTTP/1.1 200 OK") < 0 or find(planner_response, "Week At A Glance") < 0 or find(planner_response, "Plan A Meal") < 0) {
+        ! "planner page mismatch";
+        ^ 2;
+    }
+    ? (find(planner_response, "Monday") < 0 or find(planner_response, "Sunday") < 0) {
+        ! "planner week mismatch";
+        ^ 3;
+    }
+    ? (find(save_response, "HTTP/1.1 302") < 0 or find(save_response, "Saved Pizza Night to the weekly plan.") < 0) {
+        ! "planner save mismatch";
+        ^ 4;
+    }
+    ? (row_get(friday_meal, "title") != "Pizza Night" or row_get(friday_meal, "notes") != "Use the dough from the freezer" or row_get(friday_meal, "day_label") != "Friday") {
+        ! "planner row mismatch=" + friday_meal;
+        ^ 5;
+    }
+    ? (validate != "ok" or not closed) {
+        ! "validate=" + validate;
+        ^ 6;
+    }
+
+    ! "hearthlight planner smoke ok";
+    ^ 0;
+}

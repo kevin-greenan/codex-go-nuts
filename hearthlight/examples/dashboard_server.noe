@@ -1,0 +1,19 @@
+& "../lib/app.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 3) {
+        ! "usage: dashboard_server <db-path> <port>";
+        ^ 1;
+    }
+
+    db := hearthlight_open(arg(1));
+    app := kiln_app(hearthlight_routes(), 8192);
+    req := kiln_app_receive_once(app, i64_of(arg(2)));
+    reply := hearthlight_route_reply(db, req.dispatch, kiln_app_request(req));
+    finished := kiln_app_finish_reply(req, reply);
+    closed := db_close(db);
+    ? (not finished or not closed) {
+        ^ 2;
+    }
+    ^ 0;
+}

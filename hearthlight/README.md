@@ -219,6 +219,48 @@ The first implementation milestone should deliver:
 
 This milestone is intentionally narrow: it should be good enough for one real household to try for two weeks and reveal where the product is genuinely helpful versus merely organized.
 
+## Current Status
+
+Hearthlight is now a real local-first MVP on `codex/hearthlight-foundation`.
+
+What is already working:
+
+1. Hearthlight now uses AshDB and Kiln as libraries from inside `hearthlight/`
+2. the app bootstraps a local AshDB file with tables for households, members, meals, groceries, and chores
+3. the first seeded household dashboard renders server-side HTML through Kiln
+4. the dashboard shows tonight's meal, household members, grocery items, and open chores
+5. the first app actions support adding a grocery item and marking a chore complete
+6. the first local asset path is wired for Hearthlight-specific styling
+7. a long-running dashboard daemon entrypoint now exists for local browser testing and containerization
+8. a weekly planner route now shows a full seven-day meal plan and supports saving meals into the plan
+9. a pantry route now tracks on-hand inventory, flags low-stock staples, and accepts grocery purchases into pantry state
+10. planner meals can now carry ingredient lists and generate grocery items directly into the shared shopping flow
+11. a chores route now supports recurring chore creation, completion history, and completion that advances the next due state instead of just hiding work
+12. a recipes route now stores reusable meals, scores pantry matches, and lets households drop saved recipes directly into the weekly plan
+13. a setup route now lets a real household edit its name and weekly rhythm, and add members without editing seed data
+14. the pantry route now turns low-stock staples into grocery items and surfaces pantry-friendly recipe suggestions directly in the workflow
+
+The current shape is a real vertical slice, not a full product:
+
+1. one configurable household
+2. a dashboard plus planner route
+3. a dashboard, planner, grocery, pantry, chores, recipe, and setup workflow with connected write actions
+4. direct-compiler smoke coverage proving the app stack works end to end
+
+## Local Development
+
+The fastest local workflow is now:
+
+1. `make -C hearthlight smoke`
+2. `make -C hearthlight daemon`
+3. `make -C hearthlight run PORT=9124 DB=/tmp/hearthlight.db`
+
+Then browse to:
+
+1. `http://127.0.0.1:9124/`
+2. If an older local DB looks empty after a schema change, remove it and rerun with a fresh path such as `/tmp/hearthlight-v2.db`
+3. direct-compiler smoke coverage proving the app stack works end to end
+
 ## Definition of Success
 
 Hearthlight succeeds if it becomes the place a household checks when deciding what to cook, what to buy, and what needs doing, and if it makes that coordination feel lighter instead of more complicated.

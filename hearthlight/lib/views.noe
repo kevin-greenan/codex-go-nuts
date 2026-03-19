@@ -1,0 +1,508 @@
+& "../../kiln-web/lib/html.noe";
+& "db.noe";
+
+@hearthlight_card(title: text, body: text) -> text {
+    heading := kiln_html_tag("div", kiln_html_attr("class", "panel-heading"), kiln_html_tag("h2", "", kiln_html_text(title)));
+    ^ kiln_html_tag("section", kiln_html_attr("class", "panel"), heading + body);
+}
+
+@hearthlight_stat(label: text, value: text) -> text {
+    content := kiln_html_tag("span", kiln_html_attr("class", "stat-label"), kiln_html_text(label));
+    content = content + kiln_html_tag("strong", kiln_html_attr("class", "stat-value"), kiln_html_text(value));
+    ^ kiln_html_tag("div", kiln_html_attr("class", "stat"), content);
+}
+
+@hearthlight_collection(items: text) -> text {
+    ^ kiln_html_tag("div", kiln_html_attr("class", "collection"), items);
+}
+
+@hearthlight_collection_row(title: text, meta: text, extra: text) -> text {
+    main := kiln_html_tag("div", kiln_html_attr("class", "collection-main"), kiln_html_tag("div", kiln_html_attr("class", "collection-title"), kiln_html_text(title)) + kiln_html_tag("div", kiln_html_attr("class", "collection-meta"), kiln_html_text(meta)));
+    ^ kiln_html_tag("div", kiln_html_attr("class", "collection-row"), main + extra);
+}
+
+@hearthlight_nav(current_path: text) -> text {
+    dashboard_class := "nav-link";
+    planner_class := "nav-link";
+    pantry_class := "nav-link";
+    chores_class := "nav-link";
+    recipes_class := "nav-link";
+    setup_class := "nav-link";
+    ? (current_path == "/") {
+        dashboard_class = "nav-link active";
+    }
+    ? (current_path == "/planner") {
+        planner_class = "nav-link active";
+    }
+    ? (current_path == "/pantry") {
+        pantry_class = "nav-link active";
+    }
+    ? (current_path == "/chores") {
+        chores_class = "nav-link active";
+    }
+    ? (current_path == "/recipes") {
+        recipes_class = "nav-link active";
+    }
+    ? (current_path == "/setup") {
+        setup_class = "nav-link active";
+    }
+    links := kiln_html_tag("a", kiln_html_attr("class", dashboard_class) + kiln_html_attr("href", "/"), kiln_html_text("Dashboard"));
+    links = links + kiln_html_tag("a", kiln_html_attr("class", planner_class) + kiln_html_attr("href", "/planner"), kiln_html_text("Planner"));
+    links = links + kiln_html_tag("a", kiln_html_attr("class", pantry_class) + kiln_html_attr("href", "/pantry"), kiln_html_text("Pantry"));
+    links = links + kiln_html_tag("a", kiln_html_attr("class", chores_class) + kiln_html_attr("href", "/chores"), kiln_html_text("Chores"));
+    links = links + kiln_html_tag("a", kiln_html_attr("class", recipes_class) + kiln_html_attr("href", "/recipes"), kiln_html_text("Recipes"));
+    links = links + kiln_html_tag("a", kiln_html_attr("class", setup_class) + kiln_html_attr("href", "/setup"), kiln_html_text("Setup"));
+    ^ kiln_html_tag("nav", kiln_html_attr("class", "top-nav"), links);
+}
+
+@hearthlight_flash_html(request: KilnHttpRequest) -> text {
+    level := kiln_flash_level(request);
+    message := kiln_flash_message(request);
+    ? (count(message) == 0) {
+        ^ "";
+    }
+    class_attr := kiln_html_attr("class", "flash " + level);
+    ^ kiln_html_tag("div", class_attr, kiln_html_text(message));
+}
+
+@hearthlight_member_color_class(color: text) -> text {
+    ? (color == "terracotta") {
+        ^ "member-chip member-chip-terracotta";
+    }
+    ? (color == "sage") {
+        ^ "member-chip member-chip-sage";
+    }
+    ? (color == "clay") {
+        ^ "member-chip member-chip-clay";
+    }
+    ? (color == "ocean") {
+        ^ "member-chip member-chip-ocean";
+    }
+    ? (color == "gold") {
+        ^ "member-chip member-chip-gold";
+    }
+    ^ "member-chip member-chip-sage";
+}
+
+@hearthlight_member_color_label(color: text) -> text {
+    ? (color == "terracotta") {
+        ^ "Terracotta";
+    }
+    ? (color == "sage") {
+        ^ "Sage";
+    }
+    ? (color == "clay") {
+        ^ "Clay";
+    }
+    ? (color == "ocean") {
+        ^ "Ocean";
+    }
+    ? (color == "gold") {
+        ^ "Gold";
+    }
+    ^ "Sage";
+}
+
+@hearthlight_selected_option(value: text, current: text, label: text) -> text {
+    attrs := kiln_html_attr("value", value);
+    ? (value == current) {
+        attrs = attrs + kiln_html_attr("selected", "selected");
+    }
+    ^ kiln_html_tag("option", attrs, kiln_html_text(label));
+}
+
+@hearthlight_members_html(db: DB) -> text {
+    items := "";
+    key := db_first_key(db, hearthlight_members_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_members_table(), key);
+        color := row_get(row0, "color");
+        chip := kiln_html_tag("span", kiln_html_attr("class", hearthlight_member_color_class(color)), kiln_html_text(hearthlight_member_color_label(color)));
+        items = items + hearthlight_collection_row(row_get(row0, "name"), row_get(row0, "role"), chip);
+        key = db_next_key(db, hearthlight_members_table(), key);
+    }
+    ^ hearthlight_collection(items);
+}
+
+@hearthlight_recipe_suggestions_html(db: DB, include_forms: bool, limit: i64) -> text {
+    items := "";
+    key := db_first_key(db, hearthlight_recipes_table());
+    shown := 0;
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_recipes_table(), key);
+        ingredients := row_get(row0, "ingredients");
+        match_count := hearthlight_recipe_match_count(db, ingredients);
+        total_count := hearthlight_count_named_ingredients(ingredients);
+        ? (match_count > 0 and shown < limit) {
+            extra := kiln_html_tag("span", kiln_html_attr("class", "section-pill"), kiln_html_text(text_of(match_count) + "/" + text_of(total_count) + " pantry"));
+            ? (include_forms) {
+                form_body := kiln_html_tag("input", kiln_html_attr("type", "hidden") + kiln_html_attr("name", "recipe_key") + kiln_html_attr("value", text_of(key)), "");
+                form_body = form_body + hearthlight_recipe_picker_form();
+                planner_form := kiln_html_tag("div", kiln_html_attr("class", "quiet-button"), kiln_html_form("post", "/planner/recipes", form_body));
+                extra = extra + planner_form;
+            }
+            items = items + hearthlight_collection_row(row_get(row0, "name"), row_get(row0, "notes"), extra);
+            shown = shown + 1;
+        }
+        key = db_next_key(db, hearthlight_recipes_table(), key);
+    }
+    ? (count(items) == 0) {
+        items = kiln_html_tag("p", kiln_html_attr("class", "meta"), kiln_html_text("No pantry-friendly recipes are standing out yet."));
+    }
+    ^ hearthlight_collection(items);
+}
+
+@hearthlight_meal_html(db: DB) -> text {
+    result := db_get_result(db, hearthlight_meals_table(), hearthlight_today_key());
+    ? (row_get(result, "found") != "true") {
+        ^ kiln_html_paragraph("No meal is planned yet.");
+    }
+    meta := kiln_html_tag("p", kiln_html_attr("class", "eyebrow"), kiln_html_text(row_get(result, "day_label")));
+    title := kiln_html_tag("h3", kiln_html_attr("class", "meal-title"), kiln_html_text(row_get(result, "title")));
+    note := kiln_html_tag("p", kiln_html_attr("class", "meal-note"), kiln_html_text(row_get(result, "notes")));
+    quick := kiln_html_tag("div", kiln_html_attr("class", "meal-strip"), hearthlight_stat("Focus", "Quick dinner") + hearthlight_stat("Rhythm", "Shop before Saturday"));
+    ^ meta + title + note + quick;
+}
+
+@hearthlight_groceries_html(db: DB) -> text {
+    items := "";
+    key := db_first_key(db, hearthlight_groceries_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_groceries_table(), key);
+        ? (row_get(row0, "purchased") != "true") {
+            badge := kiln_html_tag("span", kiln_html_attr("class", "section-pill"), kiln_html_text(row_get(row0, "section")));
+            purchase_form := kiln_html_tag("div", kiln_html_attr("class", "quiet-button"), kiln_html_form("post", "/groceries/" + text_of(key) + "/purchase", kiln_html_button("Purchased")));
+            items = items + hearthlight_collection_row(row_get(row0, "name"), "Still needed", badge + purchase_form);
+        }
+        key = db_next_key(db, hearthlight_groceries_table(), key);
+    }
+
+    form := kiln_html_tag("div", kiln_html_attr("class", "composer"), kiln_html_form("post", "/groceries", kiln_html_field("Item", "name", kiln_html_input_text("name", "")) + kiln_html_field("Section", "section", kiln_html_input_text("section", "Produce")) + kiln_html_button("Add Grocery")));
+    ^ hearthlight_collection(items) + form;
+}
+
+@hearthlight_chores_html(db: DB) -> text {
+    items := "";
+    key := db_first_key(db, hearthlight_chores_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_chores_table(), key);
+        ? (row_get(row0, "status") != "done") {
+            recurrence := hearthlight_clean_optional(row_get(row0, "recurrence"));
+            meta := row_get(row0, "owner") + " · " + row_get(row0, "due_label");
+            ? (count(recurrence) > 0) {
+                meta = meta + " · " + recurrence;
+            }
+            done_form := kiln_html_tag("div", kiln_html_attr("class", "quiet-button"), kiln_html_form("post", "/chores/" + text_of(key) + "/complete", kiln_html_button("Complete & Advance")));
+            items = items + hearthlight_collection_row(row_get(row0, "name"), meta, done_form);
+        }
+        key = db_next_key(db, hearthlight_chores_table(), key);
+    }
+    ? (count(items) == 0) {
+        items = kiln_html_tag("p", kiln_html_attr("class", "meta"), kiln_html_text("No open chores right now."));
+    }
+    cta := kiln_html_tag("a", kiln_html_attr("class", "inline-link") + kiln_html_attr("href", "/chores"), kiln_html_text("Open chores"));
+    ^ hearthlight_collection(items) + kiln_html_tag("div", kiln_html_attr("class", "composer"), cta);
+}
+
+@hearthlight_chore_history_html(db: DB) -> text {
+    items := "";
+    key := db_first_key(db, hearthlight_chore_history_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_chore_history_table(), key);
+        badge := kiln_html_tag("span", kiln_html_attr("class", "section-pill"), kiln_html_text(row_get(row0, "completed_label")));
+        items = items + hearthlight_collection_row(row_get(row0, "name"), row_get(row0, "owner") + " · next " + row_get(row0, "next_due_label"), badge);
+        key = db_next_key(db, hearthlight_chore_history_table(), key);
+    }
+    ? (count(items) == 0) {
+        items = kiln_html_tag("p", kiln_html_attr("class", "meta"), kiln_html_text("No chores have been completed yet this week."));
+    }
+    ^ hearthlight_collection(items);
+}
+
+@hearthlight_chore_form(db: DB) -> text {
+    member_options := "";
+    member_key := db_first_key(db, hearthlight_members_table());
+    ~ (member_key >= 0) {
+        member := db_get(db, hearthlight_members_table(), member_key);
+        name := row_get(member, "name");
+        member_options = member_options + kiln_html_tag("option", kiln_html_attr("value", name), kiln_html_text(name));
+        member_key = db_next_key(db, hearthlight_members_table(), member_key);
+    }
+
+    recurrence_options := "";
+    recurrence_options = recurrence_options + kiln_html_tag("option", kiln_html_attr("value", "daily"), kiln_html_text("Daily"));
+    recurrence_options = recurrence_options + kiln_html_tag("option", kiln_html_attr("value", "weekly"), kiln_html_text("Weekly"));
+    recurrence_options = recurrence_options + kiln_html_tag("option", kiln_html_attr("value", "weekend"), kiln_html_text("Weekend"));
+    recurrence_options = recurrence_options + kiln_html_tag("option", kiln_html_attr("value", "once"), kiln_html_text("One-time"));
+
+    owner_select := kiln_html_tag("select", kiln_html_attr("name", "owner"), member_options);
+    recurrence_select := kiln_html_tag("select", kiln_html_attr("name", "recurrence"), recurrence_options);
+
+    form_body := kiln_html_field("Chore", "name", kiln_html_input_text("name", ""));
+    form_body = form_body + kiln_html_field("Owner", "owner", owner_select);
+    form_body = form_body + kiln_html_field("Due", "due_label", kiln_html_input_text("due_label", "Today"));
+    form_body = form_body + kiln_html_field("Recurrence", "recurrence", recurrence_select);
+    form_body = form_body + kiln_html_field("Rotation", "owner_cycle", kiln_html_input_text("owner_cycle", "Avery,Jordan"));
+    form_body = form_body + kiln_html_button("Save Chore");
+    ^ kiln_html_tag("div", kiln_html_attr("class", "composer"), kiln_html_form("post", "/chores", form_body));
+}
+
+@hearthlight_dashboard_page(db: DB, request: KilnHttpRequest) -> text {
+    household := db_get(db, hearthlight_households_table(), 1);
+    hero_copy := kiln_html_tag("div", kiln_html_attr("class", "hero-copy"), kiln_html_tag("p", kiln_html_attr("class", "eyebrow"), kiln_html_text("Household Rhythm")) + kiln_html_tag("h1", "", kiln_html_text(row_get(household, "name"))) + kiln_html_tag("p", kiln_html_attr("class", "hero-intro"), kiln_html_text("A calm household dashboard for meals, groceries, and chores.")));
+    hero_stats := kiln_html_tag("div", kiln_html_attr("class", "hero-stats"), hearthlight_stat("Planning day", row_get(household, "planning_day")) + hearthlight_stat("Shopping day", row_get(household, "shopping_day")) + hearthlight_stat("Low stock", text_of(hearthlight_pantry_low_stock_count(db))) + hearthlight_stat("Due today", text_of(hearthlight_due_today_count(db))) + hearthlight_stat("Tonight", row_get(db_get(db, hearthlight_meals_table(), hearthlight_today_key()), "title")));
+    hero := kiln_html_tag("section", kiln_html_attr("class", "hero"), hero_copy + hero_stats);
+    cards := "";
+    cards = cards + hearthlight_card("Tonight", hearthlight_meal_html(db));
+    cards = cards + hearthlight_card("Household", hearthlight_members_html(db));
+    cards = cards + hearthlight_card("Groceries", hearthlight_groceries_html(db));
+    cards = cards + hearthlight_card("Pantry", hearthlight_pantry_preview_html(db));
+    cards = cards + hearthlight_card("Chores", hearthlight_chores_html(db));
+    cards = cards + hearthlight_card("Cook From Pantry", hearthlight_recipe_suggestions_html(db, false, 3));
+    cards = cards + hearthlight_card("Next Three Days", hearthlight_next_days_html(db));
+    body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + kiln_html_tag("div", kiln_html_attr("class", "grid"), cards));
+    ^ kiln_html_page_with_head("Hearthlight", kiln_html_stylesheet("/assets/site.css"), body);
+}
+
+@hearthlight_next_days_html(db: DB) -> text {
+    items := "";
+    offset := 0;
+    ~ (offset < 3) {
+        meal := db_get(db, hearthlight_meals_table(), hearthlight_day_key(offset + 1));
+        title := row_get(meal, "title");
+        ? (count(title) == 0) {
+            title = "Open night";
+        }
+        items = items + hearthlight_collection_row(hearthlight_day_label(offset + 1), title, kiln_html_tag("span", kiln_html_attr("class", "section-pill"), kiln_html_text("ahead")));
+        offset = offset + 1;
+    }
+    ^ hearthlight_collection(items);
+}
+
+@hearthlight_pantry_preview_html(db: DB) -> text {
+    items := "";
+    key := db_first_key(db, hearthlight_pantry_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_pantry_table(), key);
+        ? (row_get(row0, "staple") == "true" and i64_of(row_get(row0, "quantity")) <= i64_of(row_get(row0, "threshold"))) {
+            badge := kiln_html_tag("span", kiln_html_attr("class", "section-pill low"), kiln_html_text("Low"));
+            meta := row_get(row0, "quantity") + " " + row_get(row0, "unit") + " on hand";
+            items = items + hearthlight_collection_row(row_get(row0, "name"), meta, badge);
+        }
+        key = db_next_key(db, hearthlight_pantry_table(), key);
+    }
+    ? (count(items) == 0) {
+        items = kiln_html_tag("p", kiln_html_attr("class", "meta"), kiln_html_text("No pantry items are low right now."));
+    }
+    cta := kiln_html_tag("a", kiln_html_attr("class", "inline-link") + kiln_html_attr("href", "/pantry"), kiln_html_text("Open pantry"));
+    ^ hearthlight_collection(items) + kiln_html_tag("div", kiln_html_attr("class", "composer"), cta);
+}
+
+@hearthlight_planner_week_html(db: DB) -> text {
+    items := "";
+    offset := 0;
+    ~ (offset < 7) {
+        key := hearthlight_day_key(offset);
+        row0 := db_get(db, hearthlight_meals_table(), key);
+        title := row_get(row0, "title");
+        ? (count(title) == 0) {
+            title = "Open night";
+        }
+        notes := row_get(row0, "notes");
+        ? (count(notes) == 0) {
+            notes = "No notes yet.";
+        }
+        ingredients := row_get(row0, "ingredients");
+        ingredients_text := "";
+        ? (count(ingredients) > 0) {
+            ingredients_text = kiln_html_tag("p", kiln_html_attr("class", "planner-ingredients"), kiln_html_text("Ingredients: " + ingredients));
+        }
+        badge := kiln_html_tag("span", kiln_html_attr("class", "planner-key"), kiln_html_text(text_of(key)));
+        card_body := kiln_html_tag("p", kiln_html_attr("class", "planner-day"), kiln_html_text(hearthlight_day_label(offset)));
+        card_body = card_body + kiln_html_tag("h3", kiln_html_attr("class", "planner-title"), kiln_html_text(title));
+        card_body = card_body + kiln_html_tag("p", kiln_html_attr("class", "planner-note"), kiln_html_text(notes));
+        ? (count(ingredients) > 0) {
+            grocery_form := kiln_html_tag("div", kiln_html_attr("class", "quiet-button"), kiln_html_form("post", "/planner/meals/" + text_of(key) + "/groceries", kiln_html_button("Send Ingredients To Groceries")));
+            items = items + kiln_html_tag("section", kiln_html_attr("class", "planner-card"), badge + card_body + ingredients_text + grocery_form);
+        }
+        | {
+            items = items + kiln_html_tag("section", kiln_html_attr("class", "planner-card"), badge + card_body);
+        }
+        offset = offset + 1;
+    }
+    ^ kiln_html_tag("div", kiln_html_attr("class", "planner-grid"), items);
+}
+
+@hearthlight_planner_form() -> text {
+    day_items :: list<text> := [
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(0))), kiln_html_text("Monday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(1))), kiln_html_text("Tuesday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(2))), kiln_html_text("Wednesday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(3))), kiln_html_text("Thursday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(4))), kiln_html_text("Friday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(5))), kiln_html_text("Saturday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(6))), kiln_html_text("Sunday"))
+    ];
+    select := kiln_html_tag("select", kiln_html_attr("name", "day_key"), day_items[0] + day_items[1] + day_items[2] + day_items[3] + day_items[4] + day_items[5] + day_items[6]);
+    form_body := kiln_html_field("Day", "day_key", select);
+    form_body = form_body + kiln_html_field("Meal", "title", kiln_html_input_text("title", ""));
+    form_body = form_body + kiln_html_field("Notes", "notes", kiln_html_textarea("notes", ""));
+    form_body = form_body + kiln_html_field("Ingredients", "ingredients", kiln_html_textarea("ingredients", "Lemons,Parmesan,Pasta"));
+    form_body = form_body + kiln_html_button("Save To Plan");
+    ^ kiln_html_tag("div", kiln_html_attr("class", "composer"), kiln_html_form("post", "/planner/meals", form_body));
+}
+
+@hearthlight_recipe_picker_form() -> text {
+    day_items :: list<text> := [
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(0))), kiln_html_text("Monday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(1))), kiln_html_text("Tuesday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(2))), kiln_html_text("Wednesday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(3))), kiln_html_text("Thursday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(4))), kiln_html_text("Friday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(5))), kiln_html_text("Saturday")),
+        kiln_html_tag("option", kiln_html_attr("value", text_of(hearthlight_day_key(6))), kiln_html_text("Sunday"))
+    ];
+    select := kiln_html_tag("select", kiln_html_attr("name", "day_key"), day_items[0] + day_items[1] + day_items[2] + day_items[3] + day_items[4] + day_items[5] + day_items[6]);
+    ^ kiln_html_field("Plan for", "day_key", select) + kiln_html_button("Use Recipe");
+}
+
+@hearthlight_recipe_library_html(db: DB, include_forms: bool) -> text {
+    items := "";
+    key := db_first_key(db, hearthlight_recipes_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_recipes_table(), key);
+        ingredients := row_get(row0, "ingredients");
+        match_count := hearthlight_recipe_match_count(db, ingredients);
+        total_count := hearthlight_count_named_ingredients(ingredients);
+        tempo := row_get(row0, "tempo");
+        extra := kiln_html_tag("span", kiln_html_attr("class", "section-pill"), kiln_html_text(tempo));
+        ? (include_forms) {
+            form_body := kiln_html_tag("input", kiln_html_attr("type", "hidden") + kiln_html_attr("name", "recipe_key") + kiln_html_attr("value", text_of(key)), "");
+            form_body = form_body + hearthlight_recipe_picker_form();
+            planner_form := kiln_html_tag("div", kiln_html_attr("class", "quiet-button"), kiln_html_form("post", "/planner/recipes", form_body));
+            extra = extra + planner_form;
+        }
+        meta := row_get(row0, "notes") + " · " + text_of(match_count) + "/" + text_of(total_count) + " in pantry";
+        items = items + hearthlight_collection_row(row_get(row0, "name"), meta, extra);
+        key = db_next_key(db, hearthlight_recipes_table(), key);
+    }
+    ^ hearthlight_collection(items);
+}
+
+@hearthlight_recipe_form() -> text {
+    tempo_options := "";
+    tempo_options = tempo_options + kiln_html_tag("option", kiln_html_attr("value", "quick"), kiln_html_text("Quick"));
+    tempo_options = tempo_options + kiln_html_tag("option", kiln_html_attr("value", "steady"), kiln_html_text("Steady"));
+    tempo_options = tempo_options + kiln_html_tag("option", kiln_html_attr("value", "slow"), kiln_html_text("Slow"));
+    tempo_select := kiln_html_tag("select", kiln_html_attr("name", "tempo"), tempo_options);
+    form_body := kiln_html_field("Recipe", "name", kiln_html_input_text("name", ""));
+    form_body = form_body + kiln_html_field("Notes", "notes", kiln_html_textarea("notes", ""));
+    form_body = form_body + kiln_html_field("Ingredients", "ingredients", kiln_html_textarea("ingredients", "Beans,Greens,Parmesan"));
+    form_body = form_body + kiln_html_field("Tempo", "tempo", tempo_select);
+    form_body = form_body + kiln_html_button("Save Recipe");
+    ^ kiln_html_tag("div", kiln_html_attr("class", "composer"), kiln_html_form("post", "/recipes", form_body));
+}
+
+@hearthlight_household_form(db: DB) -> text {
+    household := db_get(db, hearthlight_households_table(), 1);
+    form_body := kiln_html_field("Household Name", "name", kiln_html_input_text("name", row_get(household, "name")));
+    form_body = form_body + kiln_html_field("Planning Day", "planning_day", kiln_html_input_text("planning_day", row_get(household, "planning_day")));
+    form_body = form_body + kiln_html_field("Shopping Day", "shopping_day", kiln_html_input_text("shopping_day", row_get(household, "shopping_day")));
+    form_body = form_body + kiln_html_button("Save Household");
+    ^ kiln_html_tag("div", kiln_html_attr("class", "composer"), kiln_html_form("post", "/setup/household", form_body));
+}
+
+@hearthlight_member_form() -> text {
+    color_select := kiln_html_tag("select", kiln_html_attr("name", "color"), hearthlight_selected_option("sage", "sage", "Sage") + hearthlight_selected_option("terracotta", "sage", "Terracotta") + hearthlight_selected_option("clay", "sage", "Clay") + hearthlight_selected_option("ocean", "sage", "Ocean") + hearthlight_selected_option("gold", "sage", "Gold"));
+    form_body := kiln_html_field("Name", "name", kiln_html_input_text("name", ""));
+    form_body = form_body + kiln_html_field("Role", "role", kiln_html_input_text("role", "Household member"));
+    form_body = form_body + kiln_html_field("Color Label", "color", color_select);
+    form_body = form_body + kiln_html_button("Add Member");
+    ^ kiln_html_tag("div", kiln_html_attr("class", "composer"), kiln_html_form("post", "/setup/members", form_body));
+}
+
+@hearthlight_planner_page(db: DB, request: KilnHttpRequest) -> text {
+    household := db_get(db, hearthlight_households_table(), 1);
+    hero_copy := kiln_html_tag("div", kiln_html_attr("class", "hero-copy"), kiln_html_tag("p", kiln_html_attr("class", "eyebrow"), kiln_html_text("Weekly Planning")) + kiln_html_tag("h1", "", kiln_html_text("Meal Plan")) + kiln_html_tag("p", kiln_html_attr("class", "hero-intro"), kiln_html_text("Shape the next seven days around energy, leftovers, and shopping rhythm for " + row_get(household, "name") + ".")));
+    hero_stats := kiln_html_tag("div", kiln_html_attr("class", "hero-stats"), hearthlight_stat("Week starts", "Monday") + hearthlight_stat("Tonight", row_get(db_get(db, hearthlight_meals_table(), hearthlight_today_key()), "title")) + hearthlight_stat("Planning ritual", row_get(household, "planning_day")));
+    hero := kiln_html_tag("section", kiln_html_attr("class", "hero"), hero_copy + hero_stats);
+    main := hearthlight_card("Week At A Glance", hearthlight_planner_week_html(db));
+    side := hearthlight_card("Plan A Meal", hearthlight_planner_form());
+    suggestions := hearthlight_card("Cook From The Pantry", hearthlight_recipe_library_html(db, true));
+    layout := kiln_html_tag("div", kiln_html_attr("class", "planner-layout"), main + kiln_html_tag("div", kiln_html_attr("class", "stack"), side + suggestions));
+    body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + layout);
+    ^ kiln_html_page_with_head("Hearthlight Planner", kiln_html_stylesheet("/assets/site.css"), body);
+}
+
+@hearthlight_pantry_collection_html(db: DB) -> text {
+    items := "";
+    key := db_first_key(db, hearthlight_pantry_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_pantry_table(), key);
+        quantity_text := row_get(row0, "quantity") + " " + row_get(row0, "unit");
+        badge_text := row_get(row0, "section");
+        ? (row_get(row0, "staple") == "true" and i64_of(row_get(row0, "quantity")) <= i64_of(row_get(row0, "threshold"))) {
+            badge_text = "Low stock";
+        }
+        badge_class := "section-pill";
+        ? (badge_text == "Low stock") {
+            badge_class = "section-pill low";
+        }
+        badge := kiln_html_tag("span", kiln_html_attr("class", badge_class), kiln_html_text(badge_text));
+        items = items + hearthlight_collection_row(row_get(row0, "name"), quantity_text + " · threshold " + row_get(row0, "threshold"), badge);
+        key = db_next_key(db, hearthlight_pantry_table(), key);
+    }
+    ^ hearthlight_collection(items);
+}
+
+@hearthlight_pantry_page(db: DB, request: KilnHttpRequest) -> text {
+    household := db_get(db, hearthlight_households_table(), 1);
+    hero_copy := kiln_html_tag("div", kiln_html_attr("class", "hero-copy"), kiln_html_tag("p", kiln_html_attr("class", "eyebrow"), kiln_html_text("Pantry State")) + kiln_html_tag("h1", "", kiln_html_text("Pantry")) + kiln_html_tag("p", kiln_html_attr("class", "hero-intro"), kiln_html_text("Track what is on hand, spot staples running low, and turn shopping into stocked shelves for " + row_get(household, "name") + ".")));
+    hero_stats := kiln_html_tag("div", kiln_html_attr("class", "hero-stats"), hearthlight_stat("Low stock staples", text_of(hearthlight_pantry_low_stock_count(db))) + hearthlight_stat("Shopping day", row_get(household, "shopping_day")) + hearthlight_stat("Recent purchase flow", "Groceries → Pantry"));
+    hero := kiln_html_tag("section", kiln_html_attr("class", "hero"), hero_copy + hero_stats);
+    inventory := hearthlight_card("Current Pantry", hearthlight_pantry_collection_html(db));
+    restock_body := kiln_html_tag("p", kiln_html_attr("class", "meta"), kiln_html_text("Turn low-stock staples into grocery items before the next shopping run."));
+    restock_body = restock_body + kiln_html_tag("div", kiln_html_attr("class", "quiet-button"), kiln_html_form("post", "/pantry/restock", kiln_html_button("Add Low Stock Staples")));
+    restock := hearthlight_card("Restock Staples", restock_body);
+    suggestions := hearthlight_card("Pantry-Friendly Recipes", hearthlight_recipe_suggestions_html(db, true, 4));
+    body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + kiln_html_tag("div", kiln_html_attr("class", "planner-layout"), inventory + kiln_html_tag("div", kiln_html_attr("class", "stack"), restock + suggestions)));
+    ^ kiln_html_page_with_head("Hearthlight Pantry", kiln_html_stylesheet("/assets/site.css"), body);
+}
+
+@hearthlight_chores_page(db: DB, request: KilnHttpRequest) -> text {
+    household := db_get(db, hearthlight_households_table(), 1);
+    hero_copy := kiln_html_tag("div", kiln_html_attr("class", "hero-copy"), kiln_html_tag("p", kiln_html_attr("class", "eyebrow"), kiln_html_text("Household Rhythm")) + kiln_html_tag("h1", "", kiln_html_text("Chores")) + kiln_html_tag("p", kiln_html_attr("class", "hero-intro"), kiln_html_text("Keep recurring work visible, rotate it fairly, and preserve the recent rhythm for " + row_get(household, "name") + ".")));
+    hero_stats := kiln_html_tag("div", kiln_html_attr("class", "hero-stats"), hearthlight_stat("Open chores", text_of(hearthlight_open_chore_count(db))) + hearthlight_stat("Due today", text_of(hearthlight_due_today_count(db))) + hearthlight_stat("Latest cadence", "Recurring"));
+    hero := kiln_html_tag("section", kiln_html_attr("class", "hero"), hero_copy + hero_stats);
+    current := hearthlight_card("Current Chores", hearthlight_chores_html(db));
+    history := hearthlight_card("Recent Completions", hearthlight_chore_history_html(db));
+    add_form := hearthlight_card("Add A Chore", hearthlight_chore_form(db));
+    layout := kiln_html_tag("div", kiln_html_attr("class", "planner-layout"), current + kiln_html_tag("div", kiln_html_attr("class", "stack"), add_form + history));
+    body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + layout);
+    ^ kiln_html_page_with_head("Hearthlight Chores", kiln_html_stylesheet("/assets/site.css"), body);
+}
+
+@hearthlight_recipes_page(db: DB, request: KilnHttpRequest) -> text {
+    household := db_get(db, hearthlight_households_table(), 1);
+    hero_copy := kiln_html_tag("div", kiln_html_attr("class", "hero-copy"), kiln_html_tag("p", kiln_html_attr("class", "eyebrow"), kiln_html_text("Kitchen Memory")) + kiln_html_tag("h1", "", kiln_html_text("Recipes")) + kiln_html_tag("p", kiln_html_attr("class", "hero-intro"), kiln_html_text("Build a small library of repeatable meals for " + row_get(household, "name") + ", then slot them into the week when energy is low.")));
+    hero_stats := kiln_html_tag("div", kiln_html_attr("class", "hero-stats"), hearthlight_stat("Saved recipes", text_of(hearthlight_next_key(db, hearthlight_recipes_table()) - 1)) + hearthlight_stat("Pantry-friendly", "match scored") + hearthlight_stat("Planning flow", "Recipe → Week"));
+    hero := kiln_html_tag("section", kiln_html_attr("class", "hero"), hero_copy + hero_stats);
+    library := hearthlight_card("Recipe Library", hearthlight_recipe_library_html(db, true));
+    form := hearthlight_card("Save A Recipe", hearthlight_recipe_form());
+    layout := kiln_html_tag("div", kiln_html_attr("class", "planner-layout"), library + form);
+    body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + layout);
+    ^ kiln_html_page_with_head("Hearthlight Recipes", kiln_html_stylesheet("/assets/site.css"), body);
+}
+
+@hearthlight_setup_page(db: DB, request: KilnHttpRequest) -> text {
+    household := db_get(db, hearthlight_households_table(), 1);
+    hero_copy := kiln_html_tag("div", kiln_html_attr("class", "hero-copy"), kiln_html_tag("p", kiln_html_attr("class", "eyebrow"), kiln_html_text("Household Setup")) + kiln_html_tag("h1", "", kiln_html_text("Settings")) + kiln_html_tag("p", kiln_html_attr("class", "hero-intro"), kiln_html_text("Shape Hearthlight around " + row_get(household, "name") + " by adjusting the weekly rhythm and household roster.")));
+    hero_stats := kiln_html_tag("div", kiln_html_attr("class", "hero-stats"), hearthlight_stat("Members", text_of(hearthlight_next_key(db, hearthlight_members_table()) - 1)) + hearthlight_stat("Planning day", row_get(household, "planning_day")) + hearthlight_stat("Shopping day", row_get(household, "shopping_day")));
+    hero := kiln_html_tag("section", kiln_html_attr("class", "hero"), hero_copy + hero_stats);
+    household_card := hearthlight_card("Household Rhythm", hearthlight_household_form(db));
+    member_card := hearthlight_card("Add Member", hearthlight_member_form());
+    roster_card := hearthlight_card("Household Roster", hearthlight_members_html(db));
+    layout := kiln_html_tag("div", kiln_html_attr("class", "planner-layout"), household_card + kiln_html_tag("div", kiln_html_attr("class", "stack"), member_card + roster_card));
+    body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + layout);
+    ^ kiln_html_page_with_head("Hearthlight Setup", kiln_html_stylesheet("/assets/site.css"), body);
+}
