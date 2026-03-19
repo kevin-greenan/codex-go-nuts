@@ -13,6 +13,13 @@
     params: text;
 }
 
+%KilnReply {
+    status: i64;
+    content_type: text;
+    body: text;
+    location: text;
+}
+
 @kiln_route(method: text, pattern: text, name: text) -> KilnRoute {
     ^ KilnRoute { method: method, pattern: pattern, name: name };
 }
@@ -163,4 +170,63 @@
         ^ KilnDispatch { ok: false, status: 405, route_name: "", params: "" };
     }
     ^ KilnDispatch { ok: false, status: 404, route_name: "", params: "" };
+}
+
+@kiln_params_get(params: text, name: text) -> text {
+    marker := name + "=";
+    start0 := find(params, marker);
+    ? (start0 < 0) {
+        ^ "";
+    }
+    value_start := start0 + count(marker);
+    tail := slice(params, value_start, count(params) - value_start);
+    end0 := find(tail, ";");
+    ? (end0 < 0) {
+        ^ tail;
+    }
+    ^ slice(tail, 0, end0);
+}
+
+@kiln_dispatch_is(dispatch: KilnDispatch, route_name: text) -> bool {
+    ^ dispatch.ok and dispatch.route_name == route_name;
+}
+
+@kiln_dispatch_param(dispatch: KilnDispatch, name: text) -> text {
+    ^ kiln_params_get(dispatch.params, name);
+}
+
+@kiln_reply(status: i64, content_type: text, body: text) -> KilnReply {
+    ^ KilnReply { status: status, content_type: content_type, body: body, location: "" };
+}
+
+@kiln_reply_text(status: i64, body: text) -> KilnReply {
+    ^ kiln_reply(status, "text/plain", body);
+}
+
+@kiln_reply_html(status: i64, body: text) -> KilnReply {
+    ^ kiln_reply(status, "text/html; charset=utf-8", body);
+}
+
+@kiln_reply_redirect(location: text) -> KilnReply {
+    body := "redirecting to " + location;
+    ^ KilnReply { status: 302, content_type: "text/plain", body: body, location: location };
+}
+
+@kiln_reply_response(reply: KilnReply) -> text {
+    response := kiln_http_status_line(reply.status) + kiln_http_line_sep();
+    response = response + "Content-Type: " + reply.content_type + kiln_http_line_sep();
+    ? (count(reply.location) > 0) {
+        response = response + "Location: " + reply.location + kiln_http_line_sep();
+    }
+    response = response + "Content-Length: " + text_of(count(reply.body)) + kiln_http_line_sep();
+    response = response + "Connection: close" + kiln_http_line_sep();
+    response = response + kiln_http_line_sep();
+    ^ response + reply.body;
+}
+
+@kiln_dispatch_fallback_text(dispatch: KilnDispatch) -> KilnReply {
+    ? (dispatch.status == 405) {
+        ^ kiln_reply_text(405, "method not allowed");
+    }
+    ^ kiln_reply_text(404, "not found");
 }

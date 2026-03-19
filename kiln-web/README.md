@@ -67,11 +67,12 @@ What is already working:
 4. a first router now matches method/path patterns, including `:param` segments, and distinguishes `404` from `405`
 5. a first HTML renderer now supports escaping, attributes, tags, lists, and whole-page responses
 6. request parsing now exposes query lookup, form-field lookup, and basic URL decoding for app handlers
+7. handler ergonomics now include dispatch param helpers and a shared `KilnReply` response model
 
 What is next:
 
-1. grow the router from dispatch results into more ergonomic handler conventions
-2. extend request parsing further for repeated headers, cookies, and richer body handling
+1. extend request parsing further for repeated headers, cookies, and richer body handling
+2. grow handler ergonomics further with redirects, form helpers, and small server wrappers
 3. add forms, layout helpers, and higher-level page composition patterns
 
 ## Architecture Overview

@@ -1,48 +1,33 @@
 & "../lib/router.noe";
 & "../lib/html.noe";
 
-@route_params_get(params: text, name: text) -> text {
-    marker := name + "=";
-    start0 := find(params, marker);
-    ? (start0 < 0) {
-        ^ "";
-    }
-    value_start := start0 + count(marker);
-    tail := slice(params, value_start, count(params) - value_start);
-    end0 := find(tail, ";");
-    ? (end0 < 0) {
-        ^ tail;
-    }
-    ^ slice(tail, 0, end0);
-}
-
 @html_server_page(title: text, intro: text, links: list<text>) -> text {
     hero := kiln_html_tag("section", kiln_html_attr("class", "hero"), kiln_html_tag("h1", "", kiln_html_text(title)) + kiln_html_tag("p", "", kiln_html_text(intro)));
     nav := kiln_html_tag("nav", "", kiln_html_unordered_list(links));
     ^ kiln_html_page(title, hero + nav);
 }
 
-@html_server_response(dispatch: KilnDispatch) -> text {
+@html_server_reply(dispatch: KilnDispatch) -> KilnReply {
     home_links :: list<text> := [
         kiln_html_link("/about", "About"),
         kiln_html_link("/users/42", "User 42")
     ];
 
-    ? (dispatch.ok and dispatch.route_name == "home") {
-        ^ kiln_http_response(200, "text/html; charset=utf-8", html_server_page("Kiln Home", "A tiny Noema-native HTML page.", home_links));
+    ? (kiln_dispatch_is(dispatch, "home")) {
+        ^ kiln_reply_html(200, html_server_page("Kiln Home", "A tiny Noema-native HTML page.", home_links));
     }
-    ? (dispatch.ok and dispatch.route_name == "about") {
-        ^ kiln_http_response(200, "text/html; charset=utf-8", html_server_page("About Kiln", "Routing and HTML rendering are both live.", [kiln_html_link("/", "Back home")]));
+    ? (kiln_dispatch_is(dispatch, "about")) {
+        ^ kiln_reply_html(200, html_server_page("About Kiln", "Routing and HTML rendering are both live.", [kiln_html_link("/", "Back home")]));
     }
-    ? (dispatch.ok and dispatch.route_name == "user-show") {
-        user_id := route_params_get(dispatch.params, "id");
+    ? (kiln_dispatch_is(dispatch, "user-show")) {
+        user_id := kiln_dispatch_param(dispatch, "id");
         body := kiln_html_page("User " + user_id, kiln_html_tag("main", "", kiln_html_tag("h1", "", kiln_html_text("User " + user_id)) + kiln_html_tag("p", "", kiln_html_text("Profile page for user " + user_id))));
-        ^ kiln_http_response(200, "text/html; charset=utf-8", body);
+        ^ kiln_reply_html(200, body);
     }
     ? (dispatch.status == 405) {
-        ^ kiln_http_response(405, "text/html; charset=utf-8", kiln_html_page("Method Not Allowed", kiln_html_tag("p", "", kiln_html_text("That route does not accept this method."))));
+        ^ kiln_reply_html(405, kiln_html_page("Method Not Allowed", kiln_html_tag("p", "", kiln_html_text("That route does not accept this method."))));
     }
-    ^ kiln_http_response(404, "text/html; charset=utf-8", kiln_html_page("Not Found", kiln_html_tag("p", "", kiln_html_text("No page matched that path."))));
+    ^ kiln_reply_html(404, kiln_html_page("Not Found", kiln_html_tag("p", "", kiln_html_text("No page matched that path."))));
 }
 
 @main() -> i64 {
@@ -63,7 +48,8 @@
     raw := socket_recv(conn, 4096);
     request := kiln_http_parse_request(raw);
     dispatch := kiln_dispatch(routes, request);
-    response := html_server_response(dispatch);
+    reply := html_server_reply(dispatch);
+    response := kiln_reply_response(reply);
     wrote := socket_send(conn, response);
     closed_conn := socket_close(conn);
     closed_listener := listener_close(listener);

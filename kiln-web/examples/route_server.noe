@@ -1,34 +1,16 @@
 & "../lib/router.noe";
 
-@route_params_get(params: text, name: text) -> text {
-    marker := name + "=";
-    start0 := find(params, marker);
-    ? (start0 < 0) {
-        ^ "";
+@route_server_reply(dispatch: KilnDispatch) -> KilnReply {
+    ? (kiln_dispatch_is(dispatch, "home")) {
+        ^ kiln_reply_text(200, "kiln home");
     }
-    value_start := start0 + count(marker);
-    tail := slice(params, value_start, count(params) - value_start);
-    end0 := find(tail, ";");
-    ? (end0 < 0) {
-        ^ tail;
+    ? (kiln_dispatch_is(dispatch, "about")) {
+        ^ kiln_reply_text(200, "kiln about");
     }
-    ^ slice(tail, 0, end0);
-}
-
-@route_server_response(dispatch: KilnDispatch) -> text {
-    ? (dispatch.ok and dispatch.route_name == "home") {
-        ^ kiln_http_text(200, "kiln home");
+    ? (kiln_dispatch_is(dispatch, "user-show")) {
+        ^ kiln_reply_text(200, "user " + kiln_dispatch_param(dispatch, "id"));
     }
-    ? (dispatch.ok and dispatch.route_name == "about") {
-        ^ kiln_http_text(200, "kiln about");
-    }
-    ? (dispatch.ok and dispatch.route_name == "user-show") {
-        ^ kiln_http_text(200, "user " + route_params_get(dispatch.params, "id"));
-    }
-    ? (dispatch.status == 405) {
-        ^ kiln_http_text(405, "method not allowed");
-    }
-    ^ kiln_http_text(404, "not found");
+    ^ kiln_dispatch_fallback_text(dispatch);
 }
 
 @main() -> i64 {
@@ -49,7 +31,8 @@
     raw := socket_recv(conn, 2048);
     request := kiln_http_parse_request(raw);
     dispatch := kiln_dispatch(routes, request);
-    response := route_server_response(dispatch);
+    reply := route_server_reply(dispatch);
+    response := kiln_reply_response(reply);
     wrote := socket_send(conn, response);
     closed_conn := socket_close(conn);
     closed_listener := listener_close(listener);
