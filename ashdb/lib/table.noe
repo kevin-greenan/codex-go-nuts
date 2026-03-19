@@ -1,0 +1,237 @@
+& "table_leaf.noe";
+
+%Table {
+    pager: Pager;
+    root_page: i64;
+    slot_width: i64;
+}
+
+@table_internal_count_width() -> i64 {
+    ^ 8;
+}
+
+@table_internal_child_width() -> i64 {
+    ^ 8;
+}
+
+@table_internal_key_width() -> i64 {
+    ^ 8;
+}
+
+@table_internal_cell_width() -> i64 {
+    ^ table_internal_key_width() + table_internal_child_width();
+}
+
+@table_internal_header_size() -> i64 {
+    ^ 1 + table_internal_count_width() + table_internal_child_width();
+}
+
+@table_internal_capacity(page_size: i64) -> i64 {
+    ^ (page_size - 1 - table_internal_header_size()) / table_internal_cell_width();
+}
+
+@table_internal_page_text(page_size: i64, key_count: i64, left_child: i64, cells: text) -> text {
+    body := "I" + pad_left_i64(key_count, table_internal_count_width()) + pad_left_i64(left_child, table_internal_child_width()) + cells;
+    max_body := page_size - 1;
+    ^ pad_right(body, max_body, ".");
+}
+
+@table_internal_empty_cell() -> text {
+    ^ repeat_unit(".", table_internal_cell_width());
+}
+
+@table_internal_build_cells(capacity: i64, used_cells: text, key_count: i64) -> text {
+    ^ used_cells + repeat_unit(table_internal_empty_cell(), capacity - key_count);
+}
+
+@table_internal_key_count(page: text) -> i64 {
+    ^ i64_of(slice(page, 2, table_internal_count_width()));
+}
+
+@table_internal_left_child(page: text) -> i64 {
+    ^ i64_of(slice(page, 2 + table_internal_count_width(), table_internal_child_width()));
+}
+
+@table_internal_used_cells(page: text) -> text {
+    key_count := table_internal_key_count(page);
+    start := 1 + table_internal_header_size();
+    cells := slice(page, start, count(page) - start);
+    ^ slice(cells, 0, key_count * table_internal_cell_width());
+}
+
+@table_internal_cell_text(key: i64, right_child: i64) -> text {
+    ^ pad_left_i64(key, table_internal_key_width()) + pad_left_i64(right_child, table_internal_child_width());
+}
+
+@table_internal_cell_at(cells: text, cell_index: i64) -> text {
+    ^ slice(cells, cell_index * table_internal_cell_width(), table_internal_cell_width());
+}
+
+@table_internal_cell_key(cell: text) -> i64 {
+    ^ i64_of(slice(cell, 0, table_internal_key_width()));
+}
+
+@table_internal_cell_child(cell: text) -> i64 {
+    ^ i64_of(slice(cell, table_internal_key_width(), table_internal_child_width()));
+}
+
+@table_internal_insert_used(used_cells: text, key_count: i64, cell_index: i64, cell_text: text) -> text {
+    prefix := slice(used_cells, 0, cell_index * table_internal_cell_width());
+    moved := slice(used_cells, cell_index * table_internal_cell_width(), (key_count - cell_index) * table_internal_cell_width());
+    ^ prefix + cell_text + moved;
+}
+
+@table_internal_find_insert_index(table: Table, key: i64) -> i64 {
+    page := pager_read_page(table.pager, table.root_page);
+    key_count := table_internal_key_count(page);
+    used_cells := table_internal_used_cells(page);
+    cell_index := 0;
+    ~ (cell_index < key_count) {
+        cell := table_internal_cell_at(used_cells, cell_index);
+        ? (table_internal_cell_key(cell) >= key) {
+            ^ cell_index;
+        }
+        cell_index = cell_index + 1;
+    }
+    ^ key_count;
+}
+
+@table_internal_init_root(table: Table, left_child: i64) -> i64 {
+    capacity := table_internal_capacity(table.pager.page_size);
+    cells := table_internal_build_cells(capacity, "", 0);
+    ^ pager_write_page(table.pager, table.root_page, table_internal_page_text(table.pager.page_size, 0, left_child, cells));
+}
+
+@table_internal_insert_separator(table: Table, key: i64, right_child: i64) -> i64 {
+    page := pager_read_page(table.pager, table.root_page);
+    key_count := table_internal_key_count(page);
+    capacity := table_internal_capacity(table.pager.page_size);
+    left_child := table_internal_left_child(page);
+    used_cells := table_internal_used_cells(page);
+    insert_index := table_internal_find_insert_index(table, key);
+    ? (insert_index < key_count) {
+        existing := table_internal_cell_at(used_cells, insert_index);
+        ? (table_internal_cell_key(existing) == key) {
+            ^ -2;
+        }
+    }
+    ? (key_count >= capacity) {
+        ^ -1;
+    }
+    updated_used := table_internal_insert_used(used_cells, key_count, insert_index, table_internal_cell_text(key, right_child));
+    updated_cells := table_internal_build_cells(capacity, updated_used, key_count + 1);
+    wrote := pager_write_page(table.pager, table.root_page, table_internal_page_text(table.pager.page_size, key_count + 1, left_child, updated_cells));
+    ? (wrote == table.pager.page_size) {
+        ^ insert_index;
+    }
+    ^ -1;
+}
+
+@table_internal_child_for_key(table: Table, key: i64) -> i64 {
+    page := pager_read_page(table.pager, table.root_page);
+    key_count := table_internal_key_count(page);
+    child := table_internal_left_child(page);
+    used_cells := table_internal_used_cells(page);
+    cell_index := 0;
+    ~ (cell_index < key_count) {
+        cell := table_internal_cell_at(used_cells, cell_index);
+        ? (key < table_internal_cell_key(cell)) {
+            ^ child;
+        }
+        child = table_internal_cell_child(cell);
+        cell_index = cell_index + 1;
+    }
+    ^ child;
+}
+
+@table_root_page() -> i64 {
+    ^ 1;
+}
+
+@table_open(path: text, page_size: i64, slot_width: i64) -> Table {
+    pager := pager_open(path, page_size);
+    total_pages := pager_total_pages(pager);
+    root_page := table_root_page();
+    ? (total_pages == 1) {
+        allocated := pager_alloc_page(pager);
+        initialized := leaf_init_page(pager, root_page, slot_width);
+    }
+    ^ Table { pager: pager, root_page: root_page, slot_width: slot_width };
+}
+
+@table_root_kind(table: Table) -> text {
+    page := pager_read_page(table.pager, table.root_page);
+    ^ slice(page, 1, 1);
+}
+
+@table_promote_root_leaf(table: Table, key: i64, payload: text) -> i64 {
+    split_right := leaf_split_insert_key(table.pager, table.root_page, key, payload);
+    ? (split_right < 0) {
+        ^ split_right;
+    }
+    left_page := pager_alloc_page(table.pager);
+    left_text := pager_read_page(table.pager, table.root_page);
+    left_copy := pager_raw_write_page(table.pager, left_page, left_text);
+    root_init := table_internal_init_root(table, left_page);
+    separator_key := leaf_first_key(table.pager, split_right);
+    inserted := table_internal_insert_separator(table, separator_key, split_right);
+    ? (left_copy == table.pager.page_size and root_init == table.pager.page_size and inserted >= 0) {
+        ^ 0;
+    }
+    ^ -3;
+}
+
+@table_put(table: Table, key: i64, payload: text) -> i64 {
+    root_kind := table_root_kind(table);
+    ? (root_kind == "L") {
+        wrote := leaf_put_key(table.pager, table.root_page, key, payload);
+        ? (wrote >= 0) {
+            ^ wrote;
+        }
+        ? (wrote == -1) {
+            ^ table_promote_root_leaf(table, key, payload);
+        }
+        ^ wrote;
+    }
+    ? (root_kind == "I") {
+        child_page := table_internal_child_for_key(table, key);
+        wrote := leaf_put_key(table.pager, child_page, key, payload);
+        ? (wrote >= 0) {
+            ^ wrote;
+        }
+        ? (wrote == -1) {
+            split_right := leaf_split_insert_key(table.pager, child_page, key, payload);
+            ? (split_right < 0) {
+                ^ split_right;
+            }
+            separator_key := leaf_first_key(table.pager, split_right);
+            inserted := table_internal_insert_separator(table, separator_key, split_right);
+            ? (inserted >= 0) {
+                ^ inserted;
+            }
+            ^ -4;
+        }
+        ^ wrote;
+    }
+    ^ -5;
+}
+
+@table_get(table: Table, key: i64) -> text {
+    root_kind := table_root_kind(table);
+    ? (root_kind == "L") {
+        ^ leaf_read_by_key(table.pager, table.root_page, key);
+    }
+    ? (root_kind == "I") {
+        child_page := table_internal_child_for_key(table, key);
+        ^ leaf_read_by_key(table.pager, child_page, key);
+    }
+    ^ "";
+}
+
+@table_sync(table: Table) -> bool {
+    ^ pager_sync(table.pager);
+}
+
+@table_close(table: Table) -> bool {
+    ^ pager_close(table.pager);
+}

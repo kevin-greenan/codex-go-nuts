@@ -1,0 +1,83 @@
+& "../lib/table.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: table_smoke <db-path>";
+        ^ 1;
+    }
+
+    table := table_open(arg(1), 96, 20);
+    put0 := table_put(table, 10, "alpha");
+    put1 := table_put(table, 20, "bravo");
+    put2 := table_put(table, 30, "charlie");
+    put3 := table_put(table, 40, "delta");
+    put4 := table_put(table, 50, "echo");
+    put5 := table_put(table, 60, "foxtrot");
+    put6 := table_put(table, 20, "bravo2");
+    root_kind := table_root_kind(table);
+    get0 := table_get(table, 10);
+    get1 := table_get(table, 20);
+    get2 := table_get(table, 30);
+    get3 := table_get(table, 40);
+    get4 := table_get(table, 50);
+    get5 := table_get(table, 60);
+    missing := table_get(table, 99);
+    synced0 := table_sync(table);
+    closed0 := table_close(table);
+
+    reopened := table_open(arg(1), 96, 20);
+    root_kind1 := table_root_kind(reopened);
+    again0 := table_get(reopened, 10);
+    again1 := table_get(reopened, 20);
+    again4 := table_get(reopened, 50);
+    again5 := table_get(reopened, 60);
+    synced1 := table_sync(reopened);
+    closed1 := table_close(reopened);
+
+    ? (put0 < 0 or put1 < 0 or put2 < 0 or put3 < 0 or put4 < 0 or put5 < 0 or put6 < 0) {
+        ! "puts=" + text_of(put0) + ":" + text_of(put1) + ":" + text_of(put2) + ":" + text_of(put3) + ":" + text_of(put4) + ":" + text_of(put5) + ":" + text_of(put6);
+        ^ 2;
+    }
+    ? (root_kind != "I" or root_kind1 != "I") {
+        ! "root=" + root_kind + ":" + root_kind1;
+        ^ 3;
+    }
+    ? (slice(get0, 0, 5) != "alpha") {
+        ! "get0=" + get0;
+        ^ 4;
+    }
+    ? (slice(get1, 0, 6) != "bravo2") {
+        ! "get1=" + get1;
+        ^ 5;
+    }
+    ? (slice(get2, 0, 7) != "charlie") {
+        ! "get2=" + get2;
+        ^ 6;
+    }
+    ? (slice(get3, 0, 5) != "delta") {
+        ! "get3=" + get3;
+        ^ 7;
+    }
+    ? (slice(get4, 0, 4) != "echo") {
+        ! "get4=" + get4;
+        ^ 8;
+    }
+    ? (slice(get5, 0, 7) != "foxtrot") {
+        ! "get5=" + get5;
+        ^ 9;
+    }
+    ? (missing != "") {
+        ! "missing=" + missing;
+        ^ 10;
+    }
+    ? (slice(again0, 0, 5) != "alpha" or slice(again1, 0, 6) != "bravo2" or slice(again4, 0, 4) != "echo" or slice(again5, 0, 7) != "foxtrot") {
+        ! "again=" + again0 + ":" + again1 + ":" + again4 + ":" + again5;
+        ^ 11;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 12;
+    }
+
+    ! "ashdb table smoke ok";
+    ^ 0;
+}
