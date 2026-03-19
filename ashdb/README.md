@@ -122,7 +122,9 @@ What is already working on `codex/ashdb-foundation`:
 59. written recovery and durability documentation in `ashdb/docs/recovery.md`
 60. text-prefix predicate scans for `text` fields
 61. an operations guide covering single-writer assumptions and backup/restore workflows
-62. smoke-test coverage through the direct self-hosted compiler
+62. a file-format specification in `ashdb/docs/file-format.md`
+63. negative recovery-boundary coverage for tampered WAL headers
+64. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -151,13 +153,12 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Integrity and Recovery Tooling
 
-1. corruption fixtures and negative tests
+1. broader corruption fixtures and negative tests
 2. broader repair-oriented helpers beyond index rebuild and unreachable-page reclaim
 
 ### Operational Safety
 
 1. real file-locking support beyond the current documented single-writer guarantee
-4. file-format documentation stable enough to preserve compatibility intentionally
 
 ### Testing and Confidence
 
