@@ -24,14 +24,19 @@
 @hearthlight_nav(current_path: text) -> text {
     dashboard_class := "nav-link";
     planner_class := "nav-link";
+    pantry_class := "nav-link";
     ? (current_path == "/") {
         dashboard_class = "nav-link active";
     }
     ? (current_path == "/planner") {
         planner_class = "nav-link active";
     }
+    ? (current_path == "/pantry") {
+        pantry_class = "nav-link active";
+    }
     links := kiln_html_tag("a", kiln_html_attr("class", dashboard_class) + kiln_html_attr("href", "/"), kiln_html_text("Dashboard"));
     links = links + kiln_html_tag("a", kiln_html_attr("class", planner_class) + kiln_html_attr("href", "/planner"), kiln_html_text("Planner"));
+    links = links + kiln_html_tag("a", kiln_html_attr("class", pantry_class) + kiln_html_attr("href", "/pantry"), kiln_html_text("Pantry"));
     ^ kiln_html_tag("nav", kiln_html_attr("class", "top-nav"), links);
 }
 
@@ -76,7 +81,8 @@
         row0 := db_get(db, hearthlight_groceries_table(), key);
         ? (row_get(row0, "purchased") != "true") {
             badge := kiln_html_tag("span", kiln_html_attr("class", "section-pill"), kiln_html_text(row_get(row0, "section")));
-            items = items + hearthlight_collection_row(row_get(row0, "name"), "Still needed", badge);
+            purchase_form := kiln_html_tag("div", kiln_html_attr("class", "quiet-button"), kiln_html_form("post", "/groceries/" + text_of(key) + "/purchase", kiln_html_button("Purchased")));
+            items = items + hearthlight_collection_row(row_get(row0, "name"), "Still needed", badge + purchase_form);
         }
         key = db_next_key(db, hearthlight_groceries_table(), key);
     }
@@ -102,15 +108,35 @@
 @hearthlight_dashboard_page(db: DB, request: KilnHttpRequest) -> text {
     household := db_get(db, hearthlight_households_table(), 1);
     hero_copy := kiln_html_tag("div", kiln_html_attr("class", "hero-copy"), kiln_html_tag("p", kiln_html_attr("class", "eyebrow"), kiln_html_text("Household Rhythm")) + kiln_html_tag("h1", "", kiln_html_text(row_get(household, "name"))) + kiln_html_tag("p", kiln_html_attr("class", "hero-intro"), kiln_html_text("A calm household dashboard for meals, groceries, and chores.")));
-    hero_stats := kiln_html_tag("div", kiln_html_attr("class", "hero-stats"), hearthlight_stat("Planning day", row_get(household, "planning_day")) + hearthlight_stat("Shopping day", row_get(household, "shopping_day")) + hearthlight_stat("Tonight", row_get(db_get(db, hearthlight_meals_table(), hearthlight_today_key()), "title")));
+    hero_stats := kiln_html_tag("div", kiln_html_attr("class", "hero-stats"), hearthlight_stat("Planning day", row_get(household, "planning_day")) + hearthlight_stat("Shopping day", row_get(household, "shopping_day")) + hearthlight_stat("Low stock", text_of(hearthlight_pantry_low_stock_count(db))) + hearthlight_stat("Tonight", row_get(db_get(db, hearthlight_meals_table(), hearthlight_today_key()), "title")));
     hero := kiln_html_tag("section", kiln_html_attr("class", "hero"), hero_copy + hero_stats);
     cards := "";
     cards = cards + hearthlight_card("Tonight", hearthlight_meal_html(db));
     cards = cards + hearthlight_card("Household", hearthlight_members_html(db));
     cards = cards + hearthlight_card("Groceries", hearthlight_groceries_html(db));
+    cards = cards + hearthlight_card("Pantry", hearthlight_pantry_preview_html(db));
     cards = cards + hearthlight_card("Chores", hearthlight_chores_html(db));
     body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + kiln_html_tag("div", kiln_html_attr("class", "grid"), cards));
     ^ kiln_html_page_with_head("Hearthlight", kiln_html_stylesheet("/assets/site.css"), body);
+}
+
+@hearthlight_pantry_preview_html(db: DB) -> text {
+    items := "";
+    key := db_first_key(db, hearthlight_pantry_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_pantry_table(), key);
+        ? (row_get(row0, "staple") == "true" and i64_of(row_get(row0, "quantity")) <= i64_of(row_get(row0, "threshold"))) {
+            badge := kiln_html_tag("span", kiln_html_attr("class", "section-pill low"), kiln_html_text("Low"));
+            meta := row_get(row0, "quantity") + " " + row_get(row0, "unit") + " on hand";
+            items = items + hearthlight_collection_row(row_get(row0, "name"), meta, badge);
+        }
+        key = db_next_key(db, hearthlight_pantry_table(), key);
+    }
+    ? (count(items) == 0) {
+        items = kiln_html_tag("p", kiln_html_attr("class", "meta"), kiln_html_text("No pantry items are low right now."));
+    }
+    cta := kiln_html_tag("a", kiln_html_attr("class", "inline-link") + kiln_html_attr("href", "/pantry"), kiln_html_text("Open pantry"));
+    ^ hearthlight_collection(items) + kiln_html_tag("div", kiln_html_attr("class", "composer"), cta);
 }
 
 @hearthlight_planner_week_html(db: DB) -> text {
@@ -165,4 +191,35 @@
     layout := kiln_html_tag("div", kiln_html_attr("class", "planner-layout"), main + side);
     body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + layout);
     ^ kiln_html_page_with_head("Hearthlight Planner", kiln_html_stylesheet("/assets/site.css"), body);
+}
+
+@hearthlight_pantry_collection_html(db: DB) -> text {
+    items := "";
+    key := db_first_key(db, hearthlight_pantry_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_pantry_table(), key);
+        quantity_text := row_get(row0, "quantity") + " " + row_get(row0, "unit");
+        badge_text := row_get(row0, "section");
+        ? (row_get(row0, "staple") == "true" and i64_of(row_get(row0, "quantity")) <= i64_of(row_get(row0, "threshold"))) {
+            badge_text = "Low stock";
+        }
+        badge_class := "section-pill";
+        ? (badge_text == "Low stock") {
+            badge_class = "section-pill low";
+        }
+        badge := kiln_html_tag("span", kiln_html_attr("class", badge_class), kiln_html_text(badge_text));
+        items = items + hearthlight_collection_row(row_get(row0, "name"), quantity_text + " · threshold " + row_get(row0, "threshold"), badge);
+        key = db_next_key(db, hearthlight_pantry_table(), key);
+    }
+    ^ hearthlight_collection(items);
+}
+
+@hearthlight_pantry_page(db: DB, request: KilnHttpRequest) -> text {
+    household := db_get(db, hearthlight_households_table(), 1);
+    hero_copy := kiln_html_tag("div", kiln_html_attr("class", "hero-copy"), kiln_html_tag("p", kiln_html_attr("class", "eyebrow"), kiln_html_text("Pantry State")) + kiln_html_tag("h1", "", kiln_html_text("Pantry")) + kiln_html_tag("p", kiln_html_attr("class", "hero-intro"), kiln_html_text("Track what is on hand, spot staples running low, and turn shopping into stocked shelves for " + row_get(household, "name") + ".")));
+    hero_stats := kiln_html_tag("div", kiln_html_attr("class", "hero-stats"), hearthlight_stat("Low stock staples", text_of(hearthlight_pantry_low_stock_count(db))) + hearthlight_stat("Shopping day", row_get(household, "shopping_day")) + hearthlight_stat("Recent purchase flow", "Groceries → Pantry"));
+    hero := kiln_html_tag("section", kiln_html_attr("class", "hero"), hero_copy + hero_stats);
+    inventory := hearthlight_card("Current Pantry", hearthlight_pantry_collection_html(db));
+    body := kiln_html_tag("div", kiln_html_attr("class", "shell"), hearthlight_nav(kiln_http_path_only(request.path)) + hero + hearthlight_flash_html(request) + inventory);
+    ^ kiln_html_page_with_head("Hearthlight Pantry", kiln_html_stylesheet("/assets/site.css"), body);
 }

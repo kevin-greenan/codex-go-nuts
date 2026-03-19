@@ -233,12 +233,13 @@ What is already working:
 6. the first local asset path is wired for Hearthlight-specific styling
 7. a long-running dashboard daemon entrypoint now exists for local browser testing and containerization
 8. a weekly planner route now shows a full seven-day meal plan and supports saving meals into the plan
+9. a pantry route now tracks on-hand inventory, flags low-stock staples, and accepts grocery purchases into pantry state
 
 The current goal is a real vertical slice, not a full product:
 
 1. one seeded household
 2. a dashboard plus planner route
-3. a handful of live write actions
+3. a dashboard, planner, and pantry workflow with connected write actions
 4. direct-compiler smoke coverage proving the app stack works end to end
 
 ## Local Development

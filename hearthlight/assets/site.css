@@ -265,6 +265,11 @@ label {
   color: var(--muted);
 }
 
+.section-pill.low {
+  background: #f4dccf;
+  color: var(--accent);
+}
+
 form {
   margin-top: 12px;
 }
@@ -304,6 +309,12 @@ select {
   margin-top: 18px;
   padding-top: 12px;
   border-top: 1px solid rgba(36, 23, 15, 0.08);
+}
+
+.inline-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
 }
 
 button {

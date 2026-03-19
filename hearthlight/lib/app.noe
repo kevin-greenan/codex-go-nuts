@@ -5,8 +5,10 @@
     routes :: list<KilnRoute> := [
         kiln_route("GET", "/", "home"),
         kiln_route("GET", "/planner", "planner"),
+        kiln_route("GET", "/pantry", "pantry"),
         kiln_route("POST", "/planner/meals", "planner-meal-save"),
         kiln_route("POST", "/groceries", "grocery-create"),
+        kiln_route("POST", "/groceries/:id/purchase", "grocery-purchase"),
         kiln_route("POST", "/chores/:id/complete", "chore-complete"),
         kiln_route("GET", "/assets/site.css", "site-css")
     ];
@@ -95,6 +97,27 @@
     ^ hearthlight_redirect_with_flash("success", "Chore completed.");
 }
 
+@hearthlight_handle_grocery_purchase(db: DB, grocery_id_text: text) -> KilnReply {
+    ? (count(grocery_id_text) == 0) {
+        ^ hearthlight_redirect_with_flash("notice", "That grocery item link was missing an id.");
+    }
+
+    began := db_begin(db);
+    ? (not began) {
+        ^ kiln_reply_text(500, "unable to begin pantry transaction");
+    }
+    updated := hearthlight_mark_grocery_purchased(db, i64_of(grocery_id_text));
+    ? (updated < 0) {
+        rolled := db_rollback(db);
+        ^ hearthlight_redirect_with_flash("notice", "Hearthlight could not move that grocery into the pantry.");
+    }
+    committed := db_commit(db);
+    ? (not committed) {
+        ^ kiln_reply_text(500, "unable to commit pantry transaction");
+    }
+    ^ hearthlight_redirect_with_flash("success", "Moved that grocery into pantry inventory.");
+}
+
 @hearthlight_dashboard_reply(db: DB, request: KilnHttpRequest) -> KilnReply {
     reply := kiln_reply_html(200, hearthlight_dashboard_page(db, request));
     ? (count(kiln_flash_value(request)) > 0) {
@@ -111,6 +134,14 @@
     ^ reply;
 }
 
+@hearthlight_pantry_reply(db: DB, request: KilnHttpRequest) -> KilnReply {
+    reply := kiln_reply_html(200, hearthlight_pantry_page(db, request));
+    ? (count(kiln_flash_value(request)) > 0) {
+        ^ kiln_reply_clear_flash(reply);
+    }
+    ^ reply;
+}
+
 @hearthlight_route_reply(db: DB, dispatch: KilnDispatch, request: KilnHttpRequest) -> KilnReply {
     ? (kiln_dispatch_is(dispatch, "home")) {
         ^ hearthlight_dashboard_reply(db, request);
@@ -118,11 +149,17 @@
     ? (kiln_dispatch_is(dispatch, "planner")) {
         ^ hearthlight_planner_reply(db, request);
     }
+    ? (kiln_dispatch_is(dispatch, "pantry")) {
+        ^ hearthlight_pantry_reply(db, request);
+    }
     ? (kiln_dispatch_is(dispatch, "planner-meal-save")) {
         ^ hearthlight_handle_planner_meal_save(db, request);
     }
     ? (kiln_dispatch_is(dispatch, "grocery-create")) {
         ^ hearthlight_handle_grocery_create(db, request);
+    }
+    ? (kiln_dispatch_is(dispatch, "grocery-purchase")) {
+        ^ hearthlight_handle_grocery_purchase(db, kiln_dispatch_param(dispatch, "id"));
     }
     ? (kiln_dispatch_is(dispatch, "chore-complete")) {
         ^ hearthlight_handle_chore_complete(db, kiln_dispatch_param(dispatch, "id"));

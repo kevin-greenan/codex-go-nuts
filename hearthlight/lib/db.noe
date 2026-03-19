@@ -54,6 +54,10 @@
     ^ "groceries";
 }
 
+@hearthlight_pantry_table() -> text {
+    ^ "pantry";
+}
+
 @hearthlight_chores_table() -> text {
     ^ "chores";
 }
@@ -87,6 +91,17 @@
     payload = row_append(payload, "name", name);
     payload = row_append(payload, "section", section);
     payload = row_append(payload, "purchased", purchased);
+    ^ payload;
+}
+
+@hearthlight_pantry_row(name: text, section: text, quantity: text, threshold: text, unit: text, staple: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "section", section);
+    payload = row_append(payload, "quantity", quantity);
+    payload = row_append(payload, "threshold", threshold);
+    payload = row_append(payload, "unit", unit);
+    payload = row_append(payload, "staple", staple);
     ^ payload;
 }
 
@@ -127,6 +142,11 @@
         ^ false;
     }
 
+    pantry_root := db_table_root(db, hearthlight_pantry_table());
+    ? (pantry_root < 0 and db_define_table(db, hearthlight_pantry_table(), 144, "name:text,section:text,quantity:i64,threshold:i64=1,unit:text=items,staple:bool=true") < 0) {
+        ^ false;
+    }
+
     chores_root := db_table_root(db, hearthlight_chores_table());
     ? (chores_root < 0 and db_define_table(db, hearthlight_chores_table(), 128, "name:text,owner:text,due_label:text,status:text=todo") < 0) {
         ^ false;
@@ -149,10 +169,14 @@
     grocery0_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 1, hearthlight_grocery_row("Milk", "Dairy", "false"));
     grocery1_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 2, hearthlight_grocery_row("Parsley", "Produce", "false"));
     grocery2_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 3, hearthlight_grocery_row("Olive Oil", "Pantry", "false"));
+    pantry0_ok := hearthlight_insert_if_missing(db, hearthlight_pantry_table(), 1, hearthlight_pantry_row("Milk", "Dairy", "1", "2", "cartons", "true"));
+    pantry1_ok := hearthlight_insert_if_missing(db, hearthlight_pantry_table(), 2, hearthlight_pantry_row("Oats", "Pantry", "3", "1", "jars", "true"));
+    pantry2_ok := hearthlight_insert_if_missing(db, hearthlight_pantry_table(), 3, hearthlight_pantry_row("Olive Oil", "Pantry", "1", "1", "bottles", "true"));
+    pantry3_ok := hearthlight_insert_if_missing(db, hearthlight_pantry_table(), 4, hearthlight_pantry_row("Parsley", "Produce", "0", "1", "bunches", "false"));
     chore0_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 1, hearthlight_chore_row("Counters", "Jordan", "Today", "todo"));
     chore1_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 2, hearthlight_chore_row("Laundry", "Avery", "Tomorrow", "todo"));
     chore2_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 3, hearthlight_chore_row("Water herbs", "Jordan", "Tonight", "todo"));
-    ^ household_ok and member0_ok and member1_ok and meal0_ok and meal1_ok and meal2_ok and meal3_ok and meal4_ok and meal5_ok and meal6_ok and grocery0_ok and grocery1_ok and grocery2_ok and chore0_ok and chore1_ok and chore2_ok;
+    ^ household_ok and member0_ok and member1_ok and meal0_ok and meal1_ok and meal2_ok and meal3_ok and meal4_ok and meal5_ok and meal6_ok and grocery0_ok and grocery1_ok and grocery2_ok and pantry0_ok and pantry1_ok and pantry2_ok and pantry3_ok and chore0_ok and chore1_ok and chore2_ok;
 }
 
 @hearthlight_bootstrap(db: DB) -> bool {
@@ -200,6 +224,57 @@
 @hearthlight_put_meal(db: DB, key: i64, title: text, notes: text, day_label: text) -> i64 {
     payload := hearthlight_meal_row(title, notes, day_label);
     ^ db_put_row(db, hearthlight_meals_table(), key, payload);
+}
+
+@hearthlight_find_pantry_key_by_name(db: DB, name: text) -> i64 {
+    key := db_first_key(db, hearthlight_pantry_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_pantry_table(), key);
+        ? (row_get(row0, "name") == name) {
+            ^ key;
+        }
+        key = db_next_key(db, hearthlight_pantry_table(), key);
+    }
+    ^ -1;
+}
+
+@hearthlight_pantry_low_stock_count(db: DB) -> i64 {
+    total := 0;
+    key := db_first_key(db, hearthlight_pantry_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_pantry_table(), key);
+        ? (row_get(row0, "staple") == "true" and i64_of(row_get(row0, "quantity")) <= i64_of(row_get(row0, "threshold"))) {
+            total = total + 1;
+        }
+        key = db_next_key(db, hearthlight_pantry_table(), key);
+    }
+    ^ total;
+}
+
+@hearthlight_mark_grocery_purchased(db: DB, grocery_key: i64) -> i64 {
+    grocery := db_get(db, hearthlight_groceries_table(), grocery_key);
+    ? (count(grocery) == 0) {
+        ^ -1;
+    }
+
+    purchased_patch := "";
+    purchased_patch = row_append(purchased_patch, "purchased", "true");
+    grocery_ok := db_patch_row(db, hearthlight_groceries_table(), grocery_key, purchased_patch);
+    ? (grocery_ok < 0) {
+        ^ grocery_ok;
+    }
+
+    pantry_key := hearthlight_find_pantry_key_by_name(db, row_get(grocery, "name"));
+    ? (pantry_key >= 0) {
+        pantry := db_get(db, hearthlight_pantry_table(), pantry_key);
+        quantity := i64_of(row_get(pantry, "quantity")) + 1;
+        patch := "";
+        patch = row_append(patch, "quantity", text_of(quantity));
+        ^ db_patch_row(db, hearthlight_pantry_table(), pantry_key, patch);
+    }
+
+    pantry_payload := hearthlight_pantry_row(row_get(grocery, "name"), row_get(grocery, "section"), "1", "1", "items", "false");
+    ^ db_insert_row(db, hearthlight_pantry_table(), hearthlight_next_key(db, hearthlight_pantry_table()), pantry_payload);
 }
 
 @hearthlight_complete_chore(db: DB, key: i64) -> i64 {

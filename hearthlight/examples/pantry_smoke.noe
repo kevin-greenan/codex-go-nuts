@@ -1,0 +1,55 @@
+& "../lib/app.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: pantry_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := hearthlight_open(arg(1));
+
+    pantry_request := kiln_http_parse_request("GET /pantry HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    pantry_dispatch := kiln_dispatch(hearthlight_routes(), pantry_request);
+    pantry_reply := hearthlight_route_reply(db, pantry_dispatch, pantry_request);
+    pantry_response := kiln_reply_response(pantry_reply);
+
+    purchase_request := kiln_http_parse_request("POST /groceries/1/purchase HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n");
+    purchase_dispatch := kiln_dispatch(hearthlight_routes(), purchase_request);
+    purchase_reply := hearthlight_route_reply(db, purchase_dispatch, purchase_request);
+    purchase_response := kiln_reply_response(purchase_reply);
+
+    grocery_status := db_row_get(db, hearthlight_groceries_table(), 1, "purchased");
+    pantry_key := hearthlight_find_pantry_key_by_name(db, "Milk");
+    pantry_row := db_get(db, hearthlight_pantry_table(), pantry_key);
+    low_stock := hearthlight_pantry_low_stock_count(db);
+    validate := db_validate_report(db);
+    closed := db_close(db);
+
+    ? (find(pantry_response, "HTTP/1.1 200 OK") < 0 or find(pantry_response, "Current Pantry") < 0 or find(pantry_response, "Low stock staples") < 0) {
+        ! "pantry page mismatch";
+        ^ 2;
+    }
+    ? (find(purchase_response, "Moved that grocery into pantry inventory.") < 0) {
+        ! "purchase response mismatch";
+        ^ 3;
+    }
+    ? (grocery_status != "true") {
+        ! "grocery status=" + grocery_status;
+        ^ 4;
+    }
+    ? (row_get(pantry_row, "quantity") != "2") {
+        ! "pantry row=" + pantry_row;
+        ^ 5;
+    }
+    ? (low_stock != 2) {
+        ! "low stock=" + text_of(low_stock);
+        ^ 6;
+    }
+    ? (validate != "ok" or not closed) {
+        ! "validate=" + validate;
+        ^ 7;
+    }
+
+    ! "hearthlight pantry smoke ok";
+    ^ 0;
+}
