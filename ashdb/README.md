@@ -128,7 +128,8 @@ What is already working on `codex/ashdb-foundation`:
 65. freelist corruption coverage
 66. limited root collapse after deletes when a two-leaf root empties one side
 67. advisory single-writer file locking on the database handle
-68. smoke-test coverage through the direct self-hosted compiler
+68. partial row patch helpers for app-style field updates
+69. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -153,7 +154,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 ### Query Surface
 
 1. broader predicate support beyond equality, compound equality, text-prefix matching, and `i64` field ranges
-2. better result-shape APIs than joined text output
+2. broader app-facing mutation ergonomics beyond full-row writes
 
 ### Integrity and Recovery Tooling
 

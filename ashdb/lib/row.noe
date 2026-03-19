@@ -72,3 +72,56 @@
     }
     ^ total;
 }
+
+@row_field_entry_at(payload: text, field_index: i64) -> text {
+    normalized := row_trim_padding(payload);
+    remaining := normalized;
+    idx := 0;
+    ~ (idx < field_index) {
+        end0 := find(remaining, ";");
+        ? (end0 < 0) {
+            ^ "";
+        }
+        next_start := end0 + 1;
+        remaining = slice(remaining, next_start, count(remaining) - next_start);
+        idx = idx + 1;
+    }
+    end0 := find(remaining, ";");
+    ? (end0 < 0) {
+        ^ "";
+    }
+    ^ slice(remaining, 0, end0);
+}
+
+@row_field_name_at(payload: text, field_index: i64) -> text {
+    entry := row_field_entry_at(payload, field_index);
+    eq := find(entry, "=");
+    ? (eq < 0) {
+        ^ "";
+    }
+    ^ slice(entry, 0, eq);
+}
+
+@row_field_value_at(payload: text, field_index: i64) -> text {
+    entry := row_field_entry_at(payload, field_index);
+    eq := find(entry, "=");
+    ? (eq < 0) {
+        ^ "";
+    }
+    ^ slice(entry, eq + 1, count(entry) - (eq + 1));
+}
+
+@row_merge(base_payload: text, patch_payload: text) -> text {
+    out := row_trim_padding(base_payload);
+    count0 := row_field_count(patch_payload);
+    idx := 0;
+    ~ (idx < count0) {
+        field_name := row_field_name_at(patch_payload, idx);
+        field_value := row_field_value_at(patch_payload, idx);
+        ? (count(field_name) > 0) {
+            out = row_put(out, field_name, field_value);
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}

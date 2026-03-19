@@ -1467,6 +1467,31 @@
     ^ db_update(db, table_name, key, updated);
 }
 
+@db_patch_row(db: DB, table_name: text, key: i64, patch_payload: text) -> i64 {
+    payload := db_get(db, table_name, key);
+    ? (count(payload) == 0) {
+        ^ -1;
+    }
+    merged := row_merge(payload, patch_payload);
+    ^ db_update_row(db, table_name, key, merged);
+}
+
+@db_patch_by_unique_i64(db: DB, table_name: text, field_name: text, field_value: i64, patch_payload: text) -> i64 {
+    fields_spec := db_table_fields(db, table_name);
+    field_spec := db_schema_field_spec(fields_spec, field_name);
+    ? (count(field_spec) == 0) {
+        ^ -2;
+    }
+    ? (not db_schema_field_is_unique(field_spec) or db_schema_field_type(field_spec) != "i64") {
+        ^ -3;
+    }
+    primary_key := db_index_get(db, table_name, db_schema_unique_index_name(field_spec), field_value);
+    ? (primary_key < 0) {
+        ^ -1;
+    }
+    ^ db_patch_row(db, table_name, primary_key, patch_payload);
+}
+
 @db_table_schema(db: DB, table_name: text) -> text {
     ? (table_name == db_schema_table_name()) {
         ^ db_schema_payload(db_schema_table_name(), db_schema_slot_width(), "name:text,slot_width:i64,fields:text");
