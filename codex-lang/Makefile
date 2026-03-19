@@ -1,6 +1,6 @@
 IMAGE := codex-lang-rust
 
-.PHONY: image compiler examples selfhost-example clean
+.PHONY: image compiler examples native-examples selfhost-example clean
 
 image:
 	docker build -t $(IMAGE) -f container/Dockerfile .
@@ -23,6 +23,14 @@ selfhost-example:
 
 native-example:
 	NOEMA_BACKEND=native-arm64 ./bin/codexc examples/hello.noe build/hello.native
+
+native-examples:
+	NOEMA_BACKEND=native-arm64 ./bin/codexc examples/hello.noe build/hello.native
+	NOEMA_BACKEND=native-arm64 ./bin/codexc examples/mini_source.noe build/mini_source.native
+	NOEMA_BACKEND=native-arm64 ./bin/codexc examples/series.noe build/series.native
+	NOEMA_BACKEND=native-arm64 ./bin/codexc examples/frontend_demo.noe build/frontend_demo.native
+	NOEMA_BACKEND=native-arm64 ./bin/codexc examples/socket_probe.noe build/socket_probe.native
+	NOEMA_BACKEND=native-arm64 ./bin/codexc examples/http_get.noe build/http_get.native
 
 clean:
 	rm -rf build compiler/target

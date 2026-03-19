@@ -24,6 +24,7 @@ case "$BACKEND" in
     ;;
   native-arm64)
     GENERATED="$2.generated.s"
+    SUPPORT_C="$2.generated.s.support.c"
     ;;
   *)
     echo "unsupported NOEMA_BACKEND: $BACKEND" >&2
@@ -42,6 +43,6 @@ case "$BACKEND" in
     cc -O3 -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-function "$GENERATED" -o "$2"
     ;;
   native-arm64)
-    cc "$GENERATED" -o "$2"
+    cc -O3 -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-function "$GENERATED" "$SUPPORT_C" -o "$2"
     ;;
 esac
