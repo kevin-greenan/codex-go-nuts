@@ -2726,6 +2726,9 @@
         }
         idx = idx + 1;
     }
+    ? (count(db_unreachable_pages_text(db, ",")) > 0) {
+        ^ false;
+    }
     ^ true;
 }
 
@@ -2764,6 +2767,10 @@
             }
         }
         idx = idx + 1;
+    }
+    unreachable := db_unreachable_pages_text(db, ",");
+    ? (count(unreachable) > 0) {
+        ^ "unreachable pages: " + unreachable;
     }
     ^ "ok";
 }

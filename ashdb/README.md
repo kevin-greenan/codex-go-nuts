@@ -117,7 +117,8 @@ What is already working on `codex/ashdb-foundation`:
 54. unreachable-page detection and reclaim helpers for broader repair workflows
 55. field-drop schema migration for non-indexed/non-reference columns
 56. compound equality predicate scans across multiple fields
-57. smoke-test coverage through the direct self-hosted compiler
+57. validation now flags unreachable pages as a corruption signal
+58. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
