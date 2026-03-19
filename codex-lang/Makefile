@@ -14,34 +14,28 @@ examples:
 	./bin/codexc examples/frontend_demo.noe build/frontend_demo
 	./bin/codexc examples/socket_probe.noe build/socket_probe
 	./bin/codexc examples/http_get.noe build/http_get
-	./bin/codexc selfhost/mini_compiler.noe build/mini_compiler
+	./bin/codexc selfhost/compiler_1.noe build/compiler_1
 
 selfhost-example:
-	./bin/codexc selfhost/mini_compiler.noe build/mini_compiler
-	./build/mini_compiler examples/series.noe build/series.selfhost.generated.c
-	cc -O3 build/series.selfhost.generated.c -o build/series.selfhost
-
-selfhost-check:
-	./bin/codexc selfhost/mini_compiler.noe build/mini_compiler
-	./build/mini_compiler examples/mini_source.noe build/mini_source.generated.c
-	cc -O3 build/mini_source.generated.c -o build/mini_source.generated
-	./build/mini_source.generated || test $$? -eq 5
-	./build/mini_compiler examples/series.noe build/series.selfhost.generated.c
-	cc -O3 build/series.selfhost.generated.c -o build/series.selfhost
-	./build/series.selfhost
-	./build/mini_compiler examples/selfhost_text.noe build/selfhost_text.generated.c
-	cc -O3 build/selfhost_text.generated.c -o build/selfhost_text.generated
-	./build/selfhost_text.generated examples/hello.noe build/selfhost_text.out
-	rg -n "selfhost" build/selfhost_text.out
-	./build/mini_compiler examples/frontend_demo.noe build/frontend_demo.selfhost.generated.c
-	cc -O3 build/frontend_demo.selfhost.generated.c -o build/frontend_demo.selfhost
-	./build/frontend_demo.selfhost examples/hello.noe
-
-parity-check: selfhost-check native-examples
+	./bin/codexc selfhost/compiler_1.noe build/compiler_1
+	./build/compiler_1 examples/series.noe build/series.selfhost
 
 bootstrap-compiler:
 	./bin/codexc selfhost/compiler_1.noe build/compiler_1
 	./build/compiler_1 selfhost/compiler_1.noe build/noema_compiler
+
+selfhost-check: bootstrap-compiler
+	./build/compiler_1 examples/mini_source.noe build/mini_source.generated
+	./build/mini_source.generated || test $$? -eq 5
+	./build/compiler_1 examples/series.noe build/series.selfhost
+	./build/series.selfhost
+	./build/compiler_1 examples/selfhost_text.noe build/selfhost_text.generated
+	./build/selfhost_text.generated examples/hello.noe build/selfhost_text.out
+	rg -n "selfhost" build/selfhost_text.out
+	./build/compiler_1 examples/frontend_demo.noe build/frontend_demo.selfhost
+	./build/frontend_demo.selfhost examples/hello.noe
+
+parity-check: selfhost-check native-examples
 
 bootstrap-check: bootstrap-compiler
 	./build/noema_compiler examples/frontend_demo.noe build/frontend_demo.bootstrap

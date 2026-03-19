@@ -117,23 +117,21 @@ cd codex-lang
 ./build/http_get http://127.0.0.1:9010/examples/hello.noe
 ```
 
-A self-hosting bootstrap example:
+A stage-1 bootstrap example:
 
 ```sh
 cd codex-lang
-./bin/codexc selfhost/mini_compiler.noe build/mini_compiler
-./build/mini_compiler examples/mini_source.noe build/mini_source.generated.c
-cc -O3 build/mini_source.generated.c -o build/mini_source.generated
+./bin/codexc selfhost/compiler_1.noe build/compiler_1
+./build/compiler_1 examples/mini_source.noe build/mini_source.generated
 ./build/mini_source.generated
 ```
 
-A wider self-hosted scalar example:
+A wider self-hosted example:
 
 ```sh
 cd codex-lang
-./bin/codexc selfhost/mini_compiler.noe build/mini_compiler
-./build/mini_compiler examples/series.noe build/series.selfhost.generated.c
-cc -O3 build/series.selfhost.generated.c -o build/series.selfhost
+./bin/codexc selfhost/compiler_1.noe build/compiler_1
+./build/compiler_1 examples/series.noe build/series.selfhost
 ./build/series.selfhost
 ```
 
@@ -166,12 +164,12 @@ The Rust compiler and the Noema-written compiler are intended to move in paralle
 
 At the moment the Noema-written compiler is still behind the full Rust compiler surface, so feature parity is not complete yet. But from here forward, parity work is part of the definition of done rather than follow-up work.
 
-There is also now a first self-hosting bridge:
+There is now a canonical self-hosted bootstrap compiler:
 
-- `selfhost/mini_compiler.noe` is a compiler written in Noema
-- it tokenizes, builds a small AST, parses a scalar `i64` subset, and emits C
-- that means Noema is now compiling Noema, even though Rust still provides the outer bootstrap compiler
-- the next job is widening that Noema-written compiler until the Rust compiler becomes optional
+- `selfhost/compiler_1.noe` is the Noema-written compiler artifact
+- the Rust stage-1 compiler builds it into `compiler_1`
+- `compiler_1` then rebuilds itself into `noema_compiler`
+- that means Noema is now compiling Noema through a binary-to-binary bootstrap workflow, even though the internal backend is still C-backed today
 
 Current self-hosted subset:
 
@@ -188,7 +186,7 @@ Current self-hosted subset:
 - runtime-backed builtins such as `arg`, `arg_count`, `read_text`, `write_text`, `count`, `find`, `slice`, `text_of`, `i64_of`, and the low-level socket builtins
 - `%` declarations, struct literals, field access, list literals, and indexing
 
-That subset is now large enough for the Noema-written compiler to compile [series.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/series.noe), [selfhost_text.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/selfhost_text.noe), [socket_probe.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/socket_probe.noe), and [frontend_demo.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/frontend_demo.noe) end to end.
+That subset is now large enough for [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) to compile [series.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/series.noe), [selfhost_text.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/selfhost_text.noe), [socket_probe.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/socket_probe.noe), and [frontend_demo.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/frontend_demo.noe) end to end.
 
 ## Bootstrap Workflow
 

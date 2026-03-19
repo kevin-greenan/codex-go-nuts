@@ -168,9 +168,13 @@ It is not self-hosting yet, but it now has the structural features needed to sta
 
 ## Self-Hosting Track
 
-`Noema` now has a bootstrap compiler written in `Noema` at `selfhost/mini_compiler.noe`.
+`Noema` now has a canonical bootstrap compiler written in `Noema` at [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe).
 
-There is also an explicit bootstrap compiler artifact at `selfhost/compiler_1.noe` that is intended to be built into `compiler_1`, then used to build the final `noema_compiler` binary.
+The intended flow is:
+
+1. the Rust stage-1 compiler builds `compiler_1`
+2. `compiler_1` rebuilds itself into `noema_compiler`
+3. `noema_compiler` compiles normal Noema programs
 
 Parity expectation:
 
