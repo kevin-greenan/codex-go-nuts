@@ -1213,6 +1213,9 @@
     ? (ty == "text") {
         ^ "noema_list_append_text";
     }
+    ? (ty == "file") {
+        ^ "noema_list_append_file";
+    }
     ? (ty == "socket") {
         ^ "noema_list_append_socket";
     }
@@ -1256,6 +1259,9 @@
     }
     ? (ty == "text") {
         ^ "noema_text";
+    }
+    ? (ty == "file") {
+        ^ "noema_file";
     }
     ? (ty == "socket") {
         ^ "noema_socket";
@@ -1342,6 +1348,24 @@
             ^ "text";
         }
         ? (expr.name == "write_text") {
+            ^ "bool";
+        }
+        ? (expr.name == "file_open") {
+            ^ "file";
+        }
+        ? (expr.name == "file_close") {
+            ^ "bool";
+        }
+        ? (expr.name == "file_size") {
+            ^ "i64";
+        }
+        ? (expr.name == "file_read") {
+            ^ "text";
+        }
+        ? (expr.name == "file_write") {
+            ^ "i64";
+        }
+        ? (expr.name == "file_sync") {
             ^ "bool";
         }
         ? (expr.name == "host_cc") {
@@ -1449,6 +1473,24 @@
     }
     ? (name == "write_text") {
         ^ "noema_write_text(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "file_open") {
+        ^ "noema_file_open(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "file_close") {
+        ^ "noema_file_close(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "file_size") {
+        ^ "noema_file_size(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "file_read") {
+        ^ "noema_file_read(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "file_write") {
+        ^ "noema_file_write(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "file_sync") {
+        ^ "noema_file_sync(" + emit_args(program, fn, locals, args) + ")";
     }
     ? (name == "host_cc") {
         ^ "noema_host_cc(" + emit_args(program, fn, locals, args) + ")";
@@ -1734,6 +1776,7 @@
     out = out + "static noema_list noema_list_append_i64(noema_list list, noema_i64 value) { return noema_list_append_raw(list, &value, sizeof(noema_i64)); }\n";
     out = out + "static noema_list noema_list_append_bool(noema_list list, bool value) { return noema_list_append_raw(list, &value, sizeof(bool)); }\n";
     out = out + "static noema_list noema_list_append_text(noema_list list, noema_text value) { return noema_list_append_raw(list, &value, sizeof(noema_text)); }\n";
+    out = out + "static noema_list noema_list_append_file(noema_list list, noema_file value) { return noema_list_append_raw(list, &value, sizeof(noema_file)); }\n";
     out = out + "static noema_list noema_list_append_socket(noema_list list, noema_socket value) { return noema_list_append_raw(list, &value, sizeof(noema_socket)); }\n";
     out = out + "static noema_list noema_list_append_list(noema_list list, noema_list value) { return noema_list_append_raw(list, &value, sizeof(noema_list)); }\n";
     shapes := program.shapes;
@@ -1772,6 +1815,10 @@
             out = out + "    return noema_text_literal(\"\", 0);\n";
         }
         | {
+            ? (fn.return_ty == "file") {
+                out = out + "    return (noema_file){0};\n";
+            }
+            | {
             ? (fn.return_ty == "socket") {
                 out = out + "    return (noema_socket){0};\n";
             }
@@ -1793,6 +1840,7 @@
                     }
                 }
             }
+            }
         }
         out = out + "}\n\n";
         idx = idx + 1;
@@ -1807,12 +1855,15 @@
     out = out + "%:include <stdio.h>\n";
     out = out + "%:include <stdlib.h>\n";
     out = out + "%:include <string.h>\n";
+    out = out + "%:include <fcntl.h>\n";
     out = out + "%:include <netdb.h>\n";
+    out = out + "%:include <sys/stat.h>\n";
     out = out + "%:include <sys/socket.h>\n";
     out = out + "%:include <sys/types.h>\n";
     out = out + "%:include <unistd.h>\n\n";
     out = out + "typedef int64_t noema_i64;\n\n";
     out = out + "typedef struct { noema_i64 len; const char *data; } noema_text;\n";
+    out = out + "typedef struct { int fd; } noema_file;\n";
     out = out + "typedef struct { int fd; } noema_socket;\n";
     out = out + "typedef struct { noema_i64 len; void *items; } noema_list;\n";
     out = out + "static int noema_argc = 0;\n";
@@ -1918,6 +1969,41 @@
     out = out + "    fclose(file);\n";
     out = out + "    return written == (size_t)text.len;\n";
     out = out + "}\n\n";
+    out = out + "static noema_file noema_file_open(noema_text path) {\n";
+    out = out + "    char *path_c = noema_text_to_cstr(path);\n";
+    out = out + "    int fd = open(path_c, O_RDWR | O_CREAT, 0644);\n";
+    out = out + "    noema_file file_value;\n";
+    out = out + "    if (fd < 0) { fprintf(stderr, \"open failed %s\\n\", path_c); exit(1); }\n";
+    out = out + "    file_value.fd = fd;\n";
+    out = out + "    return file_value;\n";
+    out = out + "}\n\n";
+    out = out + "static bool noema_file_close(noema_file file_value) { return close(file_value.fd) == 0; }\n\n";
+    out = out + "static noema_i64 noema_file_size(noema_file file_value) {\n";
+    out = out + "    struct stat st;\n";
+    out = out + "    if (fstat(file_value.fd, &st) != 0) { fprintf(stderr, \"stat failed\\n\"); exit(1); }\n";
+    out = out + "    return (noema_i64)st.st_size;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_file_read(noema_file file_value, noema_i64 offset, noema_i64 len) {\n";
+    out = out + "    char *buffer;\n";
+    out = out + "    ssize_t got;\n";
+    out = out + "    if (offset < 0 || len < 0) { fprintf(stderr, \"invalid file_read args\\n\"); exit(1); }\n";
+    out = out + "    buffer = (char *)noema_alloc((size_t)len + 1);\n";
+    out = out + "    got = pread(file_value.fd, buffer, (size_t)len, (off_t)offset);\n";
+    out = out + "    if (got < 0) { fprintf(stderr, \"file_read failed\\n\"); exit(1); }\n";
+    out = out + "    buffer[got] = '\\0';\n";
+    out = out + "    return noema_text_literal(buffer, (noema_i64)got);\n";
+    out = out + "}\n\n";
+    out = out + "static noema_i64 noema_file_write(noema_file file_value, noema_i64 offset, noema_text text) {\n";
+    out = out + "    noema_i64 total = 0;\n";
+    out = out + "    if (offset < 0) { fprintf(stderr, \"invalid file_write offset\\n\"); exit(1); }\n";
+    out = out + "    while (total < text.len) {\n";
+    out = out + "        ssize_t wrote = pwrite(file_value.fd, text.data + total, (size_t)(text.len - total), (off_t)(offset + total));\n";
+    out = out + "        if (wrote <= 0) { fprintf(stderr, \"file_write failed\\n\"); exit(1); }\n";
+    out = out + "        total = total + wrote;\n";
+    out = out + "    }\n";
+    out = out + "    return total;\n";
+    out = out + "}\n\n";
+    out = out + "static bool noema_file_sync(noema_file file_value) { return fsync(file_value.fd) == 0; }\n\n";
     out = out + "static noema_i64 noema_host_cc(noema_text source_path, noema_text output_path) {\n";
     out = out + "    char *source_c = noema_text_to_cstr(source_path);\n";
     out = out + "    char *output_c = noema_text_to_cstr(output_path);\n";

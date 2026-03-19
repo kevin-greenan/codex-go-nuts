@@ -1,0 +1,35 @@
+%Pager {
+    handle: file;
+    page_size: i64;
+}
+
+@pager_open(path: text, page_size: i64) -> Pager {
+    handle := file_open(path);
+    ^ Pager { handle: handle, page_size: page_size };
+}
+
+@pager_page_offset(pager: Pager, page_id: i64) -> i64 {
+    ^ page_id * pager.page_size;
+}
+
+@pager_file_size(pager: Pager) -> i64 {
+    ^ file_size(pager.handle);
+}
+
+@pager_read_page(pager: Pager, page_id: i64) -> text {
+    offset := pager_page_offset(pager, page_id);
+    ^ file_read(pager.handle, offset, pager.page_size);
+}
+
+@pager_write_page(pager: Pager, page_id: i64, data: text) -> i64 {
+    offset := pager_page_offset(pager, page_id);
+    ^ file_write(pager.handle, offset, data);
+}
+
+@pager_sync(pager: Pager) -> bool {
+    ^ file_sync(pager.handle);
+}
+
+@pager_close(pager: Pager) -> bool {
+    ^ file_close(pager.handle);
+}

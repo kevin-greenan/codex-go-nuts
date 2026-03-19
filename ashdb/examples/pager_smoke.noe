@@ -1,0 +1,39 @@
+& "../lib/pager.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: pager_smoke <db-path>";
+        ^ 1;
+    }
+
+    pager := pager_open(arg(1), 8);
+    wrote0 := pager_write_page(pager, 0, "page0000");
+    wrote1 := pager_write_page(pager, 1, "page0001");
+    synced := pager_sync(pager);
+    size := pager_file_size(pager);
+    first := pager_read_page(pager, 0);
+    second := pager_read_page(pager, 1);
+    closed := pager_close(pager);
+
+    ? (wrote0 != 8 or wrote1 != 8) {
+        ^ 2;
+    }
+    ? (not synced or not closed) {
+        ^ 3;
+    }
+    ? (size != 16) {
+        ! "unexpected_size=" + text_of(size);
+        ^ 4;
+    }
+    ? (first != "page0000") {
+        ! "first=" + first;
+        ^ 5;
+    }
+    ? (second != "page0001") {
+        ! "second=" + second;
+        ^ 6;
+    }
+
+    ! "ashdb pager smoke ok";
+    ^ 0;
+}

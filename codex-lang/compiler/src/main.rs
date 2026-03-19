@@ -176,6 +176,7 @@ enum TypeName {
     I64,
     Bool,
     Text,
+    File,
     Socket,
     Void,
     Named(String),
@@ -613,6 +614,7 @@ fn parse_type_inner(chars: &[char], index: &mut usize) -> Option<TypeName> {
         "i64" => TypeName::I64,
         "bool" => TypeName::Bool,
         "text" => TypeName::Text,
+        "file" => TypeName::File,
         "socket" => TypeName::Socket,
         "void" => TypeName::Void,
         _ => TypeName::Named(ident),
@@ -1382,7 +1384,7 @@ fn ensure_type_defined(
     shapes: &HashMap<String, ShapeDecl>,
 ) -> Result<(), String> {
     match ty {
-        TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::Socket | TypeName::Void => Ok(()),
+        TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::File | TypeName::Socket | TypeName::Void => Ok(()),
         TypeName::Named(name) => {
             if shapes.contains_key(name) {
                 Ok(())
@@ -1927,6 +1929,82 @@ fn infer_call_type(
             let text_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
             if path_type != TypeName::Text || text_type != TypeName::Text {
                 return Err("write_text(...) expects (text, text)".to_string());
+            }
+            Ok(TypeName::Bool)
+        }
+        "file_open" => {
+            if args.len() != 1 {
+                return Err("file_open(...) expects exactly one argument".to_string());
+            }
+            let path_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if path_type != TypeName::Text {
+                return Err(format!(
+                    "file_open(...) expects a text path, got '{}'",
+                    path_type.display()
+                ));
+            }
+            Ok(TypeName::File)
+        }
+        "file_close" => {
+            if args.len() != 1 {
+                return Err("file_close(...) expects exactly one argument".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File {
+                return Err(format!(
+                    "file_close(...) expects file input, got '{}'",
+                    file_type.display()
+                ));
+            }
+            Ok(TypeName::Bool)
+        }
+        "file_size" => {
+            if args.len() != 1 {
+                return Err("file_size(...) expects exactly one argument".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File {
+                return Err(format!(
+                    "file_size(...) expects file input, got '{}'",
+                    file_type.display()
+                ));
+            }
+            Ok(TypeName::I64)
+        }
+        "file_read" => {
+            if args.len() != 3 {
+                return Err("file_read(...) expects exactly three arguments".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            let offset_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
+            let len_type = infer_expr_type(&args[2], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File || offset_type != TypeName::I64 || len_type != TypeName::I64 {
+                return Err("file_read(...) expects (file, i64, i64)".to_string());
+            }
+            Ok(TypeName::Text)
+        }
+        "file_write" => {
+            if args.len() != 3 {
+                return Err("file_write(...) expects exactly three arguments".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            let offset_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
+            let text_type = infer_expr_type(&args[2], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File || offset_type != TypeName::I64 || text_type != TypeName::Text {
+                return Err("file_write(...) expects (file, i64, text)".to_string());
+            }
+            Ok(TypeName::I64)
+        }
+        "file_sync" => {
+            if args.len() != 1 {
+                return Err("file_sync(...) expects exactly one argument".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File {
+                return Err(format!(
+                    "file_sync(...) expects file input, got '{}'",
+                    file_type.display()
+                ));
             }
             Ok(TypeName::Bool)
         }
@@ -2905,7 +2983,9 @@ fn lower_to_c_with_options(
     out.push_str("#include <stdlib.h>\n");
     out.push_str("#include <string.h>\n");
     out.push_str("#include <errno.h>\n");
+    out.push_str("#include <fcntl.h>\n");
     out.push_str("#include <netdb.h>\n");
+    out.push_str("#include <sys/stat.h>\n");
     out.push_str("#include <sys/socket.h>\n");
     out.push_str("#include <sys/types.h>\n");
     out.push_str("#include <unistd.h>\n\n");
@@ -2918,6 +2998,10 @@ fn lower_to_c_with_options(
     out.push_str("typedef struct {\n");
     out.push_str("    int fd;\n");
     out.push_str("} NoemaSocket;\n\n");
+
+    out.push_str("typedef struct {\n");
+    out.push_str("    int fd;\n");
+    out.push_str("} NoemaFile;\n\n");
 
     if external_linkage {
         out.push_str("int noema_argc = 0;\n");
@@ -3081,6 +3165,67 @@ fn lower_to_c_with_options(
     out.push_str("    return written == (size_t)text.len;\n");
     out.push_str("}\n\n");
 
+    out.push_str("static NoemaFile noema_file_open(NoemaText path) {\n");
+    out.push_str("    char *path_c = noema_text_to_cstr(path);\n");
+    out.push_str("    int fd = open(path_c, O_RDWR | O_CREAT, 0644);\n");
+    out.push_str("    NoemaFile file_value;\n");
+    out.push_str("    if (fd < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to open file %s\\n\", path_c);\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    file_value.fd = fd;\n");
+    out.push_str("    return file_value;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static bool noema_file_close(NoemaFile file_value) {\n");
+    out.push_str("    return close(file_value.fd) == 0;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static int64_t noema_file_size(NoemaFile file_value) {\n");
+    out.push_str("    struct stat st;\n");
+    out.push_str("    if (fstat(file_value.fd, &st) != 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to stat file handle\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    return (int64_t)st.st_size;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaText noema_file_read(NoemaFile file_value, int64_t offset, int64_t len) {\n");
+    out.push_str("    if (offset < 0 || len < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: file_read offset and len must be non-negative\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    char *buffer = (char *)noema_alloc((size_t)len + 1);\n");
+    out.push_str("    ssize_t got = pread(file_value.fd, buffer, (size_t)len, (off_t)offset);\n");
+    out.push_str("    if (got < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: file_read failed\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    buffer[got] = '\\0';\n");
+    out.push_str("    return noema_text_literal(buffer, (int64_t)got);\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static int64_t noema_file_write(NoemaFile file_value, int64_t offset, NoemaText text) {\n");
+    out.push_str("    int64_t total = 0;\n");
+    out.push_str("    if (offset < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: file_write offset must be non-negative\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    while (total < text.len) {\n");
+    out.push_str("        ssize_t wrote = pwrite(file_value.fd, text.data + total, (size_t)(text.len - total), (off_t)(offset + total));\n");
+    out.push_str("        if (wrote <= 0) {\n");
+    out.push_str("            fprintf(stderr, \"noema runtime: file_write failed\\n\");\n");
+    out.push_str("            exit(1);\n");
+    out.push_str("        }\n");
+    out.push_str("        total += (int64_t)wrote;\n");
+    out.push_str("    }\n");
+    out.push_str("    return total;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static bool noema_file_sync(NoemaFile file_value) {\n");
+    out.push_str("    return fsync(file_value.fd) == 0;\n");
+    out.push_str("}\n\n");
+
     out.push_str("static int64_t noema_host_cc(NoemaText source_path, NoemaText output_path) {\n");
     out.push_str("    char *source_c = noema_text_to_cstr(source_path);\n");
     out.push_str("    char *output_c = noema_text_to_cstr(output_path);\n");
@@ -3205,6 +3350,16 @@ fn lower_to_c_with_options(
     out.push_str("    return *(NoemaSocket *)(uintptr_t)handle;\n");
     out.push_str("}\n\n");
 
+    out.push_str("static uint64_t noema_native_box_file(NoemaFile file_value) {\n");
+    out.push_str("    NoemaFile *ptr = (NoemaFile *)noema_alloc(sizeof(NoemaFile));\n");
+    out.push_str("    *ptr = file_value;\n");
+    out.push_str("    return (uint64_t)(uintptr_t)ptr;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaFile noema_native_unbox_file(uint64_t handle) {\n");
+    out.push_str("    return *(NoemaFile *)(uintptr_t)handle;\n");
+    out.push_str("}\n\n");
+
     out.push_str("uint64_t noema_native_text_literal(const char *data, int64_t len) {\n");
     out.push_str("    return noema_native_box_text(noema_text_literal(data, len));\n");
     out.push_str("}\n\n");
@@ -3247,6 +3402,30 @@ fn lower_to_c_with_options(
 
     out.push_str("int64_t noema_native_write_text(uint64_t path, uint64_t text) {\n");
     out.push_str("    return noema_write_text(noema_native_unbox_text(path), noema_native_unbox_text(text));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_file_open(uint64_t path) {\n");
+    out.push_str("    return noema_native_box_file(noema_file_open(noema_native_unbox_text(path)));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_close(uint64_t file_value) {\n");
+    out.push_str("    return noema_file_close(noema_native_unbox_file(file_value));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_size(uint64_t file_value) {\n");
+    out.push_str("    return noema_file_size(noema_native_unbox_file(file_value));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_file_read(uint64_t file_value, int64_t offset, int64_t len) {\n");
+    out.push_str("    return noema_native_box_text(noema_file_read(noema_native_unbox_file(file_value), offset, len));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_write(uint64_t file_value, int64_t offset, uint64_t text) {\n");
+    out.push_str("    return noema_file_write(noema_native_unbox_file(file_value), offset, noema_native_unbox_text(text));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_sync(uint64_t file_value) {\n");
+    out.push_str("    return noema_file_sync(noema_native_unbox_file(file_value));\n");
     out.push_str("}\n\n");
 
     out.push_str("int64_t noema_native_host_cc(uint64_t source_path, uint64_t output_path) {\n");
@@ -3872,6 +4051,34 @@ fn lower_call(
             lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?,
             lower_expr(&args[1], env, semantic, Some(&TypeName::Text))?
         )),
+        "file_open" => Ok(format!(
+            "noema_file_open({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?
+        )),
+        "file_close" => Ok(format!(
+            "noema_file_close({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?
+        )),
+        "file_size" => Ok(format!(
+            "noema_file_size({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?
+        )),
+        "file_read" => Ok(format!(
+            "noema_file_read({}, {}, {})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?,
+            lower_expr(&args[1], env, semantic, Some(&TypeName::I64))?,
+            lower_expr(&args[2], env, semantic, Some(&TypeName::I64))?
+        )),
+        "file_write" => Ok(format!(
+            "noema_file_write({}, {}, {})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?,
+            lower_expr(&args[1], env, semantic, Some(&TypeName::I64))?,
+            lower_expr(&args[2], env, semantic, Some(&TypeName::Text))?
+        )),
+        "file_sync" => Ok(format!(
+            "noema_file_sync({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?
+        )),
         "host_cc" => Ok(format!(
             "noema_host_cc({}, {})",
             lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?,
@@ -3958,6 +4165,7 @@ fn c_type_name(ty: &TypeName) -> String {
         TypeName::I64 => "int64_t".to_string(),
         TypeName::Bool => "bool".to_string(),
         TypeName::Text => "NoemaText".to_string(),
+        TypeName::File => "NoemaFile".to_string(),
         TypeName::Socket => "NoemaSocket".to_string(),
         TypeName::Void => "void".to_string(),
         TypeName::Named(name) => name.clone(),
@@ -3995,6 +4203,7 @@ impl TypeName {
             TypeName::I64 => "i64".to_string(),
             TypeName::Bool => "bool".to_string(),
             TypeName::Text => "text".to_string(),
+            TypeName::File => "file".to_string(),
             TypeName::Socket => "socket".to_string(),
             TypeName::Void => "void".to_string(),
             TypeName::Named(name) => name.clone(),
@@ -4007,6 +4216,7 @@ impl TypeName {
             TypeName::I64 => "i64".to_string(),
             TypeName::Bool => "bool".to_string(),
             TypeName::Text => "text".to_string(),
+            TypeName::File => "file".to_string(),
             TypeName::Socket => "socket".to_string(),
             TypeName::Void => "void".to_string(),
             TypeName::Named(name) => name.to_lowercase(),
