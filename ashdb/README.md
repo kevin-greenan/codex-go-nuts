@@ -98,7 +98,8 @@ What is already working on `codex/ashdb-foundation`:
 35. additive schema migration for new fields with backfill
 36. unique secondary-index range scans for base-row retrieval
 37. rowset-style query helpers that include primary keys in result rows
-38. smoke-test coverage through the direct self-hosted compiler
+38. backup and restore copy helpers for committed snapshots
+39. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 

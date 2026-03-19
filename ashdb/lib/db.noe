@@ -79,6 +79,13 @@
     ^ wrote == db_journal_header_size() and synced and closed;
 }
 
+@db_journal_is_active(db: DB) -> bool {
+    journal := file_open(db_journal_path(db));
+    header := file_read(journal, 0, db_journal_header_size());
+    closed := file_close(journal);
+    ^ db_journal_active(header);
+}
+
 @db_restore_journal_pages(db: DB, journal: file, entry_count: i64) -> bool {
     idx := 0;
     ~ (idx < entry_count) {
@@ -1627,4 +1634,36 @@
 
 @db_close(db: DB) -> bool {
     ^ pager_close(db.pager);
+}
+
+@db_backup(db: DB, backup_path: text) -> bool {
+    ? (db_journal_is_active(db)) {
+        ^ false;
+    }
+    synced := db_sync(db);
+    ? (not synced) {
+        ^ false;
+    }
+    size0 := pager_file_size(db.pager);
+    snapshot := file_read_bytes(db.pager.handle, 0, size0);
+    backup := file_open(backup_path);
+    wrote := file_write(backup, 0, snapshot);
+    synced_backup := file_sync(backup);
+    closed := file_close(backup);
+    ^ wrote == size0 and synced_backup and closed;
+}
+
+@db_restore_copy(backup_path: text, restore_path: text) -> bool {
+    backup := file_open(backup_path);
+    size0 := file_size(backup);
+    snapshot := file_read_bytes(backup, 0, size0);
+    closed_backup := file_close(backup);
+    ? (not closed_backup) {
+        ^ false;
+    }
+    restored := file_open(restore_path);
+    wrote := file_write(restored, 0, snapshot);
+    synced_restored := file_sync(restored);
+    closed_restored := file_close(restored);
+    ^ wrote == size0 and synced_restored and closed_restored;
 }
