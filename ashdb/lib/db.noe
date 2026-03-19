@@ -2,10 +2,75 @@
 
 %DB {
     pager: Pager;
+    path: text;
 }
 
 @db_index_table_name(table_name: text, index_name: text) -> text {
     ^ "idx." + table_name + "." + index_name;
+}
+
+@db_journal_path(db: DB) -> text {
+    ^ db.path + ".journal";
+}
+
+@db_journal_size_width() -> i64 {
+    ^ 8;
+}
+
+@db_journal_header_size() -> i64 {
+    ^ 1 + db_journal_size_width();
+}
+
+@db_journal_header(active: bool, size0: i64) -> text {
+    flag := ".";
+    ? (active) {
+        flag = "J";
+    }
+    ^ flag + pad_left_i64(size0, db_journal_size_width());
+}
+
+@db_journal_active(header: text) -> bool {
+    ? (count(header) < db_journal_header_size()) {
+        ^ false;
+    }
+    ^ slice(header, 0, 1) == "J";
+}
+
+@db_journal_snapshot_size(header: text) -> i64 {
+    ? (count(header) < db_journal_header_size()) {
+        ^ 0;
+    }
+    ^ i64_of(slice(header, 1, db_journal_size_width()));
+}
+
+@db_journal_clear(db: DB) -> bool {
+    journal := file_open(db_journal_path(db));
+    wrote := file_write(journal, 0, db_journal_header(false, 0));
+    synced := file_sync(journal);
+    closed := file_close(journal);
+    ^ wrote == db_journal_header_size() and synced and closed;
+}
+
+@db_recover_if_needed(db: DB) -> bool {
+    journal := file_open(db_journal_path(db));
+    journal_size := file_size(journal);
+    ? (journal_size < db_journal_header_size()) {
+        closed := file_close(journal);
+        ^ true;
+    }
+    header := file_read(journal, 0, db_journal_header_size());
+    ? (not db_journal_active(header)) {
+        closed := file_close(journal);
+        ^ true;
+    }
+    snapshot_size := db_journal_snapshot_size(header);
+    snapshot := file_read_bytes(journal, db_journal_header_size(), snapshot_size);
+    restored := file_write(db.pager.handle, 0, snapshot);
+    synced_db := file_sync(db.pager.handle);
+    cleared := file_write(journal, 0, db_journal_header(false, 0));
+    synced_journal := file_sync(journal);
+    closed := file_close(journal);
+    ^ restored == snapshot_size and synced_db and cleared == db_journal_header_size() and synced_journal and closed;
 }
 
 @db_catalog_page() -> i64 {
@@ -100,12 +165,13 @@
 
 @db_open(path: text, page_size: i64) -> DB {
     pager := pager_open(path, page_size);
-    db := DB { pager: pager };
+    db := DB { pager: pager, path: path };
     total_pages := pager_total_pages(pager);
     ? (total_pages == 1) {
         catalog_page := pager_alloc_page(pager);
         initialized := db_catalog_init(db);
     }
+    recovered := db_recover_if_needed(db);
     ^ db;
 }
 
@@ -311,6 +377,48 @@
 
 @db_sync(db: DB) -> bool {
     ^ pager_sync(db.pager);
+}
+
+@db_begin(db: DB) -> bool {
+    journal := file_open(db_journal_path(db));
+    header := file_read(journal, 0, db_journal_header_size());
+    ? (db_journal_active(header)) {
+        closed := file_close(journal);
+        ^ false;
+    }
+    snapshot_size := pager_file_size(db.pager);
+    snapshot := file_read_bytes(db.pager.handle, 0, snapshot_size);
+    wrote_header := file_write(journal, 0, db_journal_header(true, snapshot_size));
+    wrote_snapshot := file_write(journal, db_journal_header_size(), snapshot);
+    synced := file_sync(journal);
+    closed := file_close(journal);
+    ^ wrote_header == db_journal_header_size() and wrote_snapshot == snapshot_size and synced and closed;
+}
+
+@db_commit(db: DB) -> bool {
+    ^ db_journal_clear(db);
+}
+
+@db_rollback(db: DB) -> bool {
+    journal := file_open(db_journal_path(db));
+    journal_size := file_size(journal);
+    ? (journal_size < db_journal_header_size()) {
+        closed := file_close(journal);
+        ^ false;
+    }
+    header := file_read(journal, 0, db_journal_header_size());
+    ? (not db_journal_active(header)) {
+        closed := file_close(journal);
+        ^ false;
+    }
+    snapshot_size := db_journal_snapshot_size(header);
+    snapshot := file_read_bytes(journal, db_journal_header_size(), snapshot_size);
+    restored := file_write(db.pager.handle, 0, snapshot);
+    synced_db := file_sync(db.pager.handle);
+    cleared := file_write(journal, 0, db_journal_header(false, 0));
+    synced_journal := file_sync(journal);
+    closed := file_close(journal);
+    ^ restored == snapshot_size and synced_db and cleared == db_journal_header_size() and synced_journal and closed;
 }
 
 @db_close(db: DB) -> bool {

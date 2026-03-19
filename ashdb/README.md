@@ -78,19 +78,19 @@ What is already working on `codex/ashdb-foundation`:
 15. root promotion from leaf to internal page
 16. internal-node child routing
 17. named-table catalog metadata
-18. point lookup by key
-19. ordered scan across the current tree shape
-20. smoke-test coverage through the direct self-hosted compiler
+18. a first secondary-index layer
+19. coarse rollback-journal transactions with recovery on reopen
+20. point lookup by key
+21. ordered scan across the current tree shape
+22. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
-1. deeper internal-tree growth beyond the current root-managed shape
-2. internal-node splitting and root promotion for larger trees
-3. richer row/schema metadata beyond fixed slot-width text payloads
-4. update and delete semantics at the database API layer
-5. transactions and crash recovery
-6. secondary indexes
-7. any SQL surface
+1. richer row/schema metadata beyond fixed slot-width text payloads
+2. stronger transactional semantics than whole-file rollback snapshots
+3. corruption tooling and format validation
+4. broader secondary-index integration across more query shapes
+5. any SQL surface
 
 ## Architecture Overview
 
@@ -290,10 +290,10 @@ Status:
 1. In progress.
 2. The current branch has keyed leaf storage, internal-node routing, root promotion, table scans, and a small named-table catalog.
 3. The next concrete milestones are:
-4. internal-node splits
-5. multi-level tree growth
-6. richer table metadata
-7. delete/update paths
+4. richer table metadata
+5. better row encoding
+6. validation and tooling
+7. more index/query integration
 8. cursor-style scans
 
 ### Phase 3: Transactions and Recovery
@@ -312,7 +312,8 @@ Exit criteria:
 Status:
 
 1. Not started.
-2. This should wait until the single-tree storage path is stable.
+2. A first rollback-journal path now exists.
+3. The next durability work should improve from whole-file snapshots toward page-aware journaling or WAL-style behavior.
 
 ### Phase 4: Secondary Indexes and Query API
 
@@ -358,10 +359,10 @@ Completed:
 Next:
 
 1. internal-node split mechanics
-2. multi-level root growth
-3. catalog-backed table metadata beyond root page and slot width
-4. delete/update operations
-5. secondary index storage
+2. catalog-backed table metadata beyond root page and slot width
+3. delete/update operations
+4. secondary index storage
+5. rollback journal and recovery validation
 
 ## Definition of Success
 

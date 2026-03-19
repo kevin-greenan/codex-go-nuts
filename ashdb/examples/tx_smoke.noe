@@ -1,0 +1,75 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: tx_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    created := db_create_table(db, "users", 20);
+    inserted := db_insert(db, "users", 10, "alice");
+
+    began0 := db_begin(db);
+    upd0 := db_update(db, "users", 10, "alicia");
+    ins0 := db_insert(db, "users", 20, "bob");
+    rolled0 := db_rollback(db);
+    after_rollback0 := db_get(db, "users", 10);
+    after_rollback1 := db_get(db, "users", 20);
+
+    began1 := db_begin(db);
+    upd1 := db_update(db, "users", 10, "amber");
+    closed_mid := db_close(db);
+
+    reopened0 := db_open(arg(1), 128);
+    recovered0 := db_get(reopened0, "users", 10);
+    recovered1 := db_get(reopened0, "users", 20);
+
+    began2 := db_begin(reopened0);
+    upd2 := db_update(reopened0, "users", 10, "ava");
+    committed := db_commit(reopened0);
+    closed0 := db_close(reopened0);
+
+    reopened1 := db_open(arg(1), 128);
+    committed_value := db_get(reopened1, "users", 10);
+    began3 := db_begin(reopened1);
+    nested := db_begin(reopened1);
+    rolled1 := db_rollback(reopened1);
+    closed1 := db_close(reopened1);
+
+    ? (created != 2 and created != -2) {
+        ! "created=" + text_of(created);
+        ^ 2;
+    }
+    ? (inserted < 0) {
+        ^ 3;
+    }
+    ? (not began0 or upd0 < 0 or ins0 < 0 or not rolled0) {
+        ! "tx0=" + text_of(upd0) + ":" + text_of(ins0);
+        ^ 4;
+    }
+    ? (slice(after_rollback0, 0, 5) != "alice" or after_rollback1 != "") {
+        ! "rollback=" + after_rollback0 + ":" + after_rollback1;
+        ^ 5;
+    }
+    ? (not began1 or upd1 < 0 or not closed_mid) {
+        ^ 6;
+    }
+    ? (slice(recovered0, 0, 5) != "alice" or recovered1 != "") {
+        ! "recovered=" + recovered0 + ":" + recovered1;
+        ^ 7;
+    }
+    ? (not began2 or upd2 < 0 or not committed or not closed0) {
+        ^ 8;
+    }
+    ? (slice(committed_value, 0, 3) != "ava") {
+        ! "committed=" + committed_value;
+        ^ 9;
+    }
+    ? (not began3 or nested or not rolled1 or not closed1) {
+        ^ 10;
+    }
+
+    ! "ashdb tx smoke ok";
+    ^ 0;
+}
