@@ -109,7 +109,8 @@ What is already working on `codex/ashdb-foundation`:
 46. table compaction/rebuild helpers with freelist recovery for long-lived trees
 47. tagged result-record conventions for lookup and cursor APIs
 48. `i64` field-range predicate scans and rowset helpers
-49. smoke-test coverage through the direct self-hosted compiler
+49. large-data stress coverage with 1,200-row insert/delete/compact/reopen validation
+50. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -127,7 +128,6 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 1. WAL-style durability beyond changed-page rollback journaling
 2. better delete/rebalance behavior beyond explicit table compaction
-3. larger data-path testing with hundreds or thousands of rows per table
 
 ### Schema and Data Model
 
