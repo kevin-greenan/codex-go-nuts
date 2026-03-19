@@ -1,0 +1,47 @@
+& "../lib/http.noe";
+
+@main() -> i64 {
+    raw := "POST /submit?ok=1 HTTP/1.1\nHost: localhost\nContent-Type: text/plain\n\nhi";
+    request := kiln_http_parse_request(raw);
+    ? (request.method != "POST") {
+        ! "method mismatch";
+        ^ 1;
+    }
+    ? (request.path != "/submit?ok=1") {
+        ! "path mismatch";
+        ^ 2;
+    }
+    ? (request.version != "HTTP/1.1") {
+        ! "version mismatch";
+        ^ 3;
+    }
+    ? (kiln_http_header_value(request.headers, "Host") != "localhost") {
+        ! "host mismatch";
+        ^ 4;
+    }
+    ? (kiln_http_header_value(request.headers, "Content-Type") != "text/plain") {
+        ! "content-type mismatch";
+        ^ 5;
+    }
+    ? (request.body != "hi") {
+        ! "body mismatch";
+        ^ 6;
+    }
+
+    response := kiln_http_text(200, "ok");
+    ? (find(response, "HTTP/1.1 200 OK") < 0) {
+        ! "status mismatch";
+        ^ 7;
+    }
+    ? (find(response, "Content-Length: 2") < 0) {
+        ! "length mismatch";
+        ^ 8;
+    }
+    ? (find(response, "\n\nok") < 0) {
+        ! "body serialization mismatch";
+        ^ 9;
+    }
+
+    ! "kiln http parse smoke ok";
+    ^ 0;
+}

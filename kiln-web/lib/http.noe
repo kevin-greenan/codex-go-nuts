@@ -1,0 +1,139 @@
+%KilnHttpRequest {
+    method: text;
+    path: text;
+    version: text;
+    headers: text;
+    body: text;
+    raw: text;
+}
+
+@kiln_http_line_sep() -> text {
+    ^ "\n";
+}
+
+@kiln_http_header_sep() -> text {
+    ^ "\n\n";
+}
+
+@kiln_http_reason_phrase(status: i64) -> text {
+    ? (status == 200) {
+        ^ "OK";
+    }
+    ? (status == 404) {
+        ^ "Not Found";
+    }
+    ? (status == 405) {
+        ^ "Method Not Allowed";
+    }
+    ^ "Internal Server Error";
+}
+
+@kiln_http_status_line(status: i64) -> text {
+    ^ "HTTP/1.1 " + text_of(status) + " " + kiln_http_reason_phrase(status);
+}
+
+@kiln_http_request_line(raw: text) -> text {
+    line_end := find(raw, kiln_http_line_sep());
+    ? (line_end < 0) {
+        ^ raw;
+    }
+    ^ slice(raw, 0, line_end);
+}
+
+@kiln_http_request_method(raw: text) -> text {
+    line := kiln_http_request_line(raw);
+    first_space := find(line, " ");
+    ? (first_space < 0) {
+        ^ "";
+    }
+    ^ slice(line, 0, first_space);
+}
+
+@kiln_http_request_path(raw: text) -> text {
+    line := kiln_http_request_line(raw);
+    first_space := find(line, " ");
+    ? (first_space < 0) {
+        ^ "";
+    }
+    rest := slice(line, first_space + 1, count(line) - (first_space + 1));
+    second_space := find(rest, " ");
+    ? (second_space < 0) {
+        ^ rest;
+    }
+    ^ slice(rest, 0, second_space);
+}
+
+@kiln_http_request_version(raw: text) -> text {
+    line := kiln_http_request_line(raw);
+    first_space := find(line, " ");
+    ? (first_space < 0) {
+        ^ "";
+    }
+    rest := slice(line, first_space + 1, count(line) - (first_space + 1));
+    second_space := find(rest, " ");
+    ? (second_space < 0) {
+        ^ "";
+    }
+    ^ slice(rest, second_space + 1, count(rest) - (second_space + 1));
+}
+
+@kiln_http_request_headers(raw: text) -> text {
+    line_end := find(raw, kiln_http_line_sep());
+    header_sep := find(raw, kiln_http_header_sep());
+    ? (line_end < 0 or header_sep < 0) {
+        ^ "";
+    }
+    start0 := line_end + count(kiln_http_line_sep());
+    ? (start0 > header_sep) {
+        ^ "";
+    }
+    ^ slice(raw, start0, header_sep - start0);
+}
+
+@kiln_http_request_body(raw: text) -> text {
+    header_sep := find(raw, kiln_http_header_sep());
+    ? (header_sep < 0) {
+        ^ "";
+    }
+    body_start := header_sep + count(kiln_http_header_sep());
+    ^ slice(raw, body_start, count(raw) - body_start);
+}
+
+@kiln_http_parse_request(raw: text) -> KilnHttpRequest {
+    ^ KilnHttpRequest {
+        method: kiln_http_request_method(raw),
+        path: kiln_http_request_path(raw),
+        version: kiln_http_request_version(raw),
+        headers: kiln_http_request_headers(raw),
+        body: kiln_http_request_body(raw),
+        raw: raw
+    };
+}
+
+@kiln_http_header_value(headers: text, name: text) -> text {
+    marker := name + ": ";
+    start0 := find(headers, marker);
+    ? (start0 < 0) {
+        ^ "";
+    }
+    value_start := start0 + count(marker);
+    tail := slice(headers, value_start, count(headers) - value_start);
+    line_end := find(tail, kiln_http_line_sep());
+    ? (line_end < 0) {
+        ^ tail;
+    }
+    ^ slice(tail, 0, line_end);
+}
+
+@kiln_http_response(status: i64, content_type: text, body: text) -> text {
+    response := kiln_http_status_line(status) + kiln_http_line_sep();
+    response = response + "Content-Type: " + content_type + kiln_http_line_sep();
+    response = response + "Content-Length: " + text_of(count(body)) + kiln_http_line_sep();
+    response = response + "Connection: close" + kiln_http_line_sep();
+    response = response + kiln_http_line_sep();
+    ^ response + body;
+}
+
+@kiln_http_text(status: i64, body: text) -> text {
+    ^ kiln_http_response(status, "text/plain", body);
+}

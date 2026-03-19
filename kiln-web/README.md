@@ -61,14 +61,15 @@ The first Kiln Web milestone is now underway on `codex/kiln-web-foundation`.
 
 What is already working:
 
-1. listener runtime support is being added to the compiler/runtime surface
-2. the target shape for the first acceptance slice is a direct-compiler `hello` server example under this folder
+1. inbound listener support is landed in both compiler paths
+2. a direct-compiled `hello` server runs locally and responds to `curl`
+3. a first Kiln HTTP library now parses request lines and serializes basic text responses
 
 What is next:
 
-1. land the inbound listener primitives end to end
-2. prove a sequential local HTTP response from a Noema server
-3. build the first HTTP parser and response helpers on top of that
+1. strengthen request parsing for headers, query strings, and bodies
+2. build route and handler dispatch on top of the HTTP layer
+3. add small HTML rendering helpers for server-rendered pages
 
 ## Architecture Overview
 
