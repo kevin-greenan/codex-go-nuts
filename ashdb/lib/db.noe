@@ -470,6 +470,144 @@
     ^ row_get(schema0, "fields");
 }
 
+@db_schema_field_count(fields_spec: text) -> i64 {
+    ? (count(fields_spec) == 0) {
+        ^ 0;
+    }
+    total := 1;
+    idx := 0;
+    ~ (idx < count(fields_spec)) {
+        ? (slice(fields_spec, idx, 1) == ",") {
+            total = total + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ total;
+}
+
+@db_schema_field_at(fields_spec: text, field_index: i64) -> text {
+    start := 0;
+    idx := 0;
+    current := 0;
+    ~ (idx < count(fields_spec)) {
+        ? (slice(fields_spec, idx, 1) == ",") {
+            ? (current == field_index) {
+                ^ slice(fields_spec, start, idx - start);
+            }
+            current = current + 1;
+            start = idx + 1;
+        }
+        idx = idx + 1;
+    }
+    ? (current == field_index) {
+        ^ slice(fields_spec, start, count(fields_spec) - start);
+    }
+    ^ "";
+}
+
+@db_schema_field_name(field_spec: text) -> text {
+    colon := find(field_spec, ":");
+    ? (colon < 0) {
+        ^ "";
+    }
+    ^ slice(field_spec, 0, colon);
+}
+
+@db_schema_field_type(field_spec: text) -> text {
+    colon := find(field_spec, ":");
+    ? (colon < 0) {
+        ^ "";
+    }
+    ^ slice(field_spec, colon + 1, count(field_spec) - (colon + 1));
+}
+
+@db_text_is_i64(value: text) -> bool {
+    ? (count(value) == 0) {
+        ^ false;
+    }
+    idx := 0;
+    ? (slice(value, 0, 1) == "-") {
+        ? (count(value) == 1) {
+            ^ false;
+        }
+        idx = 1;
+    }
+    ~ (idx < count(value)) {
+        ch := slice(value, idx, 1);
+        ? (find("0123456789", ch) < 0) {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@db_text_is_bool(value: text) -> bool {
+    ^ value == "true" or value == "false";
+}
+
+@db_value_matches_type(value: text, type_name: text) -> bool {
+    ? (type_name == "text") {
+        ^ true;
+    }
+    ? (type_name == "i64") {
+        ^ db_text_is_i64(value);
+    }
+    ? (type_name == "bool") {
+        ^ db_text_is_bool(value);
+    }
+    ^ false;
+}
+
+@db_row_matches_schema(payload: text, fields_spec: text) -> bool {
+    expected_count := db_schema_field_count(fields_spec);
+    ? (expected_count == 0) {
+        ^ true;
+    }
+    ? (row_field_count(payload) != expected_count) {
+        ^ false;
+    }
+    idx := 0;
+    ~ (idx < expected_count) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        type_name := db_schema_field_type(field_spec);
+        value := row_get(payload, field_name);
+        ? (count(field_name) == 0 or count(type_name) == 0 or count(value) == 0) {
+            ^ false;
+        }
+        ? (not db_value_matches_type(value, type_name)) {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@db_insert_row(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    fields_spec := db_table_fields(db, table_name);
+    ? (count(fields_spec) > 0 and not db_row_matches_schema(payload, fields_spec)) {
+        ^ -2;
+    }
+    ^ db_insert(db, table_name, key, payload);
+}
+
+@db_update_row(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    fields_spec := db_table_fields(db, table_name);
+    ? (count(fields_spec) > 0 and not db_row_matches_schema(payload, fields_spec)) {
+        ^ -2;
+    }
+    ^ db_update(db, table_name, key, payload);
+}
+
+@db_put_row(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    fields_spec := db_table_fields(db, table_name);
+    ? (count(fields_spec) > 0 and not db_row_matches_schema(payload, fields_spec)) {
+        ^ -2;
+    }
+    ^ db_put(db, table_name, key, payload);
+}
+
 @db_scan_where_page(db: DB, table: Table, page_id: i64, field_name: text, expected_value: text, separator: text) -> text {
     page_kind := table_page_kind(table, page_id);
     ? (page_kind == "L") {

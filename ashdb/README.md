@@ -84,13 +84,14 @@ What is already working on `codex/ashdb-foundation`:
 21. ordered scan across the current tree shape
 22. row-field helpers for record-like payloads
 23. schema metadata stored inside AshDB itself
-24. small structured query helpers for secondary-index lookup and field-equality scans
-25. smoke-test coverage through the direct self-hosted compiler
+24. typed-schema checked row insert, update, and put helpers for `text`, `i64`, and `bool`
+25. small structured query helpers for secondary-index lookup and field-equality scans
+26. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
 1. stronger transactional semantics than whole-file rollback snapshots
-2. richer schema constraints and typed column enforcement
+2. richer schema constraints beyond basic required-field and scalar-type checks
 3. broader corruption tooling and repair workflows
 4. broader query shapes beyond point lookup and equality filtering
 5. any SQL surface
@@ -293,7 +294,7 @@ Status:
 1. In progress.
 2. The current branch has keyed leaf storage, internal-node routing, root promotion, table scans, record-like row helpers, and a small named-table catalog with schema metadata.
 3. The next concrete milestones are:
-4. stronger typed schema enforcement
+4. richer schema constraints and defaults
 5. richer query helpers
 6. validation and repair tooling
 7. more index/query integration
@@ -335,7 +336,7 @@ Exit criteria:
 Status:
 
 1. Not started.
-2. The API now has a first structured shape through `table_*` and `db_*` calls, including row helpers, schema lookup, index lookup, and field-equality scans.
+2. The API now has a first structured shape through `table_*` and `db_*` calls, including row helpers, schema lookup, typed row validation, index lookup, and field-equality scans.
 3. It should continue growing as structured Noema calls, not SQL.
 
 ## Testing Strategy
@@ -361,7 +362,7 @@ Completed:
 
 Next:
 
-1. stronger typed schema enforcement
+1. richer schema constraints and defaults
 2. richer field-aware query helpers
 3. page-aware journaling or WAL-style durability
 4. repair-oriented validation tooling
