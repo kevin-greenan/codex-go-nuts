@@ -1,0 +1,53 @@
+& "../lib/table_leaf.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: leaf_smoke <db-path>";
+        ^ 1;
+    }
+
+    pager := pager_open(arg(1), 64);
+    page_id := pager_alloc_page(pager);
+    initialized := leaf_init_page(pager, page_id, 12);
+    slot0 := leaf_insert(pager, page_id, "alpha");
+    slot1 := leaf_insert(pager, page_id, "beta");
+    page := leaf_read_page(pager, page_id);
+    count0 := leaf_slot_count(page);
+    width0 := leaf_slot_width(page);
+    first := leaf_read_slot(pager, page_id, slot0);
+    second := leaf_read_slot(pager, page_id, slot1);
+    synced := pager_sync(pager);
+    closed := pager_close(pager);
+
+    ? (page_id != 1) {
+        ^ 2;
+    }
+    ? (initialized != 64) {
+        ^ 3;
+    }
+    ? (slot0 != 0 or slot1 != 1) {
+        ^ 4;
+    }
+    ? (count0 != 2 or width0 != 12) {
+        ! "leaf_meta=" + text_of(count0) + ":" + text_of(width0);
+        ^ 5;
+    }
+    ? (slice(page, 0, 2) != "DL") {
+        ! "page=" + page;
+        ^ 6;
+    }
+    ? (slice(first, 0, 5) != "alpha") {
+        ! "first=" + first;
+        ^ 7;
+    }
+    ? (slice(second, 0, 4) != "beta") {
+        ! "second=" + second;
+        ^ 8;
+    }
+    ? (not synced or not closed) {
+        ^ 9;
+    }
+
+    ! "ashdb leaf smoke ok";
+    ^ 0;
+}
