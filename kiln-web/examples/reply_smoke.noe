@@ -33,6 +33,20 @@
         ^ 6;
     }
 
+    cookie_reply := kiln_reply_with_cookie(kiln_reply_text(200, "cookie ok"), "session", "abc123");
+    cookie_response := kiln_reply_response(cookie_reply);
+    ? (find(cookie_response, "Set-Cookie: session=abc123; Path=/") < 0) {
+        ! "cookie header mismatch";
+        ^ 8;
+    }
+
+    header_reply := kiln_reply_with_header(kiln_reply_text(200, "header ok"), "X-Trace", "trace-1");
+    header_response := kiln_reply_response(header_reply);
+    ? (find(header_response, "X-Trace: trace-1") < 0) {
+        ! "custom header mismatch";
+        ^ 9;
+    }
+
     fallback := kiln_dispatch_fallback_text(KilnDispatch { ok: false, status: 405, route_name: "", params: "" });
     fallback_response := kiln_reply_response(fallback);
     ? (find(fallback_response, "405 Method Not Allowed") < 0) {

@@ -18,6 +18,7 @@
     content_type: text;
     body: text;
     location: text;
+    headers: text;
 }
 
 @kiln_route(method: text, pattern: text, name: text) -> KilnRoute {
@@ -196,7 +197,7 @@
 }
 
 @kiln_reply(status: i64, content_type: text, body: text) -> KilnReply {
-    ^ KilnReply { status: status, content_type: content_type, body: body, location: "" };
+    ^ KilnReply { status: status, content_type: content_type, body: body, location: "", headers: "" };
 }
 
 @kiln_reply_text(status: i64, body: text) -> KilnReply {
@@ -209,7 +210,21 @@
 
 @kiln_reply_redirect(location: text) -> KilnReply {
     body := "redirecting to " + location;
-    ^ KilnReply { status: 302, content_type: "text/plain", body: body, location: location };
+    ^ KilnReply { status: 302, content_type: "text/plain", body: body, location: location, headers: "" };
+}
+
+@kiln_reply_with_header(reply: KilnReply, name: text, value: text) -> KilnReply {
+    ^ KilnReply {
+        status: reply.status,
+        content_type: reply.content_type,
+        body: reply.body,
+        location: reply.location,
+        headers: reply.headers + name + ": " + value + kiln_http_line_sep()
+    };
+}
+
+@kiln_reply_with_cookie(reply: KilnReply, name: text, value: text) -> KilnReply {
+    ^ kiln_reply_with_header(reply, "Set-Cookie", name + "=" + value + "; Path=/");
 }
 
 @kiln_reply_response(reply: KilnReply) -> text {
@@ -218,6 +233,7 @@
     ? (count(reply.location) > 0) {
         response = response + "Location: " + reply.location + kiln_http_line_sep();
     }
+    response = response + reply.headers;
     response = response + "Content-Length: " + text_of(count(reply.body)) + kiln_http_line_sep();
     response = response + "Connection: close" + kiln_http_line_sep();
     response = response + kiln_http_line_sep();
