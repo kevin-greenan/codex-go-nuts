@@ -49,6 +49,8 @@ direct-check:
 	./build/mini_source.direct || test $$? -eq 5
 	./build/compiler_1 examples/series.noe build/series.direct native-arm64
 	./build/series.direct
+	./build/compiler_1 examples/aggregate_probe.noe build/aggregate_probe.direct native-arm64
+	./build/aggregate_probe.direct
 
 native-example:
 	NOEMA_BACKEND=native-arm64 ./bin/codexc examples/hello.noe build/hello.native

@@ -235,8 +235,9 @@ That direct backend currently targets `arm64-apple-darwin` and only supports a n
 - integer and bool literals
 - calls, comparisons, `not`, `and`, `or`
 - integer `+` / `-` / `*` / `/`
+- heap-backed `%` records, field access, list literals, `append`, `count(list)`, and indexing for native 64-bit values
 
-It is now wide enough for scalar multi-function programs like [series.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/series.noe) to compile and run without any generated C in the self-hosted path, but it is still not wide enough to compile [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) itself.
+It is now wide enough for scalar and aggregate handle-based programs like [series.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/series.noe) and [aggregate_probe.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/aggregate_probe.noe) to compile and run without any generated C in the self-hosted path, but it is still not wide enough to compile [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) itself because the text/runtime-heavy compiler surface is still outside the direct subset.
 
 ## Intent
 
