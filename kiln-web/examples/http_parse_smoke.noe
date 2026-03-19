@@ -1,13 +1,13 @@
 & "../lib/http.noe";
 
 @main() -> i64 {
-    raw := "POST /submit?ok=1 HTTP/1.1\r\nHost: localhost\r\nContent-Type: text/plain\r\n\r\nhi";
+    raw := "POST /submit?ok=1&name=ada+lovelace HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=ada+lovelace&role=math%20pioneer";
     request := kiln_http_parse_request(raw);
     ? (request.method != "POST") {
         ! "method mismatch";
         ^ 1;
     }
-    ? (request.path != "/submit?ok=1") {
+    ? (request.path != "/submit?ok=1&name=ada+lovelace") {
         ! "path mismatch";
         ^ 2;
     }
@@ -19,13 +19,33 @@
         ! "host mismatch";
         ^ 4;
     }
-    ? (kiln_http_header_value(request.headers, "Content-Type") != "text/plain") {
+    ? (kiln_http_header_value(request.headers, "Content-Type") != "application/x-www-form-urlencoded") {
         ! "content-type mismatch";
         ^ 5;
     }
-    ? (request.body != "hi") {
+    ? (request.body != "name=ada+lovelace&role=math%20pioneer") {
         ! "body mismatch";
         ^ 6;
+    }
+    ? (kiln_http_path_only(request.path) != "/submit") {
+        ! "path-only mismatch";
+        ^ 10;
+    }
+    ? (kiln_http_query_value(request.path, "ok") != "1") {
+        ! "query ok mismatch";
+        ^ 11;
+    }
+    ? (kiln_http_query_value(request.path, "name") != "ada lovelace") {
+        ! "query name mismatch";
+        ^ 12;
+    }
+    ? (kiln_http_form_value(request, "name") != "ada lovelace") {
+        ! "form name mismatch";
+        ^ 13;
+    }
+    ? (kiln_http_form_value(request, "role") != "math pioneer") {
+        ! "form role mismatch";
+        ^ 14;
     }
 
     response := kiln_http_text(200, "ok");

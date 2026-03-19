@@ -66,11 +66,12 @@ What is already working:
 3. a first Kiln HTTP library now parses request lines and serializes basic text responses
 4. a first router now matches method/path patterns, including `:param` segments, and distinguishes `404` from `405`
 5. a first HTML renderer now supports escaping, attributes, tags, lists, and whole-page responses
+6. request parsing now exposes query lookup, form-field lookup, and basic URL decoding for app handlers
 
 What is next:
 
-1. strengthen request parsing for headers, query strings, and bodies
-2. grow the router from dispatch results into more ergonomic handler conventions
+1. grow the router from dispatch results into more ergonomic handler conventions
+2. extend request parsing further for repeated headers, cookies, and richer body handling
 3. add forms, layout helpers, and higher-level page composition patterns
 
 ## Architecture Overview

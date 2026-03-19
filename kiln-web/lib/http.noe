@@ -132,6 +132,150 @@
     ^ kiln_http_trim_trailing_cr(slice(tail, 0, line_end));
 }
 
+@kiln_http_query_string(path: text) -> text {
+    query_at := find(path, "?");
+    ? (query_at < 0) {
+        ^ "";
+    }
+    ^ slice(path, query_at + 1, count(path) - (query_at + 1));
+}
+
+@kiln_http_path_only(path: text) -> text {
+    query_at := find(path, "?");
+    ? (query_at < 0) {
+        ^ path;
+    }
+    ^ slice(path, 0, query_at);
+}
+
+@kiln_http_pair_at(payload: text, pair_index: i64, separator: text) -> text {
+    remaining := payload;
+    idx := 0;
+    ~ (idx < pair_index) {
+        split_at := find(remaining, separator);
+        ? (split_at < 0) {
+            ^ "";
+        }
+        next_start := split_at + count(separator);
+        remaining = slice(remaining, next_start, count(remaining) - next_start);
+        idx = idx + 1;
+    }
+
+    split_at := find(remaining, separator);
+    ? (split_at < 0) {
+        ^ remaining;
+    }
+    ^ slice(remaining, 0, split_at);
+}
+
+@kiln_http_pair_name(pair: text) -> text {
+    eq := find(pair, "=");
+    ? (eq < 0) {
+        ^ pair;
+    }
+    ^ slice(pair, 0, eq);
+}
+
+@kiln_http_pair_value(pair: text) -> text {
+    eq := find(pair, "=");
+    ? (eq < 0) {
+        ^ "";
+    }
+    ^ slice(pair, eq + 1, count(pair) - (eq + 1));
+}
+
+@kiln_http_hex_digit_value(ch: text) -> i64 {
+    digits := "0123456789ABCDEF";
+    lower := "0123456789abcdef";
+    upper_at := find(digits, ch);
+    ? (upper_at >= 0) {
+        ^ upper_at;
+    }
+    ^ find(lower, ch);
+}
+
+@kiln_http_ascii_table() -> text {
+    ^ " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+}
+
+@kiln_http_char_from_code(code: i64) -> text {
+    ? (code >= 32 and code <= 126) {
+        ^ slice(kiln_http_ascii_table(), code - 32, 1);
+    }
+    ? (code == 10) {
+        ^ "\n";
+    }
+    ? (code == 13) {
+        ^ "\r";
+    }
+    ? (code == 9) {
+        ^ "\t";
+    }
+    ^ "";
+}
+
+@kiln_http_decode_component(value: text) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx < count(value)) {
+        ch := slice(value, idx, 1);
+        ? (ch == "+") {
+            out = out + " ";
+            idx = idx + 1;
+        }
+        | {
+            ? (ch == "%" and idx + 2 < count(value)) {
+                hi := kiln_http_hex_digit_value(slice(value, idx + 1, 1));
+                lo := kiln_http_hex_digit_value(slice(value, idx + 2, 1));
+                ? (hi >= 0 and lo >= 0) {
+                    out = out + kiln_http_char_from_code((hi * 16) + lo);
+                    idx = idx + 3;
+                }
+                | {
+                    out = out + ch;
+                    idx = idx + 1;
+                }
+            }
+            | {
+                out = out + ch;
+                idx = idx + 1;
+            }
+        }
+    }
+    ^ out;
+}
+
+@kiln_http_param_value(payload: text, separator: text, name: text) -> text {
+    idx := 0;
+    ~ (idx <= count(payload)) {
+        pair := kiln_http_pair_at(payload, idx, separator);
+        ? (count(pair) == 0) {
+            ^ "";
+        }
+        ? (kiln_http_decode_component(kiln_http_pair_name(pair)) == name) {
+            ^ kiln_http_decode_component(kiln_http_pair_value(pair));
+        }
+        idx = idx + 1;
+    }
+    ^ "";
+}
+
+@kiln_http_query_value(path: text, name: text) -> text {
+    ^ kiln_http_param_value(kiln_http_query_string(path), "&", name);
+}
+
+@kiln_http_content_type(request: KilnHttpRequest) -> text {
+    ^ kiln_http_header_value(request.headers, "Content-Type");
+}
+
+@kiln_http_form_value(request: KilnHttpRequest, name: text) -> text {
+    content_type := kiln_http_content_type(request);
+    ? (find(content_type, "application/x-www-form-urlencoded") != 0) {
+        ^ "";
+    }
+    ^ kiln_http_param_value(request.body, "&", name);
+}
+
 @kiln_http_response(status: i64, content_type: text, body: text) -> text {
     response := kiln_http_status_line(status) + kiln_http_line_sep();
     response = response + "Content-Type: " + content_type + kiln_http_line_sep();
