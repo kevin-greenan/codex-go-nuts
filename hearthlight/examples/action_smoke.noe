@@ -19,6 +19,8 @@
     chore_reply := hearthlight_route_reply(db, chore_dispatch, chore_request);
     chore_response := kiln_reply_response(chore_reply);
     chore_status := db_row_get(db, hearthlight_chores_table(), 1, "status");
+    chore_due := db_row_get(db, hearthlight_chores_table(), 1, "due_label");
+    chore_owner := db_row_get(db, hearthlight_chores_table(), 1, "owner");
 
     validate := db_validate_report(db);
     closed := db_close(db);
@@ -31,12 +33,12 @@
         ! "tomatoes missing=" + tomatoes;
         ^ 3;
     }
-    ? (find(chore_response, "Set-Cookie: kiln_flash=success|Chore completed.; Path=/") < 0) {
+    ? (find(chore_response, "Set-Cookie: kiln_flash=success|Chore completed and advanced.; Path=/") < 0 or find(chore_response, "Location: /chores") < 0) {
         ! "chore response mismatch";
         ^ 4;
     }
-    ? (chore_status != "done") {
-        ! "chore status=" + chore_status;
+    ? (chore_status != "todo" or chore_due != "Tomorrow" or chore_owner != "Avery") {
+        ! "chore state=" + chore_status + "|" + chore_due + "|" + chore_owner;
         ^ 5;
     }
     ? (validate != "ok" or not closed) {

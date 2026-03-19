@@ -1,7 +1,7 @@
 & "../../ashdb/lib/db.noe";
 
 @hearthlight_db_page_size() -> i64 {
-    ^ 256;
+    ^ 512;
 }
 
 @hearthlight_today_key() -> i64 {
@@ -62,6 +62,10 @@
     ^ "chores";
 }
 
+@hearthlight_chore_history_table() -> text {
+    ^ "chore_history";
+}
+
 @hearthlight_household_row(name: text, shopping_day: text, planning_day: text) -> text {
     payload := "";
     payload = row_append(payload, "name", name);
@@ -111,11 +115,28 @@
 }
 
 @hearthlight_chore_row(name: text, owner: text, due_label: text, status: text) -> text {
+    ^ hearthlight_chore_row_with_schedule(name, owner, due_label, status, "weekly", owner, "", "0");
+}
+
+@hearthlight_chore_row_with_schedule(name: text, owner: text, due_label: text, status: text, recurrence: text, owner_cycle: text, last_done: text, completed_count: text) -> text {
     payload := "";
     payload = row_append(payload, "name", name);
     payload = row_append(payload, "owner", owner);
     payload = row_append(payload, "due_label", due_label);
     payload = row_append(payload, "status", status);
+    payload = row_append(payload, "recurrence", recurrence);
+    payload = row_append(payload, "owner_cycle", owner_cycle);
+    payload = row_append(payload, "last_done", last_done);
+    payload = row_append(payload, "completed_count", completed_count);
+    ^ payload;
+}
+
+@hearthlight_chore_history_row(name: text, owner: text, completed_label: text, next_due_label: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "owner", owner);
+    payload = row_append(payload, "completed_label", completed_label);
+    payload = row_append(payload, "next_due_label", next_due_label);
     ^ payload;
 }
 
@@ -160,7 +181,40 @@
     }
 
     chores_root := db_table_root(db, hearthlight_chores_table());
-    ? (chores_root < 0 and db_define_table(db, hearthlight_chores_table(), 128, "name:text,owner:text,due_label:text,status:text=todo") < 0) {
+    ? (chores_root < 0 and db_define_table(db, hearthlight_chores_table(), 224, "name:text,owner:text,due_label:text,status:text=todo") < 0) {
+        ^ false;
+    }
+    chore_fields := db_table_fields(db, hearthlight_chores_table());
+    ? (count(chore_fields) > 0 and db_schema_field_spec(chore_fields, "recurrence") == "") {
+        migrated_recurrence := db_alter_table_add_field(db, hearthlight_chores_table(), "recurrence:text=weekly");
+        ? (migrated_recurrence < 0 and migrated_recurrence != -3) {
+            ^ false;
+        }
+    }
+    chore_fields = db_table_fields(db, hearthlight_chores_table());
+    ? (count(chore_fields) > 0 and db_schema_field_spec(chore_fields, "owner_cycle") == "") {
+        migrated_owner_cycle := db_alter_table_add_field(db, hearthlight_chores_table(), "owner_cycle:text?");
+        ? (migrated_owner_cycle < 0 and migrated_owner_cycle != -3) {
+            ^ false;
+        }
+    }
+    chore_fields = db_table_fields(db, hearthlight_chores_table());
+    ? (count(chore_fields) > 0 and db_schema_field_spec(chore_fields, "last_done") == "") {
+        migrated_last_done := db_alter_table_add_field(db, hearthlight_chores_table(), "last_done:text?");
+        ? (migrated_last_done < 0 and migrated_last_done != -3) {
+            ^ false;
+        }
+    }
+    chore_fields = db_table_fields(db, hearthlight_chores_table());
+    ? (count(chore_fields) > 0 and db_schema_field_spec(chore_fields, "completed_count") == "") {
+        migrated_completed_count := db_alter_table_add_field(db, hearthlight_chores_table(), "completed_count:i64=0");
+        ? (migrated_completed_count < 0 and migrated_completed_count != -3) {
+            ^ false;
+        }
+    }
+
+    chore_history_root := db_table_root(db, hearthlight_chore_history_table());
+    ? (chore_history_root < 0 and db_define_table(db, hearthlight_chore_history_table(), 160, "name:text,owner:text,completed_label:text,next_due_label:text") < 0) {
         ^ false;
     }
 
@@ -185,9 +239,9 @@
     pantry1_ok := hearthlight_insert_if_missing(db, hearthlight_pantry_table(), 2, hearthlight_pantry_row("Oats", "Pantry", "3", "1", "jars", "true"));
     pantry2_ok := hearthlight_insert_if_missing(db, hearthlight_pantry_table(), 3, hearthlight_pantry_row("Olive Oil", "Pantry", "1", "1", "bottles", "true"));
     pantry3_ok := hearthlight_insert_if_missing(db, hearthlight_pantry_table(), 4, hearthlight_pantry_row("Parsley", "Produce", "0", "1", "bunches", "false"));
-    chore0_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 1, hearthlight_chore_row("Counters", "Jordan", "Today", "todo"));
-    chore1_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 2, hearthlight_chore_row("Laundry", "Avery", "Tomorrow", "todo"));
-    chore2_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 3, hearthlight_chore_row("Water herbs", "Jordan", "Tonight", "todo"));
+    chore0_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 1, hearthlight_chore_row_with_schedule("Counters", "Jordan", "Today", "todo", "daily", "Jordan,Avery", "", "0"));
+    chore1_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 2, hearthlight_chore_row_with_schedule("Laundry", "Avery", "This Weekend", "todo", "weekly", "Avery,Jordan", "", "0"));
+    chore2_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 3, hearthlight_chore_row_with_schedule("Water herbs", "Jordan", "Tonight", "todo", "daily", "Jordan,Avery", "", "0"));
     ^ household_ok and member0_ok and member1_ok and meal0_ok and meal1_ok and meal2_ok and meal3_ok and meal4_ok and meal5_ok and meal6_ok and grocery0_ok and grocery1_ok and grocery2_ok and pantry0_ok and pantry1_ok and pantry2_ok and pantry3_ok and chore0_ok and chore1_ok and chore2_ok;
 }
 
@@ -312,6 +366,54 @@
     ^ "Pantry";
 }
 
+@hearthlight_clean_optional(value: text) -> text {
+    ? (value == "null") {
+        ^ "";
+    }
+    ^ value;
+}
+
+@hearthlight_due_from_recurrence(recurrence: text) -> text {
+    ? (recurrence == "daily") {
+        ^ "Tomorrow";
+    }
+    ? (recurrence == "weekly") {
+        ^ "Next Week";
+    }
+    ? (recurrence == "weekend") {
+        ^ "This Weekend";
+    }
+    ? (recurrence == "once") {
+        ^ "Done";
+    }
+    ^ "Soon";
+}
+
+@hearthlight_cycle_next(cycle: text, current: text) -> text {
+    cleaned := hearthlight_clean_optional(cycle);
+    ? (count(cleaned) == 0) {
+        ^ current;
+    }
+
+    idx := 0;
+    first_item := hearthlight_trim_space(hearthlight_item_at(cleaned, 0, ","));
+    ~ (idx <= count(cleaned)) {
+        item := hearthlight_trim_space(hearthlight_item_at(cleaned, idx, ","));
+        ? (count(item) == 0) {
+            ^ first_item;
+        }
+        ? (item == current) {
+            next_item := hearthlight_trim_space(hearthlight_item_at(cleaned, idx + 1, ","));
+            ? (count(next_item) == 0) {
+                ^ first_item;
+            }
+            ^ next_item;
+        }
+        idx = idx + 1;
+    }
+    ^ first_item;
+}
+
 @hearthlight_pantry_low_stock_count(db: DB) -> i64 {
     total := 0;
     key := db_first_key(db, hearthlight_pantry_table());
@@ -321,6 +423,33 @@
             total = total + 1;
         }
         key = db_next_key(db, hearthlight_pantry_table(), key);
+    }
+    ^ total;
+}
+
+@hearthlight_open_chore_count(db: DB) -> i64 {
+    total := 0;
+    key := db_first_key(db, hearthlight_chores_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_chores_table(), key);
+        ? (row_get(row0, "status") != "done") {
+            total = total + 1;
+        }
+        key = db_next_key(db, hearthlight_chores_table(), key);
+    }
+    ^ total;
+}
+
+@hearthlight_due_today_count(db: DB) -> i64 {
+    total := 0;
+    key := db_first_key(db, hearthlight_chores_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_chores_table(), key);
+        due_label := row_get(row0, "due_label");
+        ? (row_get(row0, "status") != "done" and (due_label == "Today" or due_label == "Tonight")) {
+            total = total + 1;
+        }
+        key = db_next_key(db, hearthlight_chores_table(), key);
     }
     ^ total;
 }
@@ -380,8 +509,42 @@
     ^ added;
 }
 
+@hearthlight_add_chore(db: DB, name: text, owner: text, due_label: text, recurrence: text, owner_cycle: text) -> i64 {
+    payload := hearthlight_chore_row_with_schedule(name, owner, due_label, "todo", recurrence, owner_cycle, "", "0");
+    ^ db_insert_row(db, hearthlight_chores_table(), hearthlight_next_key(db, hearthlight_chores_table()), payload);
+}
+
 @hearthlight_complete_chore(db: DB, key: i64) -> i64 {
+    chore := db_get(db, hearthlight_chores_table(), key);
+    ? (count(chore) == 0) {
+        ^ -1;
+    }
+
+    recurrence := hearthlight_clean_optional(row_get(chore, "recurrence"));
+    ? (count(recurrence) == 0) {
+        recurrence = "weekly";
+    }
+    owner := row_get(chore, "owner");
+    next_due := hearthlight_due_from_recurrence(recurrence);
+    next_owner := hearthlight_cycle_next(row_get(chore, "owner_cycle"), owner);
+    completed_count := i64_of(hearthlight_clean_optional(row_get(chore, "completed_count"))) + 1;
+    next_status := "todo";
+    ? (recurrence == "once") {
+        next_status = "done";
+    }
+
+    history_payload := hearthlight_chore_history_row(row_get(chore, "name"), owner, "Today", next_due);
+    history_key := hearthlight_next_key(db, hearthlight_chore_history_table());
+    history_ok := db_insert_row(db, hearthlight_chore_history_table(), history_key, history_payload);
+    ? (history_ok < 0) {
+        ^ history_ok;
+    }
+
     patch := "";
-    patch = row_append(patch, "status", "done");
+    patch = row_append(patch, "status", next_status);
+    patch = row_append(patch, "last_done", "Today");
+    patch = row_append(patch, "completed_count", text_of(completed_count));
+    patch = row_append(patch, "due_label", next_due);
+    patch = row_append(patch, "owner", next_owner);
     ^ db_patch_row(db, hearthlight_chores_table(), key, patch);
 }

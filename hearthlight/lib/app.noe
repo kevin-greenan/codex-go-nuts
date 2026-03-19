@@ -6,9 +6,11 @@
         kiln_route("GET", "/", "home"),
         kiln_route("GET", "/planner", "planner"),
         kiln_route("GET", "/pantry", "pantry"),
+        kiln_route("GET", "/chores", "chores"),
         kiln_route("POST", "/planner/meals", "planner-meal-save"),
         kiln_route("POST", "/planner/meals/:id/groceries", "planner-meal-groceries"),
         kiln_route("POST", "/groceries", "grocery-create"),
+        kiln_route("POST", "/chores", "chore-create"),
         kiln_route("POST", "/groceries/:id/purchase", "grocery-purchase"),
         kiln_route("POST", "/chores/:id/complete", "chore-complete"),
         kiln_route("GET", "/assets/site.css", "site-css")
@@ -120,7 +122,40 @@
     ? (not committed) {
         ^ kiln_reply_text(500, "unable to commit chore transaction");
     }
-    ^ hearthlight_redirect_with_flash("success", "Chore completed.");
+    ^ kiln_reply_with_flash(kiln_reply_redirect("/chores"), "success", "Chore completed and advanced.");
+}
+
+@hearthlight_handle_chore_create(db: DB, request: KilnHttpRequest) -> KilnReply {
+    name := kiln_http_form_value(request, "name");
+    owner := kiln_http_form_value(request, "owner");
+    due_label := kiln_http_form_value(request, "due_label");
+    recurrence := kiln_http_form_value(request, "recurrence");
+    owner_cycle := kiln_http_form_value(request, "owner_cycle");
+
+    ? (count(name) == 0 or count(owner) == 0) {
+        ^ kiln_reply_with_flash(kiln_reply_redirect("/chores"), "notice", "Add a chore name and owner before saving.");
+    }
+    ? (count(due_label) == 0) {
+        due_label = "Today";
+    }
+    ? (count(recurrence) == 0) {
+        recurrence = "weekly";
+    }
+
+    began := db_begin(db);
+    ? (not began) {
+        ^ kiln_reply_text(500, "unable to begin chore create transaction");
+    }
+    inserted := hearthlight_add_chore(db, name, owner, due_label, recurrence, owner_cycle);
+    ? (inserted < 0) {
+        rolled := db_rollback(db);
+        ^ kiln_reply_with_flash(kiln_reply_redirect("/chores"), "notice", "Hearthlight could not save that chore.");
+    }
+    committed := db_commit(db);
+    ? (not committed) {
+        ^ kiln_reply_text(500, "unable to commit chore create transaction");
+    }
+    ^ kiln_reply_with_flash(kiln_reply_redirect("/chores"), "success", "Added " + name + " to the household rhythm.");
 }
 
 @hearthlight_handle_grocery_purchase(db: DB, grocery_id_text: text) -> KilnReply {
@@ -168,6 +203,14 @@
     ^ reply;
 }
 
+@hearthlight_chores_reply(db: DB, request: KilnHttpRequest) -> KilnReply {
+    reply := kiln_reply_html(200, hearthlight_chores_page(db, request));
+    ? (count(kiln_flash_value(request)) > 0) {
+        ^ kiln_reply_clear_flash(reply);
+    }
+    ^ reply;
+}
+
 @hearthlight_route_reply(db: DB, dispatch: KilnDispatch, request: KilnHttpRequest) -> KilnReply {
     ? (kiln_dispatch_is(dispatch, "home")) {
         ^ hearthlight_dashboard_reply(db, request);
@@ -178,6 +221,9 @@
     ? (kiln_dispatch_is(dispatch, "pantry")) {
         ^ hearthlight_pantry_reply(db, request);
     }
+    ? (kiln_dispatch_is(dispatch, "chores")) {
+        ^ hearthlight_chores_reply(db, request);
+    }
     ? (kiln_dispatch_is(dispatch, "planner-meal-save")) {
         ^ hearthlight_handle_planner_meal_save(db, request);
     }
@@ -186,6 +232,9 @@
     }
     ? (kiln_dispatch_is(dispatch, "grocery-create")) {
         ^ hearthlight_handle_grocery_create(db, request);
+    }
+    ? (kiln_dispatch_is(dispatch, "chore-create")) {
+        ^ hearthlight_handle_chore_create(db, request);
     }
     ? (kiln_dispatch_is(dispatch, "grocery-purchase")) {
         ^ hearthlight_handle_grocery_purchase(db, kiln_dispatch_param(dispatch, "id"));

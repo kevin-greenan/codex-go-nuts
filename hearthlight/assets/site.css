@@ -101,6 +101,12 @@ body {
   margin-top: 22px;
 }
 
+.stack {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -250,6 +256,11 @@ label {
   margin-top: 14px;
   color: var(--muted);
   font-size: 14px;
+}
+
+.collection-row .quiet-button {
+  display: inline-flex;
+  gap: 10px;
 }
 
 .member-chip,

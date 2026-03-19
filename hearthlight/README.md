@@ -235,6 +235,7 @@ What is already working:
 8. a weekly planner route now shows a full seven-day meal plan and supports saving meals into the plan
 9. a pantry route now tracks on-hand inventory, flags low-stock staples, and accepts grocery purchases into pantry state
 10. planner meals can now carry ingredient lists and generate grocery items directly into the shared shopping flow
+11. a chores route now supports recurring chore creation, completion history, and completion that advances the next due state instead of just hiding work
 
 The current goal is a real vertical slice, not a full product:
 
@@ -254,7 +255,8 @@ The fastest local workflow is now:
 Then browse to:
 
 1. `http://127.0.0.1:9124/`
-4. direct-compiler smoke coverage proving the app stack works end to end
+2. If an older local DB looks empty after a schema change, remove it and rerun with a fresh path such as `/tmp/hearthlight-v2.db`
+3. direct-compiler smoke coverage proving the app stack works end to end
 
 ## Definition of Success
 
