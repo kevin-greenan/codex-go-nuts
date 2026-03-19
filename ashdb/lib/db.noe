@@ -1650,6 +1650,39 @@
     ^ reclaimed;
 }
 
+@db_validate_free_list_report(db: DB) -> text {
+    total_pages := pager_total_pages(db.pager);
+    reachable := db_reachable_pages(db);
+    seen := "";
+    page_id := pager_free_head(db.pager);
+    ~ (page_id > 0) {
+        ? (page_id >= total_pages) {
+            ^ "freelist page " + text_of(page_id) + " is out of range";
+        }
+        ? (db_page_set_has(seen, page_id)) {
+            ^ "freelist cycle detected at page " + text_of(page_id);
+        }
+        ? (db_page_set_has(reachable, page_id)) {
+            ^ "freelist page " + text_of(page_id) + " is still reachable from catalog";
+        }
+        raw := pager_read_page(db.pager, page_id);
+        ? (pager_page_kind(raw) != "F") {
+            ^ "freelist page " + text_of(page_id) + " is not marked free";
+        }
+        seen = db_page_set_add(seen, page_id);
+        page_id = pager_free_page_next(raw);
+    }
+    scan_page_id := 2;
+    ~ (scan_page_id < total_pages) {
+        raw := pager_read_page(db.pager, scan_page_id);
+        ? (pager_page_kind(raw) == "F" and not db_page_set_has(seen, scan_page_id)) {
+            ^ "free page " + text_of(scan_page_id) + " is not linked from freelist head";
+        }
+        scan_page_id = scan_page_id + 1;
+    }
+    ^ "ok";
+}
+
 @db_schema_field_count(fields_spec: text) -> i64 {
     ? (count(fields_spec) == 0) {
         ^ 0;
@@ -2820,6 +2853,10 @@
         }
         idx = idx + 1;
     }
+    free_report := db_validate_free_list_report(db);
+    ? (free_report != "ok") {
+        ^ false;
+    }
     ? (count(db_unreachable_pages_text(db, ",")) > 0) {
         ^ false;
     }
@@ -2861,6 +2898,10 @@
             }
         }
         idx = idx + 1;
+    }
+    free_report := db_validate_free_list_report(db);
+    ? (free_report != "ok") {
+        ^ free_report;
     }
     unreachable := db_unreachable_pages_text(db, ",");
     ? (count(unreachable) > 0) {

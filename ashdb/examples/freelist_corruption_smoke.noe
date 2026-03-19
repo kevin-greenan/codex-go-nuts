@@ -1,0 +1,48 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: freelist_corruption_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    defined := db_define_table(db, "users", 48, "name:text");
+    payload0 := "";
+    payload0 = row_append(payload0, "name", "alice");
+    payload1 := "";
+    payload1 = row_append(payload1, "name", "bob");
+    inserted0 := db_insert_row(db, "users", 10, payload0);
+    inserted1 := db_insert_row(db, "users", 20, payload1);
+    scratch := pager_alloc_page(db.pager);
+    freed0 := pager_free_page(db.pager, scratch);
+    free_head0 := pager_free_head(db.pager);
+    report0 := db_validate_report(db);
+
+    corrupted := pager_raw_write_page(db.pager, free_head0, pager_free_page_text(db.pager.page_size, free_head0));
+    report1 := db_validate_report(db);
+    closed := db_close(db);
+
+    ? (defined <= 0 or inserted0 < 0 or inserted1 < 0 or scratch <= 1 or not freed0) {
+        ! "setup=" + text_of(defined) + ":" + text_of(inserted0) + ":" + text_of(inserted1) + ":" + text_of(scratch) + ":" + text_of(freed0);
+        ^ 2;
+    }
+    ? (free_head0 <= 1 or report0 != "ok") {
+        ! "before=" + text_of(free_head0) + ":" + report0;
+        ^ 3;
+    }
+    ? (corrupted != db.pager.page_size) {
+        ! "corrupted=" + text_of(corrupted);
+        ^ 4;
+    }
+    ? (find(report1, "freelist cycle detected") < 0) {
+        ! "report1=" + report1;
+        ^ 5;
+    }
+    ? (not closed) {
+        ^ 6;
+    }
+
+    ! "ashdb freelist corruption smoke ok";
+    ^ 0;
+}

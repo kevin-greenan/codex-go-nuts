@@ -124,7 +124,9 @@ What is already working on `codex/ashdb-foundation`:
 61. an operations guide covering single-writer assumptions and backup/restore workflows
 62. a file-format specification in `ashdb/docs/file-format.md`
 63. negative recovery-boundary coverage for tampered WAL headers
-64. smoke-test coverage through the direct self-hosted compiler
+64. freelist validation for cycles, bad markers, and unlinked free pages
+65. freelist corruption coverage
+66. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
