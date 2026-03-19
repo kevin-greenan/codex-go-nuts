@@ -1,6 +1,6 @@
 # AshDB Status Inventory
 
-This document captures the detailed implementation inventory for `codex/ashdb-foundation`.
+This document captures the detailed implementation inventory for AshDB.
 
 What is already working:
 

@@ -57,7 +57,7 @@ This folder should grow into:
 
 ## Current Status
 
-Kiln Web is now in strong MVP shape on `codex/kiln-web-foundation`.
+Kiln Web is now in strong MVP shape for this repository.
 
 What is already working:
 
@@ -85,7 +85,7 @@ Recommended verification flow:
 1. run grouped direct suites with [tools/run_direct_smokes.sh](/Users/kevin/Documents/Projects/AI/codex-go-nuts/kiln-web/tools/run_direct_smokes.sh)
 2. start with the `core` suite while iterating on framework code
 3. run the `apps` suite before merging app-layer changes
-4. use the PR acceptance set in [examples/README.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/kiln-web/examples/README.md) before merge
+4. use the acceptance set in [examples/README.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/kiln-web/examples/README.md) before merge
 
 For a milestone-by-milestone inventory, use [docs/status.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/kiln-web/docs/status.md).
 

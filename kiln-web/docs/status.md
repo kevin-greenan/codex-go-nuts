@@ -2,7 +2,7 @@
 
 This page keeps the fuller milestone inventory so the main README can stay focused on current status and verification.
 
-Working now on `codex/kiln-web-foundation`:
+Working now in Kiln Web:
 
 1. inbound listener support in both compiler paths
 2. direct-compiled localhost `hello` server

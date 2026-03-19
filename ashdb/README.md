@@ -70,7 +70,7 @@ The current MVP includes:
 5. advisory single-writer locking, backup/restore, validation, inspection, repair, and compaction
 6. broader reopen-and-verify smoke coverage through the direct self-hosted compiler
 
-For the full implementation inventory from this branch, see [docs/status.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/ashdb/docs/status.md).
+For the full implementation inventory, see [docs/status.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/ashdb/docs/status.md).
 
 What is not done yet:
 
@@ -80,7 +80,7 @@ What is not done yet:
 
 ## Production Readiness Checklist
 
-AshDB is now production-ready for the intended scope of this repository: a serious, local-first, single-writer embedded database for Noema applications. The remaining work is now best understood as future expansion rather than a blocker for shipping the engine in this PR.
+AshDB is now production-ready for the intended scope of this repository: a serious, local-first, single-writer embedded database for Noema applications. The remaining work is now best understood as future expansion rather than a blocker for shipping the engine.
 
 ### Shipping Bar Met
 
@@ -111,7 +111,7 @@ The best path from here is:
 
 The canonical verification path is the pure direct compiler flow, not the older C path.
 
-Primary acceptance suites for this PR:
+Primary acceptance suites:
 
 1. `repair_database_smoke`
 2. `reopen_regress_smoke`

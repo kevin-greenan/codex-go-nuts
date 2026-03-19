@@ -221,7 +221,7 @@ This milestone is intentionally narrow: it should be good enough for one real ho
 
 ## Current Status
 
-Hearthlight is now a real local-first MVP on `codex/hearthlight-foundation`.
+Hearthlight is now a real local-first MVP for this repository.
 
 What is already working:
 
