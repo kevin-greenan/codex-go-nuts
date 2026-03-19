@@ -153,11 +153,22 @@
         ? (count(notes) == 0) {
             notes = "No notes yet.";
         }
+        ingredients := row_get(row0, "ingredients");
+        ingredients_text := "";
+        ? (count(ingredients) > 0) {
+            ingredients_text = kiln_html_tag("p", kiln_html_attr("class", "planner-ingredients"), kiln_html_text("Ingredients: " + ingredients));
+        }
         badge := kiln_html_tag("span", kiln_html_attr("class", "planner-key"), kiln_html_text(text_of(key)));
         card_body := kiln_html_tag("p", kiln_html_attr("class", "planner-day"), kiln_html_text(hearthlight_day_label(offset)));
         card_body = card_body + kiln_html_tag("h3", kiln_html_attr("class", "planner-title"), kiln_html_text(title));
         card_body = card_body + kiln_html_tag("p", kiln_html_attr("class", "planner-note"), kiln_html_text(notes));
-        items = items + kiln_html_tag("section", kiln_html_attr("class", "planner-card"), badge + card_body);
+        ? (count(ingredients) > 0) {
+            grocery_form := kiln_html_tag("div", kiln_html_attr("class", "quiet-button"), kiln_html_form("post", "/planner/meals/" + text_of(key) + "/groceries", kiln_html_button("Send Ingredients To Groceries")));
+            items = items + kiln_html_tag("section", kiln_html_attr("class", "planner-card"), badge + card_body + ingredients_text + grocery_form);
+        }
+        | {
+            items = items + kiln_html_tag("section", kiln_html_attr("class", "planner-card"), badge + card_body);
+        }
         offset = offset + 1;
     }
     ^ kiln_html_tag("div", kiln_html_attr("class", "planner-grid"), items);
@@ -177,6 +188,7 @@
     form_body := kiln_html_field("Day", "day_key", select);
     form_body = form_body + kiln_html_field("Meal", "title", kiln_html_input_text("title", ""));
     form_body = form_body + kiln_html_field("Notes", "notes", kiln_html_textarea("notes", ""));
+    form_body = form_body + kiln_html_field("Ingredients", "ingredients", kiln_html_textarea("ingredients", "Lemons,Parmesan,Pasta"));
     form_body = form_body + kiln_html_button("Save To Plan");
     ^ kiln_html_tag("div", kiln_html_attr("class", "composer"), kiln_html_form("post", "/planner/meals", form_body));
 }

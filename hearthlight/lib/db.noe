@@ -79,10 +79,15 @@
 }
 
 @hearthlight_meal_row(title: text, notes: text, day_label: text) -> text {
+    ^ hearthlight_meal_row_with_ingredients(title, notes, day_label, "");
+}
+
+@hearthlight_meal_row_with_ingredients(title: text, notes: text, day_label: text, ingredients: text) -> text {
     payload := "";
     payload = row_append(payload, "title", title);
     payload = row_append(payload, "notes", notes);
     payload = row_append(payload, "day_label", day_label);
+    payload = row_append(payload, "ingredients", ingredients);
     ^ payload;
 }
 
@@ -136,6 +141,13 @@
     ? (meals_root < 0 and db_define_table(db, hearthlight_meals_table(), 128, "title:text,notes:text?,day_label:text") < 0) {
         ^ false;
     }
+    meal_fields := db_table_fields(db, hearthlight_meals_table());
+    ? (count(meal_fields) > 0 and db_schema_field_spec(meal_fields, "ingredients") == "") {
+        migrated := db_alter_table_add_field(db, hearthlight_meals_table(), "ingredients:text?");
+        ? (migrated < 0 and migrated != -3) {
+            ^ false;
+        }
+    }
 
     groceries_root := db_table_root(db, hearthlight_groceries_table());
     ? (groceries_root < 0 and db_define_table(db, hearthlight_groceries_table(), 128, "name:text,section:text,purchased:bool=false") < 0) {
@@ -159,13 +171,13 @@
     household_ok := hearthlight_insert_if_missing(db, hearthlight_households_table(), 1, hearthlight_household_row("Maple House", "Saturday", "Sunday"));
     member0_ok := hearthlight_insert_if_missing(db, hearthlight_members_table(), 1, hearthlight_member_row("Avery", "Meal planner", "terracotta"));
     member1_ok := hearthlight_insert_if_missing(db, hearthlight_members_table(), 2, hearthlight_member_row("Jordan", "Grocery runner", "sage"));
-    meal0_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(0), hearthlight_meal_row("Chickpea Bowls", "Use the last of the tahini and cucumbers.", hearthlight_day_label(0)));
-    meal1_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(1), hearthlight_meal_row("Soup Night", "Double batch for leftovers.", hearthlight_day_label(1)));
-    meal2_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(2), hearthlight_meal_row("Breakfast Tacos", "Easy pantry dinner for the midweek crunch.", hearthlight_day_label(2)));
-    meal3_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(3), hearthlight_meal_row("Lemon Pasta", "Fast enough for a busy Thursday.", "Tonight"));
-    meal4_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(4), hearthlight_meal_row("Leftover Night", "Clear the fridge before shopping day.", hearthlight_day_label(4)));
-    meal5_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(5), hearthlight_meal_row("Market Salad", "Shopping day dinner with crusty bread.", hearthlight_day_label(5)));
-    meal6_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(6), hearthlight_meal_row("Roast Chicken", "Anchor meal for the next week.", hearthlight_day_label(6)));
+    meal0_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(0), hearthlight_meal_row_with_ingredients("Chickpea Bowls", "Use the last of the tahini and cucumbers.", hearthlight_day_label(0), "Chickpeas,Cucumbers,Tahini"));
+    meal1_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(1), hearthlight_meal_row_with_ingredients("Soup Night", "Double batch for leftovers.", hearthlight_day_label(1), "Stock,Carrots,Bread"));
+    meal2_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(2), hearthlight_meal_row_with_ingredients("Breakfast Tacos", "Easy pantry dinner for the midweek crunch.", hearthlight_day_label(2), "Eggs,Tortillas,Hot Sauce"));
+    meal3_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(3), hearthlight_meal_row_with_ingredients("Lemon Pasta", "Fast enough for a busy Thursday.", "Tonight", "Lemons,Parmesan,Pasta"));
+    meal4_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(4), hearthlight_meal_row_with_ingredients("Leftover Night", "Clear the fridge before shopping day.", hearthlight_day_label(4), ""));
+    meal5_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(5), hearthlight_meal_row_with_ingredients("Market Salad", "Shopping day dinner with crusty bread.", hearthlight_day_label(5), "Greens,Radishes,Bread"));
+    meal6_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(6), hearthlight_meal_row_with_ingredients("Roast Chicken", "Anchor meal for the next week.", hearthlight_day_label(6), "Chicken,Potatoes,Rosemary"));
     grocery0_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 1, hearthlight_grocery_row("Milk", "Dairy", "false"));
     grocery1_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 2, hearthlight_grocery_row("Parsley", "Produce", "false"));
     grocery2_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 3, hearthlight_grocery_row("Olive Oil", "Pantry", "false"));
@@ -222,7 +234,12 @@
 }
 
 @hearthlight_put_meal(db: DB, key: i64, title: text, notes: text, day_label: text) -> i64 {
-    payload := hearthlight_meal_row(title, notes, day_label);
+    payload := hearthlight_meal_row_with_ingredients(title, notes, day_label, "");
+    ^ db_put_row(db, hearthlight_meals_table(), key, payload);
+}
+
+@hearthlight_put_meal_with_ingredients(db: DB, key: i64, title: text, notes: text, day_label: text, ingredients: text) -> i64 {
+    payload := hearthlight_meal_row_with_ingredients(title, notes, day_label, ingredients);
     ^ db_put_row(db, hearthlight_meals_table(), key, payload);
 }
 
@@ -236,6 +253,63 @@
         key = db_next_key(db, hearthlight_pantry_table(), key);
     }
     ^ -1;
+}
+
+@hearthlight_find_open_grocery_key_by_name(db: DB, name: text) -> i64 {
+    key := db_first_key(db, hearthlight_groceries_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_groceries_table(), key);
+        ? (row_get(row0, "name") == name and row_get(row0, "purchased") != "true") {
+            ^ key;
+        }
+        key = db_next_key(db, hearthlight_groceries_table(), key);
+    }
+    ^ -1;
+}
+
+@hearthlight_item_at(items: text, index: i64, separator: text) -> text {
+    remaining := items;
+    idx := 0;
+    ~ (idx < index) {
+        cut := find(remaining, separator);
+        ? (cut < 0) {
+            ^ "";
+        }
+        next_start := cut + count(separator);
+        remaining = slice(remaining, next_start, count(remaining) - next_start);
+        idx = idx + 1;
+    }
+    cut := find(remaining, separator);
+    ? (cut < 0) {
+        ^ remaining;
+    }
+    ^ slice(remaining, 0, cut);
+}
+
+@hearthlight_trim_space(value: text) -> text {
+    start := 0;
+    end0 := count(value);
+    ~ (start < end0 and slice(value, start, 1) == " ") {
+        start = start + 1;
+    }
+    ~ (end0 > start and slice(value, end0 - 1, 1) == " ") {
+        end0 = end0 - 1;
+    }
+    ^ slice(value, start, end0 - start);
+}
+
+@hearthlight_guess_section(name: text) -> text {
+    lowerish := name;
+    ? (find(lowerish, "Milk") >= 0 or find(lowerish, "Parmesan") >= 0 or find(lowerish, "Egg") >= 0 or find(lowerish, "Mozzarella") >= 0) {
+        ^ "Dairy";
+    }
+    ? (find(lowerish, "Lemon") >= 0 or find(lowerish, "Cucumber") >= 0 or find(lowerish, "Greens") >= 0 or find(lowerish, "Radish") >= 0 or find(lowerish, "Rosemary") >= 0 or find(lowerish, "Carrot") >= 0 or find(lowerish, "Basil") >= 0 or find(lowerish, "Tomato") >= 0) {
+        ^ "Produce";
+    }
+    ? (find(lowerish, "Chicken") >= 0) {
+        ^ "Butcher";
+    }
+    ^ "Pantry";
 }
 
 @hearthlight_pantry_low_stock_count(db: DB) -> i64 {
@@ -275,6 +349,35 @@
 
     pantry_payload := hearthlight_pantry_row(row_get(grocery, "name"), row_get(grocery, "section"), "1", "1", "items", "false");
     ^ db_insert_row(db, hearthlight_pantry_table(), hearthlight_next_key(db, hearthlight_pantry_table()), pantry_payload);
+}
+
+@hearthlight_add_meal_ingredients_to_groceries(db: DB, meal_key: i64) -> i64 {
+    meal := db_get(db, hearthlight_meals_table(), meal_key);
+    ? (count(meal) == 0) {
+        ^ -1;
+    }
+    ingredients := row_get(meal, "ingredients");
+    ? (count(ingredients) == 0) {
+        ^ 0;
+    }
+
+    added := 0;
+    idx := 0;
+    ~ (idx <= count(ingredients)) {
+        item := hearthlight_trim_space(hearthlight_item_at(ingredients, idx, ","));
+        ? (count(item) == 0) {
+            ^ added;
+        }
+        ? (hearthlight_find_open_grocery_key_by_name(db, item) < 0) {
+            inserted := hearthlight_add_grocery(db, item, hearthlight_guess_section(item));
+            ? (inserted < 0) {
+                ^ inserted;
+            }
+            added = added + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ added;
 }
 
 @hearthlight_complete_chore(db: DB, key: i64) -> i64 {

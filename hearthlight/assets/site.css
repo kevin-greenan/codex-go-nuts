@@ -246,6 +246,12 @@ label {
   color: var(--muted);
 }
 
+.planner-ingredients {
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .member-chip,
 .section-pill {
   display: inline-flex;

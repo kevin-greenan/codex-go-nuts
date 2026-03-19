@@ -7,6 +7,7 @@
         kiln_route("GET", "/planner", "planner"),
         kiln_route("GET", "/pantry", "pantry"),
         kiln_route("POST", "/planner/meals", "planner-meal-save"),
+        kiln_route("POST", "/planner/meals/:id/groceries", "planner-meal-groceries"),
         kiln_route("POST", "/groceries", "grocery-create"),
         kiln_route("POST", "/groceries/:id/purchase", "grocery-purchase"),
         kiln_route("POST", "/chores/:id/complete", "chore-complete"),
@@ -54,6 +55,7 @@
     day_key_text := kiln_http_form_value(request, "day_key");
     title := kiln_http_form_value(request, "title");
     notes := kiln_http_form_value(request, "notes");
+    ingredients := kiln_http_form_value(request, "ingredients");
 
     ? (count(day_key_text) == 0 or count(title) == 0) {
         ^ kiln_reply_with_flash(kiln_reply_redirect("/planner"), "notice", "Choose a day and meal title before saving.");
@@ -64,7 +66,7 @@
         ^ kiln_reply_text(500, "unable to begin planner transaction");
     }
     day_key := i64_of(day_key_text);
-    wrote := hearthlight_put_meal(db, day_key, title, notes, hearthlight_meal_day_label(day_key));
+    wrote := hearthlight_put_meal_with_ingredients(db, day_key, title, notes, hearthlight_meal_day_label(day_key), ingredients);
     ? (wrote < 0) {
         rolled := db_rollback(db);
         ^ kiln_reply_with_flash(kiln_reply_redirect("/planner"), "notice", "Hearthlight could not save that meal.");
@@ -74,6 +76,30 @@
         ^ kiln_reply_text(500, "unable to commit planner transaction");
     }
     ^ kiln_reply_with_flash(kiln_reply_redirect("/planner"), "success", "Saved " + title + " to the weekly plan.");
+}
+
+@hearthlight_handle_planner_meal_groceries(db: DB, meal_id_text: text) -> KilnReply {
+    ? (count(meal_id_text) == 0) {
+        ^ kiln_reply_with_flash(kiln_reply_redirect("/planner"), "notice", "That meal link was missing an id.");
+    }
+
+    began := db_begin(db);
+    ? (not began) {
+        ^ kiln_reply_text(500, "unable to begin grocery generation transaction");
+    }
+    added := hearthlight_add_meal_ingredients_to_groceries(db, i64_of(meal_id_text));
+    ? (added < 0) {
+        rolled := db_rollback(db);
+        ^ kiln_reply_with_flash(kiln_reply_redirect("/planner"), "notice", "Hearthlight could not build groceries from that meal.");
+    }
+    committed := db_commit(db);
+    ? (not committed) {
+        ^ kiln_reply_text(500, "unable to commit grocery generation transaction");
+    }
+    ? (added == 0) {
+        ^ kiln_reply_with_flash(kiln_reply_redirect("/planner"), "notice", "No new grocery items were needed for that meal.");
+    }
+    ^ kiln_reply_with_flash(kiln_reply_redirect("/planner"), "success", "Added " + text_of(added) + " grocery items from the meal plan.");
 }
 
 @hearthlight_handle_chore_complete(db: DB, chore_id_text: text) -> KilnReply {
@@ -154,6 +180,9 @@
     }
     ? (kiln_dispatch_is(dispatch, "planner-meal-save")) {
         ^ hearthlight_handle_planner_meal_save(db, request);
+    }
+    ? (kiln_dispatch_is(dispatch, "planner-meal-groceries")) {
+        ^ hearthlight_handle_planner_meal_groceries(db, kiln_dispatch_param(dispatch, "id"));
     }
     ? (kiln_dispatch_is(dispatch, "grocery-create")) {
         ^ hearthlight_handle_grocery_create(db, request);

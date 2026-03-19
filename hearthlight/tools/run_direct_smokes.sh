@@ -22,14 +22,16 @@ examples_for_suite() {
         hearthlight/examples/dashboard_smoke.noe \
         hearthlight/examples/action_smoke.noe \
         hearthlight/examples/planner_smoke.noe \
-        hearthlight/examples/pantry_smoke.noe
+        hearthlight/examples/pantry_smoke.noe \
+        hearthlight/examples/grocery_generation_smoke.noe
       ;;
     all)
       print -l \
         hearthlight/examples/dashboard_smoke.noe \
         hearthlight/examples/action_smoke.noe \
         hearthlight/examples/planner_smoke.noe \
-        hearthlight/examples/pantry_smoke.noe
+        hearthlight/examples/pantry_smoke.noe \
+        hearthlight/examples/grocery_generation_smoke.noe
       ;;
     *)
       print -u2 "unknown suite: ${1}"

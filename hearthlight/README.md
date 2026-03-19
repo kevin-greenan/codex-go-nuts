@@ -234,12 +234,13 @@ What is already working:
 7. a long-running dashboard daemon entrypoint now exists for local browser testing and containerization
 8. a weekly planner route now shows a full seven-day meal plan and supports saving meals into the plan
 9. a pantry route now tracks on-hand inventory, flags low-stock staples, and accepts grocery purchases into pantry state
+10. planner meals can now carry ingredient lists and generate grocery items directly into the shared shopping flow
 
 The current goal is a real vertical slice, not a full product:
 
 1. one seeded household
 2. a dashboard plus planner route
-3. a dashboard, planner, and pantry workflow with connected write actions
+3. a dashboard, planner, grocery, and pantry workflow with connected write actions
 4. direct-compiler smoke coverage proving the app stack works end to end
 
 ## Local Development
