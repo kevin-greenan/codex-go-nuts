@@ -104,7 +104,7 @@ What is already working on `codex/ashdb-foundation`:
 
 What is not done yet:
 
-1. stronger transactional semantics beyond page-aware rollback journaling
+1. stronger transactional semantics beyond changed-page rollback journaling
 2. richer schema constraints beyond scalar types, nullable fields, defaults, and unique `i64` fields
 3. broader corruption tooling and repair workflows beyond index rebuild
 4. broader query shapes beyond point lookup, equality filtering, primary-key ranges, unique secondary-index ranges, key-by-key traversal, and rowset-style result helpers
@@ -116,10 +116,9 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Storage Engine
 
-1. changed-page journaling or WAL-style durability instead of journaling every page up front
-2. durability boundaries that operate on changed pages rather than the entire file
-3. better delete/rebalance behavior for long-lived trees
-4. larger data-path testing with hundreds or thousands of rows per table
+1. WAL-style durability beyond changed-page rollback journaling
+2. better delete/rebalance behavior for long-lived trees
+3. larger data-path testing with hundreds or thousands of rows per table
 
 ### Schema and Data Model
 
@@ -129,11 +128,10 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 ### Query Surface
 
 1. richer predicate support beyond exact field equality
-2. range scans over primary and secondary keys
-3. index-assisted field lookups instead of manual index-table wiring in user code
-4. stable cursor APIs for incremental iteration
-5. better result-shape APIs than joined text output
-6. explicit query/result conventions for failure cases
+2. index-assisted field lookups instead of manual index-table wiring in user code
+3. stable cursor APIs for incremental iteration
+4. better result-shape APIs than joined text output
+5. explicit query/result conventions for failure cases
 
 ### Integrity and Recovery Tooling
 
@@ -162,7 +160,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 The best path from here is:
 
 1. broader repair-oriented validation helpers
-2. changed-page durability work or WAL
+2. WAL-style durability and deeper commit-boundary recovery work
 3. richer schema constraints and defaults
 4. richer query helpers and cursor APIs
 5. larger negative and recovery test coverage
