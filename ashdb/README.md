@@ -115,7 +115,8 @@ What is already working on `codex/ashdb-foundation`:
 52. field-rename schema migration for non-indexed/non-reference columns
 53. table-layout and raw-page inspection helpers for debugging trees and page contents
 54. unreachable-page detection and reclaim helpers for broader repair workflows
-55. smoke-test coverage through the direct self-hosted compiler
+55. field-drop schema migration for non-indexed/non-reference columns
+56. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -135,7 +136,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Schema and Data Model
 
-1. broader schema evolution support beyond additive field migration and safe field renames
+1. broader schema evolution support beyond additive migration and safe rename/drop operations
 
 ### Query Surface
 

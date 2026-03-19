@@ -1672,6 +1672,24 @@
     ^ out;
 }
 
+@db_schema_remove_field(fields_spec: text, target_field_name: text) -> text {
+    count0 := db_schema_field_count(fields_spec);
+    out := "";
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        ? (field_name != target_field_name) {
+            ? (count(out) > 0) {
+                out = out + ",";
+            }
+            out = out + field_spec;
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
 @db_schema_rename_field_spec(field_spec: text, new_field_name: text) -> text {
     colon := find(field_spec, ":");
     ? (colon < 0) {
@@ -1905,6 +1923,21 @@
             field_name = new_field_name;
         }
         out = row_append(out, field_name, value);
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@db_drop_field_from_payload(payload: text, old_fields_spec: text, dropped_field_name: text) -> text {
+    count0 := db_schema_field_count(old_fields_spec);
+    out := "";
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(old_fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        ? (field_name != dropped_field_name) {
+            out = row_append(out, field_name, row_get(payload, field_name));
+        }
         idx = idx + 1;
     }
     ^ out;
@@ -2290,6 +2323,44 @@
         payload := db_get(db, table_name, key);
         renamed_payload := db_rename_field_in_payload(payload, old_fields, old_field_name, new_field_name);
         wrote := db_update_row(db, table_name, key, renamed_payload);
+        ? (wrote < 0) {
+            ^ wrote;
+        }
+        updated_count = updated_count + 1;
+        key = db_next_key(db, table_name, key);
+    }
+    ^ updated_count;
+}
+
+@db_alter_table_drop_field(db: DB, table_name: text, field_name: text) -> i64 {
+    schema_payload := db_table_schema(db, table_name);
+    ? (count(schema_payload) == 0) {
+        ^ -1;
+    }
+    ? (count(field_name) == 0) {
+        ^ -2;
+    }
+    old_fields := row_get(schema_payload, "fields");
+    old_field_spec := db_schema_field_spec(old_fields, field_name);
+    ? (count(old_field_spec) == 0) {
+        ^ -3;
+    }
+    ? (db_schema_field_is_unique(old_field_spec) or count(db_schema_field_ref_table(old_field_spec)) > 0) {
+        ^ -5;
+    }
+    new_fields := db_schema_remove_field(old_fields, field_name);
+    updated_schema := row_put(schema_payload, "fields", new_fields);
+    schema_key := db_table_root(db, table_name);
+    schema_updated := db_update(db, db_schema_table_name(), schema_key, updated_schema);
+    ? (schema_updated < 0) {
+        ^ -6;
+    }
+    key := db_first_key(db, table_name);
+    updated_count := 0;
+    ~ (key >= 0) {
+        payload := db_get(db, table_name, key);
+        trimmed_payload := db_drop_field_from_payload(payload, old_fields, field_name);
+        wrote := db_update_row(db, table_name, key, trimmed_payload);
         ? (wrote < 0) {
             ^ wrote;
         }
