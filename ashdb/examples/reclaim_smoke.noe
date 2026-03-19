@@ -1,0 +1,67 @@
+& "../lib/db.noe";
+
+@user_payload(name: text, email_key: i64) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "email_key", text_of(email_key));
+    ^ payload;
+}
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: reclaim_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 256);
+    defined := db_define_table(db, "users", 80, "name:text,email_key:i64!");
+    inserted := db_insert_row(db, "users", 1, user_payload("alice", 1001));
+    tx0 := db_begin(db);
+    orphan := pager_alloc_page(db.pager);
+    wrote := pager_write_page(db.pager, orphan, "orphan-page");
+    unreachable0 := db_unreachable_pages_text(db, "|");
+    reclaimed := db_reclaim_unreachable_pages(db);
+    unreachable1 := db_unreachable_pages_text(db, "|");
+    free0 := pager_free_head(db.pager);
+    committed := db_commit(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 256);
+    validate0 := db_validate_report(reopened);
+    unreachable2 := db_unreachable_pages_text(reopened, "|");
+    page0 := db_page_text(reopened, orphan);
+    free1 := pager_free_head(reopened.pager);
+    row0 := db_get(reopened, "users", 1);
+    closed1 := db_close(reopened);
+
+    ? (defined <= 0 or inserted < 0) {
+        ! "setup=" + text_of(defined) + ":" + text_of(inserted);
+        ^ 2;
+    }
+    ? (not tx0 or orphan <= 1 or wrote != db.pager.page_size) {
+        ! "orphan=" + text_of(tx0) + ":" + text_of(orphan) + ":" + text_of(wrote);
+        ^ 3;
+    }
+    ? (unreachable0 != text_of(orphan)) {
+        ! "unreachable0=" + unreachable0 + ":" + text_of(orphan);
+        ^ 4;
+    }
+    ? (reclaimed != 1 or count(unreachable1) != 0 or free0 != orphan) {
+        ! "reclaim=" + text_of(reclaimed) + ":" + unreachable1 + ":" + text_of(free0) + ":" + text_of(orphan);
+        ^ 5;
+    }
+    ? (not committed or not closed0) {
+        ^ 6;
+    }
+    ? (validate0 != "ok" or count(unreachable2) != 0) {
+        ! "reopen=" + validate0 + ":" + unreachable2;
+        ^ 7;
+    }
+    ? (slice(page0, 0, 1) != "F" or free1 != orphan or row_get(row0, "name") != "alice" or not closed1) {
+        ! "page=" + page0 + ":" + text_of(free1) + ":" + row0;
+        ^ 8;
+    }
+
+    ! "ashdb reclaim smoke ok";
+    ^ 0;
+}

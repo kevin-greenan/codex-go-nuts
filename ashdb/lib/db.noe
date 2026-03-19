@@ -1323,12 +1323,136 @@
     ^ pager_read_page(db.pager, page_id);
 }
 
+@db_page_payload_kind(db: DB, page_id: i64) -> text {
+    total_pages := pager_total_pages(db.pager);
+    ? (page_id < 0 or page_id >= total_pages) {
+        ^ "";
+    }
+    ? (page_id == 0) {
+        ^ pager_page_kind(pager_load_header(db.pager));
+    }
+    raw := pager_read_page(db.pager, page_id);
+    raw_kind := pager_page_kind(raw);
+    ? (raw_kind == "D") {
+        ^ slice(raw, 1, 1);
+    }
+    ^ raw_kind;
+}
+
 @db_table_layout_text(db: DB, table_name: text, separator: text) -> text {
     table := db_bind_table(db, table_name);
     ? (table.root_page < 0 or table.slot_width < 0) {
         ^ "";
     }
     ^ table_layout_text(table, separator);
+}
+
+@db_page_set_item(page_id: i64) -> text {
+    ^ "," + text_of(page_id) + ",";
+}
+
+@db_page_set_has(pages: text, page_id: i64) -> bool {
+    ^ find(pages, db_page_set_item(page_id)) >= 0;
+}
+
+@db_page_set_add(pages: text, page_id: i64) -> text {
+    ? (db_page_set_has(pages, page_id)) {
+        ^ pages;
+    }
+    ? (count(pages) == 0) {
+        ^ db_page_set_item(page_id);
+    }
+    ^ pages + text_of(page_id) + ",";
+}
+
+@db_collect_table_pages(table: Table, page_id: i64, pages: text) -> text {
+    ? (page_id <= 0) {
+        ^ pages;
+    }
+    ? (db_page_set_has(pages, page_id)) {
+        ^ pages;
+    }
+    updated := db_page_set_add(pages, page_id);
+    kind := table_page_kind(table, page_id);
+    ? (kind != "I") {
+        ^ updated;
+    }
+    page := pager_read_page(table.pager, page_id);
+    out := db_collect_table_pages(table, table_internal_left_child(page), updated);
+    key_count := table_internal_key_count(page);
+    used_cells := table_internal_used_cells(page);
+    idx := 0;
+    ~ (idx < key_count) {
+        cell := table_internal_cell_at(used_cells, idx);
+        out = db_collect_table_pages(table, table_internal_cell_child(cell), out);
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@db_reachable_pages(db: DB) -> text {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    pages := db_page_set_add("", 0);
+    pages = db_page_set_add(pages, db_catalog_page());
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (db_catalog_entry_is_used(entry)) {
+            root_page := db_catalog_entry_root(entry);
+            slot_width := db_catalog_entry_slot_width(entry);
+            table := table_bind(db.pager, root_page, slot_width);
+            pages = db_collect_table_pages(table, root_page, pages);
+        }
+        idx = idx + 1;
+    }
+    ^ pages;
+}
+
+@db_unreachable_pages_text(db: DB, separator: text) -> text {
+    reachable := db_reachable_pages(db);
+    total_pages := pager_total_pages(db.pager);
+    out := "";
+    page_id := 2;
+    ~ (page_id < total_pages) {
+        kind := db_page_payload_kind(db, page_id);
+        ? (kind != "F" and not db_page_set_has(reachable, page_id)) {
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + text_of(page_id);
+        }
+        page_id = page_id + 1;
+    }
+    ^ out;
+}
+
+@db_reclaim_unreachable_pages(db: DB) -> i64 {
+    reachable := db_reachable_pages(db);
+    total_pages := pager_total_pages(db.pager);
+    captured_header := db_journal_capture_page_if_needed(db, 0);
+    ? (not captured_header) {
+        ^ -1;
+    }
+    reclaimed := 0;
+    page_id := 2;
+    ~ (page_id < total_pages) {
+        kind := db_page_payload_kind(db, page_id);
+        ? (kind != "F" and not db_page_set_has(reachable, page_id)) {
+            captured := db_journal_capture_page_if_needed(db, page_id);
+            ? (not captured) {
+                ^ -2;
+            }
+            freed := pager_free_page(db.pager, page_id);
+            ? (not freed) {
+                ^ -3;
+            }
+            reclaimed = reclaimed + 1;
+        }
+        page_id = page_id + 1;
+    }
+    ^ reclaimed;
 }
 
 @db_schema_field_count(fields_spec: text) -> i64 {

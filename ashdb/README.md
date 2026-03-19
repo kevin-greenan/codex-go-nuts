@@ -114,7 +114,8 @@ What is already working on `codex/ashdb-foundation`:
 51. scalar coercion and canonicalization for `i64` and `bool` schema fields
 52. field-rename schema migration for non-indexed/non-reference columns
 53. table-layout and raw-page inspection helpers for debugging trees and page contents
-54. smoke-test coverage through the direct self-hosted compiler
+54. unreachable-page detection and reclaim helpers for broader repair workflows
+55. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -143,8 +144,8 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Integrity and Recovery Tooling
 
-1. broader repair-oriented helpers beyond unique-index repair
-2. corruption fixtures and negative tests
+1. corruption fixtures and negative tests
+2. broader repair-oriented helpers beyond index rebuild and unreachable-page reclaim
 3. clear recovery behavior documentation for interrupted writes
 
 ### Operational Safety
