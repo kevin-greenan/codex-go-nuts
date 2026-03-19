@@ -65,12 +65,13 @@ What is already working:
 2. a direct-compiled `hello` server runs locally and responds to `curl`
 3. a first Kiln HTTP library now parses request lines and serializes basic text responses
 4. a first router now matches method/path patterns, including `:param` segments, and distinguishes `404` from `405`
+5. a first HTML renderer now supports escaping, attributes, tags, lists, and whole-page responses
 
 What is next:
 
 1. strengthen request parsing for headers, query strings, and bodies
 2. grow the router from dispatch results into more ergonomic handler conventions
-3. add small HTML rendering helpers for server-rendered pages
+3. add forms, layout helpers, and higher-level page composition patterns
 
 ## Architecture Overview
 

@@ -1,0 +1,41 @@
+& "../lib/http.noe";
+& "../lib/html.noe";
+
+@main() -> i64 {
+    card := kiln_html_tag("div", kiln_html_attr("class", "card"), kiln_html_tag("h1", "", kiln_html_text("Kiln <Home>")) + kiln_html_tag("p", "", kiln_html_text("safe & steady")));
+    links :: list<text> := [
+        kiln_html_link("/", "Home"),
+        kiln_html_link("/users/42", "User 42")
+    ];
+    body := card + kiln_html_unordered_list(links);
+    page := kiln_html_page("Kiln", body);
+    response := kiln_http_response(200, "text/html; charset=utf-8", page);
+
+    ? (find(page, "<!doctype html>") != 0) {
+        ! "doctype mismatch";
+        ^ 1;
+    }
+    ? (find(page, "&lt;Home&gt;") < 0) {
+        ! "escape mismatch";
+        ^ 2;
+    }
+    ? (find(page, "&amp;") < 0) {
+        ! "amp mismatch";
+        ^ 3;
+    }
+    ? (find(page, "<ul>") < 0 or find(page, "</ul>") < 0) {
+        ! "list mismatch";
+        ^ 4;
+    }
+    ? (find(response, "Content-Type: text/html; charset=utf-8") < 0) {
+        ! "response content-type mismatch";
+        ^ 5;
+    }
+    ? (find(response, "<title>Kiln</title>") < 0) {
+        ! "title mismatch";
+        ^ 6;
+    }
+
+    ! "kiln html smoke ok";
+    ^ 0;
+}

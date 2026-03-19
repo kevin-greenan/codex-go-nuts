@@ -1,0 +1,70 @@
+@kiln_html_escape(text: text) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx < count(text)) {
+        ch := slice(text, idx, 1);
+        ? (ch == "&") {
+            out = out + "&amp;";
+        }
+        | {
+            ? (ch == "<") {
+                out = out + "&lt;";
+            }
+            | {
+                ? (ch == ">") {
+                    out = out + "&gt;";
+                }
+                | {
+                    ? (ch == "\"") {
+                        out = out + "&quot;";
+                    }
+                    | {
+                        out = out + ch;
+                    }
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@kiln_html_attr(name: text, value: text) -> text {
+    ^ " " + name + "=\"" + kiln_html_escape(value) + "\"";
+}
+
+@kiln_html_tag(name: text, attrs: text, body: text) -> text {
+    ^ "<" + name + attrs + ">" + body + "</" + name + ">";
+}
+
+@kiln_html_empty_tag(name: text, attrs: text) -> text {
+    ^ "<" + name + attrs + ">";
+}
+
+@kiln_html_text(text: text) -> text {
+    ^ kiln_html_escape(text);
+}
+
+@kiln_html_link(href: text, label: text) -> text {
+    ^ kiln_html_tag("a", kiln_html_attr("href", href), kiln_html_text(label));
+}
+
+@kiln_html_list_item(body: text) -> text {
+    ^ kiln_html_tag("li", "", body);
+}
+
+@kiln_html_unordered_list(items: list<text>) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx < count(items)) {
+        out = out + kiln_html_list_item(items[idx]);
+        idx = idx + 1;
+    }
+    ^ kiln_html_tag("ul", "", out);
+}
+
+@kiln_html_page(title: text, body: text) -> text {
+    head := kiln_html_tag("head", "", kiln_html_tag("meta", kiln_html_attr("charset", "utf-8"), "") + kiln_html_tag("title", "", kiln_html_text(title)));
+    doc_body := kiln_html_tag("body", "", body);
+    ^ "<!doctype html>" + kiln_html_tag("html", "", head + doc_body);
+}
