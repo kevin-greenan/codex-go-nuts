@@ -150,8 +150,8 @@ There is also an experimental direct native backend:
 - backend id: `native-arm64`
 - target: `arm64-apple-darwin`
 - output: arm64 assembly plus a generated support C file when fallback is needed
-- direct native subset: scalar `i64` programs with locals, arithmetic, comparisons, branching, loops, calls, and `!`
-- fallback path: text, file I/O, sockets, HTTP-support code, shapes, and lists currently link through generated C support code
+- direct native subset: scalar `i64` programs with locals, arithmetic, comparisons, branching, loops, calls, and `!`, plus text literals/emits and runtime-backed arg/file/socket builtins
+- fallback path: aggregate values such as shapes, field access, and lists currently still link through generated C support code
 
 This is now strong enough to build and run every program in `examples/` through the native backend on `arm64-apple-darwin`, but it is still not a full replacement yet because some features are still lowered through C support code.
 

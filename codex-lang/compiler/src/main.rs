@@ -212,12 +212,14 @@ struct IrFunction {
     params: usize,
     slots: usize,
     stack_slots: usize,
+    strings: Vec<(String, String)>,
     body: Vec<IrInst>,
 }
 
 #[derive(Clone, Debug)]
 enum IrInst {
     PushImm(i64),
+    TextConst(String, usize),
     Load(usize),
     Store(usize),
     Drop,
@@ -236,7 +238,9 @@ enum IrInst {
     Jump(String),
     JumpIfZero(String),
     Call(String, usize),
+    CallExtern(String, usize),
     EmitI64,
+    EmitText,
     Label(String),
     Return,
 }
@@ -244,10 +248,14 @@ enum IrInst {
 #[derive(Default)]
 struct IrFunctionBuilder {
     slots: HashMap<String, usize>,
+    slot_types: HashMap<String, TypeName>,
     next_slot: usize,
     depth: usize,
     max_depth: usize,
     label_counter: usize,
+    string_counter: usize,
+    string_labels: HashMap<String, String>,
+    strings: Vec<(String, String)>,
 }
 
 struct ExprParser {
@@ -2062,17 +2070,17 @@ fn lower_function_to_ir(function: &Function, semantic: &SemanticInfo) -> Result<
             function.params.len()
         ));
     }
-    if function.return_type != TypeName::I64 {
+    if !is_native_value_type(&function.return_type) {
         return Err(format!(
-            "native backend currently requires i64 return types, '{}' returns '{}'",
-            function.name,
-            function.return_type.display()
+            "native backend does not yet support return type '{}' in '{}'",
+            function.return_type.display(),
+            function.name
         ));
     }
     for param in &function.params {
-        if param.ty != TypeName::I64 {
+        if !is_native_value_type(&param.ty) {
             return Err(format!(
-                "native backend currently supports only i64 parameters, '{}:{}' is '{}'",
+                "native backend does not yet support parameter '{}:{}' as '{}'",
                 function.name,
                 param.name,
                 param.ty.display()
@@ -2082,7 +2090,7 @@ fn lower_function_to_ir(function: &Function, semantic: &SemanticInfo) -> Result<
 
     let mut builder = IrFunctionBuilder::default();
     for param in &function.params {
-        builder.alloc_slot(param.name.clone());
+        builder.alloc_slot(param.name.clone(), param.ty.clone());
     }
 
     let mut body = Vec::new();
@@ -2093,6 +2101,7 @@ fn lower_function_to_ir(function: &Function, semantic: &SemanticInfo) -> Result<
         params: function.params.len(),
         slots: builder.next_slot,
         stack_slots: builder.max_depth,
+        strings: builder.strings,
         body,
     })
 }
@@ -2118,12 +2127,20 @@ fn lower_ir_statement(
     match statement {
         Statement::Let {
             name,
-            annotation: _,
+            annotation,
             expr,
         } => {
             ensure_native_expr(expr, semantic, builder)?;
             lower_ir_expr(expr, semantic, builder, out)?;
-            let slot = builder.alloc_slot(name.clone());
+            let value_type = infer_expr_type(
+                expr,
+                &builder.type_env(),
+                &semantic.shapes,
+                &semantic.functions,
+                annotation.as_ref(),
+                &mut HashSet::new(),
+            )?;
+            let slot = builder.alloc_slot(name.clone(), value_type);
             out.push(IrInst::Store(slot));
             builder.pop_depth(1)?;
         }
@@ -2150,10 +2167,16 @@ fn lower_ir_statement(
                 &mut HashSet::new(),
             )?;
             if expr_type != TypeName::I64 {
-                return Err("native backend currently supports emitting only i64 values".to_string());
+                if expr_type != TypeName::Text {
+                    return Err("native backend currently supports emitting only i64 or text values".to_string());
+                }
             }
             lower_ir_expr(expr, semantic, builder, out)?;
-            out.push(IrInst::EmitI64);
+            if expr_type == TypeName::I64 {
+                out.push(IrInst::EmitI64);
+            } else {
+                out.push(IrInst::EmitText);
+            }
             builder.pop_depth(1)?;
         }
         Statement::Return(Some(expr)) => {
@@ -2215,6 +2238,15 @@ fn lower_ir_expr(
             out.push(IrInst::PushImm(*value));
             builder.push_depth(1);
         }
+        Expr::Bool(value) => {
+            out.push(IrInst::PushImm(if *value { 1 } else { 0 }));
+            builder.push_depth(1);
+        }
+        Expr::Text(value) => {
+            let label = builder.string_label(value);
+            out.push(IrInst::TextConst(label, value.len()));
+            builder.push_depth(1);
+        }
         Expr::Name(name) => {
             let slot = builder
                 .slot_of(name)
@@ -2235,58 +2267,101 @@ fn lower_ir_expr(
             }
         }
         Expr::Binary { left, op, right } => {
+            let left_type = infer_expr_type(
+                left,
+                &builder.type_env(),
+                &semantic.shapes,
+                &semantic.functions,
+                None,
+                &mut HashSet::new(),
+            )?;
             lower_ir_expr(left, semantic, builder, out)?;
             lower_ir_expr(right, semantic, builder, out)?;
-            out.push(match op {
-                BinaryOp::Add => IrInst::Add,
-                BinaryOp::Sub => IrInst::Sub,
-                BinaryOp::Mul => IrInst::Mul,
-                BinaryOp::Div => IrInst::Div,
-                BinaryOp::Mod => IrInst::Mod,
-                BinaryOp::Eq => IrInst::Eq,
-                BinaryOp::Ne => IrInst::Ne,
-                BinaryOp::Lt => IrInst::Lt,
-                BinaryOp::Le => IrInst::Le,
-                BinaryOp::Gt => IrInst::Gt,
-                BinaryOp::Ge => IrInst::Ge,
-                BinaryOp::And | BinaryOp::Or => {
-                    return Err("native backend does not yet support logical and/or".to_string())
+            if left_type == TypeName::Text {
+                match op {
+                    BinaryOp::Add => out.push(IrInst::CallExtern("noema_native_text_concat".to_string(), 2)),
+                    BinaryOp::Eq => out.push(IrInst::CallExtern("noema_native_text_eq".to_string(), 2)),
+                    BinaryOp::Ne => {
+                        out.push(IrInst::CallExtern("noema_native_text_eq".to_string(), 2));
+                        out.push(IrInst::Not);
+                    }
+                    _ => {
+                        return Err("native backend currently supports only +/==/!= on text".to_string())
+                    }
                 }
-            });
-            builder.pop_depth(1)?;
+                builder.pop_depth(1)?;
+            } else {
+                out.push(match op {
+                    BinaryOp::Add => IrInst::Add,
+                    BinaryOp::Sub => IrInst::Sub,
+                    BinaryOp::Mul => IrInst::Mul,
+                    BinaryOp::Div => IrInst::Div,
+                    BinaryOp::Mod => IrInst::Mod,
+                    BinaryOp::Eq => IrInst::Eq,
+                    BinaryOp::Ne => IrInst::Ne,
+                    BinaryOp::Lt => IrInst::Lt,
+                    BinaryOp::Le => IrInst::Le,
+                    BinaryOp::Gt => IrInst::Gt,
+                    BinaryOp::Ge => IrInst::Ge,
+                    BinaryOp::And | BinaryOp::Or => {
+                        return Err("native backend does not yet support logical and/or".to_string())
+                    }
+                });
+                builder.pop_depth(1)?;
+            }
         }
         Expr::Call { name, args } => {
-            if name == "socket_open"
-                || name == "socket_send"
-                || name == "socket_recv"
-                || name == "socket_recv_all"
-                || name == "socket_close"
-                || name == "read_text"
-                || name == "write_text"
-                || name == "find"
-                || name == "slice"
-                || name == "append"
-                || name == "count"
-                || name == "text_of"
-                || name == "i64_of"
-                || name == "arg"
-                || name == "arg_count"
-            {
-                return Err(format!(
-                    "native backend does not yet support builtin '{}'",
-                    name
-                ));
+            if name == "text_of" {
+                let arg_type = infer_expr_type(
+                    &args[0],
+                    &builder.type_env(),
+                    &semantic.shapes,
+                    &semantic.functions,
+                    None,
+                    &mut HashSet::new(),
+                )?;
+                for arg in args {
+                    lower_ir_expr(arg, semantic, builder, out)?;
+                }
+                let symbol = match arg_type {
+                    TypeName::I64 => "noema_native_text_from_i64",
+                    TypeName::Bool => "noema_native_text_from_bool",
+                    TypeName::Text => "noema_native_text_identity",
+                    _ => return Err("native backend text_of supports only i64, bool, or text".to_string()),
+                };
+                out.push(IrInst::CallExtern(symbol.to_string(), args.len()));
+                builder.pop_depth(args.len())?;
+                builder.push_depth(1);
+                return Ok(());
+            }
+            if let Some((symbol, argc)) = native_builtin_symbol(name, args.len())? {
+                for arg in args {
+                    lower_ir_expr(arg, semantic, builder, out)?;
+                }
+                out.push(IrInst::CallExtern(symbol.to_string(), argc));
+                builder.pop_depth(args.len())?;
+                builder.push_depth(1);
+                return Ok(());
             }
             let signature = semantic
                 .functions
                 .get(name)
                 .ok_or_else(|| format!("unknown function '{}'", name))?;
-            if signature.return_type != TypeName::I64 {
+            if !is_native_value_type(&signature.return_type) {
                 return Err(format!(
-                    "native backend currently supports only i64-returning calls, '{}' returns '{}'",
-                    name,
-                    signature.return_type.display()
+                    "native backend currently does not support call return type '{}' from '{}'",
+                    signature.return_type.display(),
+                    name
                 ));
+            }
+            for expected in &signature.params {
+                if !is_native_value_type(expected) {
+                    return Err(format!(
+                        "native backend currently does not support parameter type '{}' in '{}'",
+                        expected.display(),
+                        name
+                    ));
+                }
             }
             for arg in args {
                 lower_ir_expr(arg, semantic, builder, out)?;
@@ -2295,13 +2370,11 @@ fn lower_ir_expr(
             builder.pop_depth(args.len())?;
             builder.push_depth(1);
         }
-        Expr::Bool(_)
-        | Expr::Text(_)
-        | Expr::Field { .. }
+        Expr::Field { .. }
         | Expr::Index { .. }
         | Expr::ListLiteral(_)
         | Expr::StructLiteral { .. } => {
-            return Err("native backend currently supports only scalar i64 subset".to_string())
+            return Err("native backend currently does not support aggregate native lowering".to_string())
         }
     }
     Ok(())
@@ -2320,19 +2393,43 @@ fn ensure_native_expr(
         None,
         &mut HashSet::new(),
     )?;
-    if expr_type != TypeName::I64 && expr_type != TypeName::Bool {
+    if !is_native_value_type(&expr_type) {
         return Err(format!(
-            "native backend currently supports only i64/bool expressions, got '{}'",
+            "native backend currently supports only scalar/text/socket expressions, got '{}'",
             expr_type.display()
         ));
     }
     Ok(())
 }
 
+fn is_native_value_type(ty: &TypeName) -> bool {
+    matches!(ty, TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::Socket)
+}
+
+fn native_builtin_symbol(name: &str, argc: usize) -> Result<Option<(&'static str, usize)>, String> {
+    Ok(Some(match (name, argc) {
+        ("arg_count", 0) => ("noema_native_arg_count", 0),
+        ("arg", 1) => ("noema_native_arg", 1),
+        ("read_text", 1) => ("noema_native_read_text", 1),
+        ("write_text", 2) => ("noema_native_write_text", 2),
+        ("count", 1) => ("noema_native_count_text", 1),
+        ("find", 2) => ("noema_native_text_find", 2),
+        ("slice", 3) => ("noema_native_text_slice", 3),
+        ("i64_of", 1) => ("noema_native_i64_of", 1),
+        ("socket_open", 2) => ("noema_native_socket_open", 2),
+        ("socket_send", 2) => ("noema_native_socket_send", 2),
+        ("socket_recv", 2) => ("noema_native_socket_recv", 2),
+        ("socket_recv_all", 1) => ("noema_native_socket_recv_all", 1),
+        ("socket_close", 1) => ("noema_native_socket_close", 1),
+        _ => return Ok(None),
+    }))
+}
+
 impl IrFunctionBuilder {
-    fn alloc_slot(&mut self, name: String) -> usize {
+    fn alloc_slot(&mut self, name: String, ty: TypeName) -> usize {
         let slot = self.next_slot;
-        self.slots.insert(name, slot);
+        self.slots.insert(name.clone(), slot);
+        self.slot_types.insert(name, ty);
         self.next_slot += 1;
         slot
     }
@@ -2360,11 +2457,19 @@ impl IrFunctionBuilder {
         label
     }
 
+    fn string_label(&mut self, value: &str) -> String {
+        if let Some(label) = self.string_labels.get(value) {
+            return label.clone();
+        }
+        let label = format!("LCSTR_{}", self.string_counter);
+        self.string_counter += 1;
+        self.string_labels.insert(value.to_string(), label.clone());
+        self.strings.push((label.clone(), value.to_string()));
+        label
+    }
+
     fn type_env(&self) -> HashMap<String, TypeName> {
-        self.slots
-            .keys()
-            .map(|name| (name.clone(), TypeName::I64))
-            .collect()
+        self.slot_types.clone()
     }
 }
 
@@ -2376,6 +2481,26 @@ fn lower_to_arm64_macos(program: &IrProgram) -> Result<String, String> {
     out.push_str(".extern _write\n\n");
     out.push_str(".extern _noema_argc\n");
     out.push_str(".extern _noema_argv\n\n");
+    out.push_str(".extern _noema_native_text_literal\n");
+    out.push_str(".extern _noema_native_text_concat\n");
+    out.push_str(".extern _noema_native_text_eq\n");
+    out.push_str(".extern _noema_native_text_from_i64\n");
+    out.push_str(".extern _noema_native_text_from_bool\n");
+    out.push_str(".extern _noema_native_text_identity\n");
+    out.push_str(".extern _noema_native_emit_text\n");
+    out.push_str(".extern _noema_native_arg_count\n");
+    out.push_str(".extern _noema_native_arg\n");
+    out.push_str(".extern _noema_native_read_text\n");
+    out.push_str(".extern _noema_native_write_text\n");
+    out.push_str(".extern _noema_native_count_text\n");
+    out.push_str(".extern _noema_native_text_find\n");
+    out.push_str(".extern _noema_native_text_slice\n");
+    out.push_str(".extern _noema_native_i64_of\n");
+    out.push_str(".extern _noema_native_socket_open\n");
+    out.push_str(".extern _noema_native_socket_send\n");
+    out.push_str(".extern _noema_native_socket_recv\n");
+    out.push_str(".extern _noema_native_socket_recv_all\n");
+    out.push_str(".extern _noema_native_socket_close\n\n");
     out.push_str("_main:\n");
     out.push_str("    stp x29, x30, [sp, #-16]!\n");
     out.push_str("    mov x29, sp\n");
@@ -2441,6 +2566,17 @@ fn lower_to_arm64_macos(program: &IrProgram) -> Result<String, String> {
     for function in &program.functions {
         emit_arm64_function(function, &mut out)?;
     }
+    let mut emitted_strings = false;
+    for function in &program.functions {
+        if !function.strings.is_empty() && !emitted_strings {
+            out.push_str(".section __TEXT,__cstring,cstring_literals\n");
+            emitted_strings = true;
+        }
+        for (label, value) in &function.strings {
+            writeln!(out, "{}:", label).unwrap();
+            writeln!(out, "    .asciz \"{}\"", escape_asm_string(value)).unwrap();
+        }
+    }
     Ok(out)
 }
 
@@ -2487,6 +2623,14 @@ fn emit_arm64_inst(
         IrInst::PushImm(value) => {
             emit_mov_imm("x9", *value as u64, out)?;
             writeln!(out, "    str x9, [x29, #{}]", stack_offset(function, *depth)).unwrap();
+            *depth += 1;
+        }
+        IrInst::TextConst(label, len) => {
+            writeln!(out, "    adrp x0, {}@PAGE", label).unwrap();
+            writeln!(out, "    add x0, x0, {}@PAGEOFF", label).unwrap();
+            emit_mov_imm("x1", *len as u64, out)?;
+            out.push_str("    bl _noema_native_text_literal\n");
+            writeln!(out, "    str x0, [x29, #{}]", stack_offset(function, *depth)).unwrap();
             *depth += 1;
         }
         IrInst::Load(slot) => {
@@ -2575,9 +2719,30 @@ fn emit_arm64_inst(
             writeln!(out, "    str x0, [x29, #{}]", stack_offset(function, *depth)).unwrap();
             *depth += 1;
         }
+        IrInst::CallExtern(name, argc) => {
+            for arg_index in 0..*argc {
+                let src_depth = *depth - *argc + arg_index;
+                writeln!(
+                    out,
+                    "    ldr x{}, [x29, #{}]",
+                    arg_index,
+                    stack_offset(function, src_depth)
+                )
+                .unwrap();
+            }
+            writeln!(out, "    bl _{}", name).unwrap();
+            *depth -= *argc;
+            writeln!(out, "    str x0, [x29, #{}]", stack_offset(function, *depth)).unwrap();
+            *depth += 1;
+        }
         IrInst::EmitI64 => {
             writeln!(out, "    ldr x0, [x29, #{}]", stack_offset(function, *depth - 1)).unwrap();
             out.push_str("    bl _noema_emit_i64_native\n");
+            *depth -= 1;
+        }
+        IrInst::EmitText => {
+            writeln!(out, "    ldr x0, [x29, #{}]", stack_offset(function, *depth - 1)).unwrap();
+            out.push_str("    bl _noema_native_emit_text\n");
             *depth -= 1;
         }
         IrInst::Label(label) => {
@@ -2620,6 +2785,21 @@ fn emit_mov_imm(reg: &str, value: u64, out: &mut String) -> Result<(), String> {
         writeln!(out, "    movz {reg}, #0").unwrap();
     }
     Ok(())
+}
+
+fn escape_asm_string(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 fn asm_function_name(name: &str) -> String {
@@ -2935,6 +3115,106 @@ fn lower_to_c_with_options(
 
     out.push_str("static bool noema_socket_close(NoemaSocket socket_value) {\n");
     out.push_str("    return close(socket_value.fd) == 0;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static uint64_t noema_native_box_text(NoemaText text) {\n");
+    out.push_str("    NoemaText *ptr = (NoemaText *)noema_alloc(sizeof(NoemaText));\n");
+    out.push_str("    *ptr = text;\n");
+    out.push_str("    return (uint64_t)(uintptr_t)ptr;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaText noema_native_unbox_text(uint64_t handle) {\n");
+    out.push_str("    return *(NoemaText *)(uintptr_t)handle;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static uint64_t noema_native_box_socket(NoemaSocket socket_value) {\n");
+    out.push_str("    NoemaSocket *ptr = (NoemaSocket *)noema_alloc(sizeof(NoemaSocket));\n");
+    out.push_str("    *ptr = socket_value;\n");
+    out.push_str("    return (uint64_t)(uintptr_t)ptr;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaSocket noema_native_unbox_socket(uint64_t handle) {\n");
+    out.push_str("    return *(NoemaSocket *)(uintptr_t)handle;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_text_literal(const char *data, int64_t len) {\n");
+    out.push_str("    return noema_native_box_text(noema_text_literal(data, len));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_text_concat(uint64_t left, uint64_t right) {\n");
+    out.push_str("    return noema_native_box_text(noema_text_concat(noema_native_unbox_text(left), noema_native_unbox_text(right)));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_text_eq(uint64_t left, uint64_t right) {\n");
+    out.push_str("    return noema_text_eq(noema_native_unbox_text(left), noema_native_unbox_text(right));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_text_from_i64(int64_t value) {\n");
+    out.push_str("    return noema_native_box_text(noema_text_from_i64(value));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_text_from_bool(int64_t value) {\n");
+    out.push_str("    return noema_native_box_text(noema_text_from_bool(value != 0));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_text_identity(uint64_t value) {\n");
+    out.push_str("    return value;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("void noema_native_emit_text(uint64_t text) {\n");
+    out.push_str("    noema_emit_text(noema_native_unbox_text(text));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_arg_count(void) {\n");
+    out.push_str("    return noema_arg_count();\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_arg(int64_t index) {\n");
+    out.push_str("    return noema_native_box_text(noema_arg(index));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_read_text(uint64_t path) {\n");
+    out.push_str("    return noema_native_box_text(noema_read_text(noema_native_unbox_text(path)));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_write_text(uint64_t path, uint64_t text) {\n");
+    out.push_str("    return noema_write_text(noema_native_unbox_text(path), noema_native_unbox_text(text));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_count_text(uint64_t text) {\n");
+    out.push_str("    return noema_text_count(noema_native_unbox_text(text));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_text_find(uint64_t haystack, uint64_t needle) {\n");
+    out.push_str("    return noema_text_find(noema_native_unbox_text(haystack), noema_native_unbox_text(needle));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_text_slice(uint64_t text, int64_t start, int64_t len) {\n");
+    out.push_str("    return noema_native_box_text(noema_text_slice(noema_native_unbox_text(text), start, len));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_i64_of(uint64_t text) {\n");
+    out.push_str("    return noema_i64_of(noema_native_unbox_text(text));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_socket_open(uint64_t host, int64_t port) {\n");
+    out.push_str("    return noema_native_box_socket(noema_socket_open(noema_native_unbox_text(host), port));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_socket_send(uint64_t socket_value, uint64_t text) {\n");
+    out.push_str("    return noema_socket_send(noema_native_unbox_socket(socket_value), noema_native_unbox_text(text));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_socket_recv(uint64_t socket_value, int64_t limit) {\n");
+    out.push_str("    return noema_native_box_text(noema_socket_recv(noema_native_unbox_socket(socket_value), limit));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_socket_recv_all(uint64_t socket_value) {\n");
+    out.push_str("    return noema_native_box_text(noema_socket_recv_all(noema_native_unbox_socket(socket_value)));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_socket_close(uint64_t socket_value) {\n");
+    out.push_str("    return noema_socket_close(noema_native_unbox_socket(socket_value));\n");
     out.push_str("}\n\n");
 
     let mut ordered_lists: Vec<TypeName> = semantic.list_types.iter().cloned().collect();

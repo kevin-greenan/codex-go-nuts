@@ -152,7 +152,8 @@ There is now also an experimental `native-arm64` backend for `arm64-apple-darwin
 
 - It emits arm64 assembly directly and links a generated support C file when features are not natively lowered yet.
 - Scalar `i64` codepaths run through direct native codegen.
-- Higher-level features currently fall back to generated C support code inside the same native build.
+- Text literals, text emission, argument/file/socket builtins, and simple text/socket programs now also lower through the native backend via native-handle runtime calls.
+- Higher-level aggregate features such as `%` records, fields, and `list<T>` still fall back to generated C support code inside the same native build.
 - That means every program under `examples/` can now be built and run through `NOEMA_BACKEND=native-arm64` on this Mac, even though the fallback surface is still larger than we want.
 
 There is also now a first self-hosting bridge:
