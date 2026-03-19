@@ -65,12 +65,59 @@
     ^ kiln_html_tag("div", class_attr, kiln_html_text(message));
 }
 
+@hearthlight_member_color_class(color: text) -> text {
+    ? (color == "terracotta") {
+        ^ "member-chip member-chip-terracotta";
+    }
+    ? (color == "sage") {
+        ^ "member-chip member-chip-sage";
+    }
+    ? (color == "clay") {
+        ^ "member-chip member-chip-clay";
+    }
+    ? (color == "ocean") {
+        ^ "member-chip member-chip-ocean";
+    }
+    ? (color == "gold") {
+        ^ "member-chip member-chip-gold";
+    }
+    ^ "member-chip member-chip-sage";
+}
+
+@hearthlight_member_color_label(color: text) -> text {
+    ? (color == "terracotta") {
+        ^ "Terracotta";
+    }
+    ? (color == "sage") {
+        ^ "Sage";
+    }
+    ? (color == "clay") {
+        ^ "Clay";
+    }
+    ? (color == "ocean") {
+        ^ "Ocean";
+    }
+    ? (color == "gold") {
+        ^ "Gold";
+    }
+    ^ "Sage";
+}
+
+@hearthlight_selected_option(value: text, current: text, label: text) -> text {
+    attrs := kiln_html_attr("value", value);
+    ? (value == current) {
+        attrs = attrs + kiln_html_attr("selected", "selected");
+    }
+    ^ kiln_html_tag("option", attrs, kiln_html_text(label));
+}
+
 @hearthlight_members_html(db: DB) -> text {
     items := "";
     key := db_first_key(db, hearthlight_members_table());
     ~ (key >= 0) {
         row0 := db_get(db, hearthlight_members_table(), key);
-        chip := kiln_html_tag("span", kiln_html_attr("class", "member-chip"), kiln_html_text(row_get(row0, "color")));
+        color := row_get(row0, "color");
+        chip := kiln_html_tag("span", kiln_html_attr("class", hearthlight_member_color_class(color)), kiln_html_text(hearthlight_member_color_label(color)));
         items = items + hearthlight_collection_row(row_get(row0, "name"), row_get(row0, "role"), chip);
         key = db_next_key(db, hearthlight_members_table(), key);
     }
@@ -366,9 +413,10 @@
 }
 
 @hearthlight_member_form() -> text {
+    color_select := kiln_html_tag("select", kiln_html_attr("name", "color"), hearthlight_selected_option("sage", "sage", "Sage") + hearthlight_selected_option("terracotta", "sage", "Terracotta") + hearthlight_selected_option("clay", "sage", "Clay") + hearthlight_selected_option("ocean", "sage", "Ocean") + hearthlight_selected_option("gold", "sage", "Gold"));
     form_body := kiln_html_field("Name", "name", kiln_html_input_text("name", ""));
     form_body = form_body + kiln_html_field("Role", "role", kiln_html_input_text("role", "Household member"));
-    form_body = form_body + kiln_html_field("Color Label", "color", kiln_html_input_text("color", "sage"));
+    form_body = form_body + kiln_html_field("Color Label", "color", color_select);
     form_body = form_body + kiln_html_button("Add Member");
     ^ kiln_html_tag("div", kiln_html_attr("class", "composer"), kiln_html_form("post", "/setup/members", form_body));
 }
