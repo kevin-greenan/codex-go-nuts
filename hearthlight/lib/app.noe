@@ -78,7 +78,7 @@
         ^ hearthlight_handle_chore_complete(db, kiln_dispatch_param(dispatch, "id"));
     }
     ? (kiln_dispatch_is(dispatch, "site-css")) {
-        ^ kiln_reply_file(200, "hearthlight/assets/site.css", kiln_asset_content_type("site.css"));
+        ^ kiln_reply_file(200, "assets/site.css", kiln_asset_content_type("site.css"));
     }
     ^ kiln_dispatch_fallback_text(dispatch);
 }
