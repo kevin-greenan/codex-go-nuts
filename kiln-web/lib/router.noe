@@ -235,6 +235,41 @@
     ^ kiln_reply_with_header(reply, "Set-Cookie", name + "=" + value + "; Path=/");
 }
 
+@kiln_flash_cookie_name() -> text {
+    ^ "kiln_flash";
+}
+
+@kiln_reply_with_flash(reply: KilnReply, level: text, message: text) -> KilnReply {
+    ^ kiln_reply_with_cookie(reply, kiln_flash_cookie_name(), level + "|" + message);
+}
+
+@kiln_reply_clear_flash(reply: KilnReply) -> KilnReply {
+    ^ kiln_reply_with_header(reply, "Set-Cookie", kiln_flash_cookie_name() + "=; Path=/");
+}
+
+@kiln_flash_value(request: KilnHttpRequest) -> text {
+    ^ kiln_http_cookie_value(request.headers, kiln_flash_cookie_name());
+}
+
+@kiln_flash_level(request: KilnHttpRequest) -> text {
+    flash := kiln_flash_value(request);
+    split_at := find(flash, "|");
+    ? (split_at < 0) {
+        ^ "";
+    }
+    ^ slice(flash, 0, split_at);
+}
+
+@kiln_flash_message(request: KilnHttpRequest) -> text {
+    flash := kiln_flash_value(request);
+    split_at := find(flash, "|");
+    ? (split_at < 0) {
+        ^ "";
+    }
+    value_start := split_at + 1;
+    ^ slice(flash, value_start, count(flash) - value_start);
+}
+
 @kiln_reply_response(reply: KilnReply) -> text {
     response := kiln_http_status_line(reply.status) + kiln_http_line_sep();
     response = response + "Content-Type: " + reply.content_type + kiln_http_line_sep();

@@ -7,13 +7,15 @@
         kiln_route("GET", "/assets/site.css", "site-css")
     ];
     replies :: list<KilnAppRouteReply> := [
-        kiln_app_route_reply("home", kiln_reply_html(200, kiln_html_page_with_head("Assets", kiln_html_stylesheet("/assets/site.css"), kiln_html_paragraph("home")))),
-        kiln_app_route_reply("site-css", kiln_reply_css(200, "body { color: red; }"))
+        kiln_app_route_reply("home", kiln_reply_html(200, kiln_html_page_with_head("Assets", kiln_html_stylesheet("/assets/site.css"), kiln_html_paragraph("home"))))
     ];
-    site := kiln_static_app(routes, replies, 4096);
+    assets :: list<KilnAppRouteAsset> := [
+        kiln_app_route_asset("site-css", "kiln-web/examples/assets/site.css", kiln_asset_content_type("site.css"))
+    ];
+    site := kiln_static_asset_app(routes, replies, assets, 4096);
 
-    home_dispatch := kiln_dispatch(site.app.routes, kiln_http_parse_request("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"));
-    home_response := kiln_reply_response(kiln_static_app_reply(site, home_dispatch));
+    home_dispatch := kiln_dispatch(site.site.app.routes, kiln_http_parse_request("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"));
+    home_response := kiln_reply_response(kiln_static_asset_app_reply(site, home_dispatch));
     ? (find(home_response, "Content-Type: text/html; charset=utf-8") < 0) {
         ! "home content-type mismatch";
         ^ 1;
@@ -23,13 +25,13 @@
         ^ 2;
     }
 
-    css_dispatch := kiln_dispatch(site.app.routes, kiln_http_parse_request("GET /assets/site.css HTTP/1.1\r\nHost: localhost\r\n\r\n"));
-    css_response := kiln_reply_response(kiln_static_app_reply(site, css_dispatch));
+    css_dispatch := kiln_dispatch(site.site.app.routes, kiln_http_parse_request("GET /assets/site.css HTTP/1.1\r\nHost: localhost\r\n\r\n"));
+    css_response := kiln_reply_response(kiln_static_asset_app_reply(site, css_dispatch));
     ? (find(css_response, "Content-Type: text/css; charset=utf-8") < 0) {
         ! "css content-type mismatch";
         ^ 3;
     }
-    ? (find(css_response, "body { color: red; }") < 0) {
+    ? (find(css_response, "background: #fffaf0;") < 0) {
         ! "css body mismatch";
         ^ 4;
     }

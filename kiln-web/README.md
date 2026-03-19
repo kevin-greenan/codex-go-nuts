@@ -57,30 +57,37 @@ This folder should grow into:
 
 ## Current Status
 
-The first Kiln Web milestone is now underway on `codex/kiln-web-foundation`.
+Kiln Web is now in strong MVP shape on `codex/kiln-web-foundation`.
 
 What is already working:
 
 1. inbound listener support is landed in both compiler paths
-2. a direct-compiled `hello` server runs locally and responds to `curl`
-3. a first Kiln HTTP library now parses request lines and serializes basic text responses
-4. a first router now matches method/path patterns, including `:param` segments, and distinguishes `404` from `405`
-5. a first HTML renderer now supports escaping, attributes, tags, lists, and whole-page responses
-6. request parsing now exposes query lookup, form-field lookup, and basic URL decoding for app handlers
-7. handler ergonomics now include dispatch param helpers and a shared `KilnReply` response model
-8. HTTP parsing now supports repeated-header access and cookie lookup helpers
-9. response helpers now support custom headers and `Set-Cookie` emission
-10. a small server wrapper now handles one-shot listen/accept/read/reply/close flow for example apps
-11. HTML rendering now includes reusable page shells and basic form helpers
-12. a first app wrapper now bundles routes, read limits, request dispatch, and reply finishing
-13. a static app layer now supports route-to-reply mapping for simple content-style apps
-14. static asset-style responses now have dedicated CSS/JS reply helpers and example page wiring
+2. a direct-compiled `hello` server runs locally and responds to HTTP requests
+3. the HTTP layer now covers request lines, headers, repeated headers, query params, cookies, urlencoded forms, repeated form values, and response serialization
+4. routing supports method/path matching, `404` versus `405`, and `:param` path segments
+5. reply helpers cover text, HTML, redirects, custom headers, cookies, flash-cookie conventions, CSS, and JavaScript
+6. the HTML layer covers escaping, tags, attributes, page shells, forms, and linked stylesheet helpers
+7. the app layer now covers one-shot server flow, route apps, static reply apps, and file-backed asset serving for local development
+8. direct-compiled localhost examples now cover text routes, HTML pages, forms, cookies, and CSS assets
 
-What is next:
+What still belongs to later expansion work:
 
-1. extend request parsing further for richer body handling
-2. grow handler ergonomics further with richer dynamic route conventions above the current app wrapper
-3. grow the UI layer with richer layout and form composition patterns
+1. richer body formats beyond urlencoded forms
+2. more dynamic app conventions above the current app wrapper
+3. deeper long-running server ergonomics beyond the current one-shot helpers
+
+## Verification
+
+Kiln Web should be treated as direct-compiler-first.
+
+Recommended verification flow:
+
+1. run grouped direct suites with [tools/run_direct_smokes.sh](/Users/kevin/Documents/Projects/AI/codex-go-nuts/kiln-web/tools/run_direct_smokes.sh)
+2. start with the `core` suite while iterating on framework code
+3. run the `apps` suite before merging app-layer changes
+4. use the PR acceptance set in [examples/README.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/kiln-web/examples/README.md) before merge
+
+For a milestone-by-milestone inventory, use [docs/status.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/kiln-web/docs/status.md).
 
 ## Architecture Overview
 
