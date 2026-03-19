@@ -478,6 +478,58 @@
     ^ row_get(schema0, "fields");
 }
 
+@db_catalog_display_name(entry: text) -> text {
+    ^ row_trim_padding(db_catalog_entry_name(entry));
+}
+
+@db_catalog_text(db: DB, separator: text) -> text {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    out := "";
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (db_catalog_entry_is_used(entry)) {
+            table_name := db_catalog_display_name(entry);
+            item := "";
+            item = row_append(item, "name", table_name);
+            item = row_append(item, "root", text_of(db_catalog_entry_root(entry)));
+            item = row_append(item, "slot_width", text_of(db_catalog_entry_slot_width(entry)));
+            item = row_append(item, "fields", db_table_fields(db, table_name));
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + item;
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@db_page_map_text(db: DB, separator: text) -> text {
+    total_pages := pager_total_pages(db.pager);
+    out := "";
+    page_id := 0;
+    ~ (page_id < total_pages) {
+        kind := "";
+        ? (page_id == 0) {
+            kind = pager_page_kind(pager_load_header(db.pager));
+        }
+        ? (page_id > 0) {
+            page := pager_read_page(db.pager, page_id);
+            kind = slice(page, 1, 1);
+        }
+        item := text_of(page_id) + ":" + kind;
+        ? (count(out) > 0) {
+            out = out + separator;
+        }
+        out = out + item;
+        page_id = page_id + 1;
+    }
+    ^ out;
+}
+
 @db_schema_field_count(fields_spec: text) -> i64 {
     ? (count(fields_spec) == 0) {
         ^ 0;
@@ -614,6 +666,99 @@
         ^ -2;
     }
     ^ db_put(db, table_name, key, payload);
+}
+
+@db_scan_keys_text(db: DB, table_name: text, separator: text) -> text {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ "";
+    }
+    ^ table_scan_keys_text(table, separator);
+}
+
+@db_delete_keys_text(db: DB, table_name: text, keys_text: text, separator: text) -> i64 {
+    remaining := keys_text;
+    deleted := 0;
+    ~ (count(remaining) > 0) {
+        split_at := find(remaining, separator);
+        item := remaining;
+        next_remaining := "";
+        ? (split_at >= 0) {
+            item = slice(remaining, 0, split_at);
+            next_remaining = slice(remaining, split_at + count(separator), count(remaining) - (split_at + count(separator)));
+        }
+        ? (count(item) > 0) {
+            key := i64_of(item);
+            removed := db_delete(db, table_name, key);
+            ? (removed >= 0) {
+                deleted = deleted + 1;
+            }
+        }
+        remaining = next_remaining;
+    }
+    ^ deleted;
+}
+
+@db_rebuild_index_from_field_page(db: DB, table: Table, table_name: text, index_name: text, field_name: text, page_id: i64) -> i64 {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        page := leaf_read_page(table.pager, page_id);
+        slot_count := leaf_slot_count(page);
+        slot_width := leaf_slot_width(page);
+        entries := leaf_entries_region(page);
+        built := 0;
+        slot_index := 0;
+        ~ (slot_index < slot_count) {
+            slot := leaf_slot_text_at(entries, slot_width, slot_index);
+            primary_key := leaf_slot_key(slot);
+            payload := leaf_slot_payload(slot);
+            secondary_text := row_get(payload, field_name);
+            ? (count(secondary_text) == 0 or not db_text_is_i64(secondary_text)) {
+                ^ -3;
+            }
+            inserted := db_index_insert_unique(db, table_name, index_name, i64_of(secondary_text), primary_key);
+            ? (inserted < 0) {
+                ^ inserted;
+            }
+            built = built + 1;
+            slot_index = slot_index + 1;
+        }
+        ^ built;
+    }
+    ? (page_kind == "I") {
+        page := pager_read_page(table.pager, page_id);
+        key_count := table_internal_key_count(page);
+        used_cells := table_internal_used_cells(page);
+        total := db_rebuild_index_from_field_page(db, table, table_name, index_name, field_name, table_internal_left_child(page));
+        ? (total < 0) {
+            ^ total;
+        }
+        cell_index := 0;
+        ~ (cell_index < key_count) {
+            cell := table_internal_cell_at(used_cells, cell_index);
+            built := db_rebuild_index_from_field_page(db, table, table_name, index_name, field_name, table_internal_cell_child(cell));
+            ? (built < 0) {
+                ^ built;
+            }
+            total = total + built;
+            cell_index = cell_index + 1;
+        }
+        ^ total;
+    }
+    ^ -5;
+}
+
+@db_rebuild_index_from_field(db: DB, table_name: text, index_name: text, field_name: text) -> i64 {
+    base_table := db_bind_table(db, table_name);
+    index_table_name := db_index_table_name(table_name, index_name);
+    index_table := db_bind_table(db, index_table_name);
+    ? (base_table.root_page < 0 or index_table.root_page < 0) {
+        ^ -1;
+    }
+    existing_keys := db_scan_keys_text(db, index_table_name, ",");
+    cleared := db_delete_keys_text(db, index_table_name, existing_keys, ",");
+    rebuilt := db_rebuild_index_from_field_page(db, base_table, table_name, index_name, field_name, base_table.root_page);
+    ^ rebuilt;
 }
 
 @db_scan_where_page(db: DB, table: Table, page_id: i64, field_name: text, expected_value: text, separator: text) -> text {

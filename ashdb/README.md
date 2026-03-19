@@ -88,13 +88,15 @@ What is already working on `codex/ashdb-foundation`:
 25. small structured query helpers for secondary-index lookup and field-equality scans
 26. validation reports with human-readable failure reasons
 27. primary-key range scans
-28. smoke-test coverage through the direct self-hosted compiler
+28. catalog and page-map inspection helpers
+29. secondary-index rebuild helpers from row data
+30. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
 1. stronger transactional semantics than whole-file rollback snapshots
 2. richer schema constraints beyond basic required-field and scalar-type checks
-3. broader corruption tooling and repair workflows
+3. broader corruption tooling and repair workflows beyond index rebuild
 4. broader query shapes beyond point lookup, equality filtering, and primary-key ranges
 5. any SQL surface
 
@@ -129,9 +131,9 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Integrity and Recovery Tooling
 
-1. repair-oriented helpers for recoverable states
+1. broader repair-oriented helpers for recoverable states
 2. corruption fixtures and negative tests
-3. debug/inspection tooling for catalog, pages, and tables
+3. deeper debug/inspection tooling for pages and trees
 4. clear recovery behavior documentation for interrupted writes
 
 ### Operational Safety
@@ -153,7 +155,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 The best path from here is:
 
-1. repair-oriented validation helpers
+1. broader repair-oriented validation helpers
 2. page-aware durability work
 3. richer schema constraints and defaults
 4. richer query helpers and cursor APIs
@@ -399,7 +401,7 @@ Exit criteria:
 Status:
 
 1. Not started.
-2. The API now has a first structured shape through `table_*` and `db_*` calls, including row helpers, schema lookup, typed row validation, index lookup, field-equality scans, validation reports, and primary-key range scans.
+2. The API now has a first structured shape through `table_*` and `db_*` calls, including row helpers, schema lookup, typed row validation, index lookup, field-equality scans, validation reports, primary-key range scans, inspection helpers, and index rebuild helpers.
 3. It should continue growing as structured Noema calls, not SQL.
 
 ## Testing Strategy

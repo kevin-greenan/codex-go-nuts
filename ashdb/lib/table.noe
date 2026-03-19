@@ -552,6 +552,56 @@
     ^ table_scan_page_key_range_text(table, table.root_page, min_key, max_key, separator);
 }
 
+@table_scan_leaf_keys_text(table: Table, page_id: i64, separator: text) -> text {
+    page := leaf_read_page(table.pager, page_id);
+    slot_count := leaf_slot_count(page);
+    slot_width := leaf_slot_width(page);
+    entries := leaf_entries_region(page);
+    out := "";
+    slot_index := 0;
+    ~ (slot_index < slot_count) {
+        slot := leaf_slot_text_at(entries, slot_width, slot_index);
+        key := leaf_slot_key(slot);
+        ? (count(out) > 0) {
+            out = out + separator;
+        }
+        out = out + text_of(key);
+        slot_index = slot_index + 1;
+    }
+    ^ out;
+}
+
+@table_scan_page_keys_text(table: Table, page_id: i64, separator: text) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ table_scan_leaf_keys_text(table, page_id, separator);
+    }
+    ? (page_kind == "I") {
+        page := pager_read_page(table.pager, page_id);
+        key_count := table_internal_key_count(page);
+        used_cells := table_internal_used_cells(page);
+        out := table_scan_page_keys_text(table, table_internal_left_child(page), separator);
+        cell_index := 0;
+        ~ (cell_index < key_count) {
+            cell := table_internal_cell_at(used_cells, cell_index);
+            child_text := table_scan_page_keys_text(table, table_internal_cell_child(cell), separator);
+            ? (count(child_text) > 0) {
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + child_text;
+            }
+            cell_index = cell_index + 1;
+        }
+        ^ out;
+    }
+    ^ "";
+}
+
+@table_scan_keys_text(table: Table, separator: text) -> text {
+    ^ table_scan_page_keys_text(table, table.root_page, separator);
+}
+
 @table_validate_leaf_page(table: Table, page_id: i64) -> bool {
     page := leaf_read_page(table.pager, page_id);
     slot_count := leaf_slot_count(page);
