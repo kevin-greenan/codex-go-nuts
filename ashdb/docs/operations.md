@@ -63,10 +63,11 @@ For controlled maintenance, the current recommended order is:
 2. reopen the restored copy in test or staging if possible
 3. run schema migration helpers
 4. run `db_validate_report(...)`
-5. rebuild or reclaim if needed:
-6. `db_repair_unique_indexes(...)`
-7. `db_reclaim_unreachable_pages(...)`
-8. `db_compact_database(...)` when long-lived fragmentation is a concern
+5. run `db_repair_database_report(...)` for a broad repair-and-validate pass when the goal is to normalize the file quickly
+6. or run targeted maintenance helpers:
+7. `db_repair_unique_indexes(...)`
+8. `db_reclaim_unreachable_pages(...)`
+9. `db_compact_database(...)` when long-lived fragmentation is a concern
 
 ## Recovery Inspection
 

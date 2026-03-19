@@ -59,79 +59,18 @@ This folder should grow into:
 
 ## Current Status
 
-What is already working on `codex/ashdb-foundation`:
+AshDB is now a solid MVP for this repository's needs: a local-first, single-writer, embedded Noema database with durable storage, schema-managed tables, indexes, recovery tooling, and direct self-hosted compiler verification.
 
-1. The Noema compiler now has the file and bytes support AshDB needs.
-2. The canonical self-hosted compiler in [codex-lang/selfhost/compiler.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler.noe) is now native-only for its direct path.
-3. AshDB has a working pager foundation with:
-4. fixed-size pages
-5. a file header page
-6. page allocation
-7. free-page reuse
-8. simple page-kind markers
-9. AshDB also has a first leaf-page storage layer with:
-10. keyed rows
-11. sorted inserts
-12. duplicate-key update or reject behavior
-13. leaf splitting
-14. AshDB also has a first internal-node and table layer with:
-15. root promotion from leaf to internal page
-16. internal-node child routing
-17. named-table catalog metadata
-18. a first secondary-index layer
-19. coarse rollback-journal transactions with recovery on reopen
-20. point lookup by key
-21. ordered scan across the current tree shape
-22. row-field helpers for record-like payloads
-23. schema metadata stored inside AshDB itself
-24. typed-schema checked row insert, update, and put helpers for `text`, `i64`, and `bool`
-25. small structured query helpers for secondary-index lookup and field-equality scans
-26. validation reports with human-readable failure reasons
-27. primary-key range scans
-28. catalog and page-map inspection helpers
-29. secondary-index rebuild helpers from row data
-30. cursor-style first/next key traversal primitives
-31. nullable-field and default-value support for row inserts
-32. schema-declared unique `i64` fields with automatic index maintenance
-33. page-aware rollback journal records instead of a single whole-file snapshot blob
-34. schema-declared `i64` foreign-key style reference checks and delete protection
-35. additive schema migration for new fields with backfill
-36. unique secondary-index range scans for base-row retrieval
-37. rowset-style query helpers that include primary keys in result rows
-38. backup and restore copy helpers for committed snapshots
-39. whole-database unique-index repair helper
-40. changed-page rollback journaling instead of journaling every page up front
-41. larger-tree stress coverage with rollback recovery checks
-42. structural corruption-detection coverage
-43. schema-aware index-assisted field equality lookups for unique `i64` fields
-44. commit ordering now flushes database pages before clearing the rollback journal
-45. stable cursor APIs for incremental table iteration
-46. table compaction/rebuild helpers with freelist recovery for long-lived trees
-47. tagged result-record conventions for lookup and cursor APIs
-48. `i64` field-range predicate scans and rowset helpers
-49. large-data stress coverage with 1,200-row insert/delete/compact/reopen validation
-50. WAL-style commit recovery layered on top of rollback journaling
-51. scalar coercion and canonicalization for `i64` and `bool` schema fields
-52. field-rename schema migration for non-indexed/non-reference columns
-53. table-layout and raw-page inspection helpers for debugging trees and page contents
-54. unreachable-page detection and reclaim helpers for broader repair workflows
-55. field-drop schema migration for non-indexed/non-reference columns
-56. compound equality predicate scans across multiple fields
-57. validation now flags unreachable pages as a corruption signal
-58. a recovery-state inspection helper for journal and WAL state
-59. written recovery and durability documentation in `ashdb/docs/recovery.md`
-60. text-prefix predicate scans for `text` fields
-61. an operations guide covering single-writer assumptions and backup/restore workflows
-62. a file-format specification in `ashdb/docs/file-format.md`
-63. negative recovery-boundary coverage for tampered WAL headers
-64. freelist validation for cycles, bad markers, and unlinked free pages
-65. freelist corruption coverage
-66. limited root collapse after deletes when a two-leaf root empties one side
-67. advisory single-writer file locking on the database handle
-68. partial row patch helpers for app-style field updates
-69. one-shot repair reporting that combines unique-index rebuild, unreachable-page reclaim, compaction, and validation
-70. heavier reopen-and-verify regression coverage across commit, rollback, delete, patch, and compaction flows
-71. smoke-test coverage through the direct self-hosted compiler
+The current MVP includes:
+
+1. file-backed pager, freelist, and B-tree style table/index storage
+2. schema metadata, typed rows, nullable fields, defaults, unique fields, and foreign-key style checks
+3. point lookups, scans, range scans, cursor traversal, patch-style updates, and tagged result helpers
+4. rollback journal plus WAL-assisted reopen recovery
+5. advisory single-writer locking, backup/restore, validation, inspection, repair, and compaction
+6. broader reopen-and-verify smoke coverage through the direct self-hosted compiler
+
+For the full implementation inventory from this branch, see [docs/status.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/ashdb/docs/status.md).
 
 What is not done yet:
 
@@ -167,6 +106,26 @@ The best path from here is:
 3. broader schema evolution and richer constraints
 4. broader predicate/query shapes
 5. deeper randomized failure coverage
+
+## Verification
+
+The canonical verification path is the pure direct compiler flow, not the older C path.
+
+Primary acceptance suites for this PR:
+
+1. `repair_database_smoke`
+2. `reopen_regress_smoke`
+3. `lock_smoke`
+4. `validate_smoke`
+
+You can run curated suites with [tools/run_direct_smokes.sh](/Users/kevin/Documents/Projects/AI/codex-go-nuts/ashdb/tools/run_direct_smokes.sh):
+
+1. `./ashdb/tools/run_direct_smokes.sh core`
+2. `./ashdb/tools/run_direct_smokes.sh recovery`
+3. `./ashdb/tools/run_direct_smokes.sh schema`
+4. `./ashdb/tools/run_direct_smokes.sh all`
+
+The smoke inventory is grouped in [examples/README.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/ashdb/examples/README.md).
 
 ## Architecture Overview
 
