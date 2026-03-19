@@ -1509,6 +1509,35 @@
     ^ fields_spec + "," + field_spec;
 }
 
+@db_schema_replace_field(fields_spec: text, old_field_name: text, new_field_spec: text) -> text {
+    count0 := db_schema_field_count(fields_spec);
+    out := "";
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        item := field_spec;
+        ? (field_name == old_field_name) {
+            item = new_field_spec;
+        }
+        ? (count(out) > 0) {
+            out = out + ",";
+        }
+        out = out + item;
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@db_schema_rename_field_spec(field_spec: text, new_field_name: text) -> text {
+    colon := find(field_spec, ":");
+    ? (colon < 0) {
+        ^ "";
+    }
+    tail := slice(field_spec, colon, count(field_spec) - colon);
+    ^ new_field_name + tail;
+}
+
 @db_create_schema_unique_indexes(db: DB, table_name: text, fields_spec: text) -> i64 {
     count0 := db_schema_field_count(fields_spec);
     created := 0;
@@ -1719,6 +1748,23 @@
         ^ row_put(payload, field_name, "null");
     }
     ^ "";
+}
+
+@db_rename_field_in_payload(payload: text, old_fields_spec: text, old_field_name: text, new_field_name: text) -> text {
+    count0 := db_schema_field_count(old_fields_spec);
+    out := "";
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(old_fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        value := row_get(payload, field_name);
+        ? (field_name == old_field_name) {
+            field_name = new_field_name;
+        }
+        out = row_append(out, field_name, value);
+        idx = idx + 1;
+    }
+    ^ out;
 }
 
 @db_create_indexes_for_new_field(db: DB, table_name: text, field_spec: text) -> i64 {
@@ -2061,6 +2107,51 @@
     rebuilt := db_rebuild_indexes_for_new_field(db, table_name, field_spec);
     ? (rebuilt < 0) {
         ^ rebuilt;
+    }
+    ^ updated_count;
+}
+
+@db_alter_table_rename_field(db: DB, table_name: text, old_field_name: text, new_field_name: text) -> i64 {
+    schema_payload := db_table_schema(db, table_name);
+    ? (count(schema_payload) == 0) {
+        ^ -1;
+    }
+    ? (count(old_field_name) == 0 or count(new_field_name) == 0) {
+        ^ -2;
+    }
+    old_fields := row_get(schema_payload, "fields");
+    old_field_spec := db_schema_field_spec(old_fields, old_field_name);
+    ? (count(old_field_spec) == 0) {
+        ^ -3;
+    }
+    ? (db_schema_has_field(old_fields, new_field_name)) {
+        ^ -4;
+    }
+    ? (db_schema_field_is_unique(old_field_spec) or count(db_schema_field_ref_table(old_field_spec)) > 0) {
+        ^ -5;
+    }
+    new_field_spec := db_schema_rename_field_spec(old_field_spec, new_field_name);
+    ? (count(new_field_spec) == 0) {
+        ^ -6;
+    }
+    new_fields := db_schema_replace_field(old_fields, old_field_name, new_field_spec);
+    updated_schema := row_put(schema_payload, "fields", new_fields);
+    schema_key := db_table_root(db, table_name);
+    schema_updated := db_update(db, db_schema_table_name(), schema_key, updated_schema);
+    ? (schema_updated < 0) {
+        ^ -7;
+    }
+    key := db_first_key(db, table_name);
+    updated_count := 0;
+    ~ (key >= 0) {
+        payload := db_get(db, table_name, key);
+        renamed_payload := db_rename_field_in_payload(payload, old_fields, old_field_name, new_field_name);
+        wrote := db_update_row(db, table_name, key, renamed_payload);
+        ? (wrote < 0) {
+            ^ wrote;
+        }
+        updated_count = updated_count + 1;
+        key = db_next_key(db, table_name, key);
     }
     ^ updated_count;
 }
