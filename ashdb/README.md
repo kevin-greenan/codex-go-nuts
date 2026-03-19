@@ -97,14 +97,15 @@ What is already working on `codex/ashdb-foundation`:
 34. schema-declared `i64` foreign-key style reference checks and delete protection
 35. additive schema migration for new fields with backfill
 36. unique secondary-index range scans for base-row retrieval
-37. smoke-test coverage through the direct self-hosted compiler
+37. rowset-style query helpers that include primary keys in result rows
+38. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
 1. stronger transactional semantics beyond page-aware rollback journaling
 2. richer schema constraints beyond scalar types, nullable fields, defaults, and unique `i64` fields
 3. broader corruption tooling and repair workflows beyond index rebuild
-4. broader query shapes beyond point lookup, equality filtering, primary-key ranges, unique secondary-index ranges, and key-by-key traversal
+4. broader query shapes beyond point lookup, equality filtering, primary-key ranges, unique secondary-index ranges, key-by-key traversal, and rowset-style result helpers
 5. any SQL surface
 
 ## Production Readiness Checklist
