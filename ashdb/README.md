@@ -96,6 +96,68 @@ What is not done yet:
 4. broader query shapes beyond point lookup and equality filtering
 5. any SQL surface
 
+## Production Readiness Checklist
+
+AshDB is no longer in the “blank engine” stage, but it is not production-ready yet. To call it production-ready for a serious local-first app, we still need all of the following:
+
+### Storage Engine
+
+1. page-aware journaling or WAL-style durability instead of whole-file snapshots
+2. durability boundaries that operate on changed pages rather than the entire file
+3. better delete/rebalance behavior for long-lived trees
+4. cursor-style scans for incremental iteration instead of whole-result text concatenation
+5. larger data-path testing with hundreds or thousands of rows per table
+
+### Schema and Data Model
+
+1. nullable-field support
+2. defaults at insert time
+3. richer scalar validation and coercion rules
+4. unique constraints beyond hand-managed secondary indexes
+5. foreign-key style relationship checks or a clearly documented phase-one omission
+6. schema evolution support for adding fields or changing table metadata safely
+
+### Query Surface
+
+1. richer predicate support beyond exact field equality
+2. range scans over primary and secondary keys
+3. index-assisted field lookups instead of manual index-table wiring in user code
+4. better result-shape APIs than joined text output
+5. explicit query/result conventions for failure cases
+
+### Integrity and Recovery Tooling
+
+1. detailed validation reports, not only boolean validity
+2. repair-oriented helpers for recoverable states
+3. corruption fixtures and negative tests
+4. debug/inspection tooling for catalog, pages, and tables
+5. clear recovery behavior documentation for interrupted writes
+
+### Operational Safety
+
+1. documented single-process writer guarantees or real file-locking support
+2. backup/export story for application snapshots
+3. import/restore story for development and migration
+4. file-format documentation stable enough to preserve compatibility intentionally
+
+### Testing and Confidence
+
+1. more reopen-and-verify integration tests
+2. randomized or generative mutation tests
+3. crash-recovery simulations around commit boundaries
+4. regression coverage for large trees and many splits
+5. performance sanity checks so obvious pathologies show up early
+
+### Current Priority Order
+
+The best path from here is:
+
+1. detailed validation and repair-oriented reporting
+2. page-aware durability work
+3. richer schema constraints and defaults
+4. richer query helpers and cursor APIs
+5. larger negative and recovery test coverage
+
 ## Architecture Overview
 
 AshDB should be built in layers:

@@ -15,11 +15,13 @@
     upd0 := db_update_with_index(db, "users", "email", 20, "bobby", 1002, 1004);
     del0 := db_delete_with_index(db, "users", "email", 10, 1001);
     valid0 := db_validate(db);
+    report0 := db_validate_report(db);
     synced0 := db_sync(db);
     closed0 := db_close(db);
 
     reopened := db_open(arg(1), 128);
     valid1 := db_validate(reopened);
+    report1 := db_validate_report(reopened);
     user0 := db_get(reopened, "users", 20);
     idx0 := db_index_get(reopened, "users", "email", 1004);
     idx1 := db_index_get(reopened, "users", "email", 1001);
@@ -35,6 +37,10 @@
     }
     ? (not valid0 or not valid1) {
         ^ 4;
+    }
+    ? (report0 != "ok" or report1 != "ok") {
+        ! "report=" + report0 + ":" + report1;
+        ^ 8;
     }
     ? (slice(user0, 0, 5) != "bobby") {
         ! "user=" + user0;

@@ -686,6 +686,39 @@
     ^ true;
 }
 
+@db_validate_report(db: DB) -> text {
+    page := pager_read_page(db.pager, db_catalog_page());
+    ? (slice(page, 1, 1) != "C") {
+        ^ "catalog page marker is invalid";
+    }
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    total_pages := pager_total_pages(db.pager);
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (not db_catalog_entry_is_used(entry)) {
+            ^ "catalog entry " + text_of(idx) + " is not marked used";
+        }
+        root_page := db_catalog_entry_root(entry);
+        slot_width := db_catalog_entry_slot_width(entry);
+        table_name := db_catalog_entry_name(entry);
+        ? (root_page <= 0 or root_page >= total_pages) {
+            ^ "catalog table " + table_name + " has invalid root page";
+        }
+        ? (slot_width <= 0) {
+            ^ "catalog table " + table_name + " has invalid slot width";
+        }
+        table := table_bind(db.pager, root_page, slot_width);
+        report := table_validate_report(table);
+        ? (report != "ok") {
+            ^ "table " + table_name + " invalid: " + report;
+        }
+        idx = idx + 1;
+    }
+    ^ "ok";
+}
+
 @db_sync(db: DB) -> bool {
     ^ pager_sync(db.pager);
 }
