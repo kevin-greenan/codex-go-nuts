@@ -227,12 +227,16 @@ cd codex-lang
 
 That direct backend currently targets `arm64-apple-darwin` and only supports a narrow scalar subset:
 
-- a single `@main() -> i64`
-- linear `let` / `assign` / `!` / `^`
-- local `i64` values
-- integer literals and `+` / `-` / `*`
+- multiple `@fn(...) -> i64` functions
+- up to 8 `i64` parameters per function/call
+- `let` / `assign` / `!` / `^`
+- `if` / `while`
+- local scalar `i64` / `bool` values
+- integer and bool literals
+- calls, comparisons, `not`, `and`, `or`
+- integer `+` / `-` / `*` / `/`
 
-It is a real no-C direct path for those programs, but it is not yet wide enough to compile `compiler_1.noe` itself.
+It is now wide enough for scalar multi-function programs like [series.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/series.noe) to compile and run without any generated C in the self-hosted path, but it is still not wide enough to compile [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) itself.
 
 ## Intent
 

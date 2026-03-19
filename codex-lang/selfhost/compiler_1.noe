@@ -2012,15 +2012,33 @@
     ^ -1;
 }
 
+@native_fn_label(name: text) -> text {
+    ? (name == "main") {
+        ^ "_noema_user_main";
+    }
+    ^ "_noema_" + name;
+}
+
+@native_count_stmt_slots(program: Program, stmt: Stmt) -> i64 {
+    ? (stmt.tag == "let") {
+        ^ 1;
+    }
+    ? (stmt.tag == "if") {
+        ^ native_count_slots(program, stmt.body) + native_count_slots(program, stmt.alt);
+    }
+    ? (stmt.tag == "while") {
+        ^ native_count_slots(program, stmt.body);
+    }
+    ^ 0;
+}
+
 @native_count_slots(program: Program, items: list<i64>) -> i64 {
     count_slots := 0;
     idx := 0;
     stmts := program.stmts;
     ~ (idx < count(items)) {
         stmt := stmts[items[idx]];
-        ? (stmt.tag == "let") {
-            count_slots = count_slots + 1;
-        }
+        count_slots = count_slots + native_count_stmt_slots(program, stmt);
         idx = idx + 1;
     }
     ^ count_slots;
@@ -2034,17 +2052,71 @@
     ^ abs < 65536;
 }
 
+@native_arg_reg(idx: i64) -> text {
+    ? (idx == 0) {
+        ^ "x0";
+    }
+    ? (idx == 1) {
+        ^ "x1";
+    }
+    ? (idx == 2) {
+        ^ "x2";
+    }
+    ? (idx == 3) {
+        ^ "x3";
+    }
+    ? (idx == 4) {
+        ^ "x4";
+    }
+    ? (idx == 5) {
+        ^ "x5";
+    }
+    ? (idx == 6) {
+        ^ "x6";
+    }
+    ^ "x7";
+}
+
 @native_supported_expr(program: Program, fn: Function, locals: list<Binding>, index: i64) -> bool {
     exprs := program.exprs;
     expr := exprs[index];
     ? (expr.tag == "int") {
         ^ native_small_imm(expr.value);
     }
+    ? (expr.tag == "bool") {
+        ^ true;
+    }
     ? (expr.tag == "name") {
         ^ native_slot_of(locals, expr.name) >= 0;
     }
+    ? (expr.tag == "unary") {
+        ? (expr.op != "not") {
+            ^ false;
+        }
+        ^ infer_expr_type(program, fn, locals, expr.left) == "bool" and native_supported_expr(program, fn, locals, expr.left);
+    }
+    ? (expr.tag == "call") {
+        called := find_function(program, expr.name);
+        ? (called.return_ty != "i64" or count(called.params) != count(expr.args)) {
+            ^ false;
+        }
+        ? (count(expr.args) > 8) {
+            ^ false;
+        }
+        idx := 0;
+        params := called.params;
+        args := expr.args;
+        ~ (idx < count(args)) {
+            param := params[idx];
+            ? (param.ty != "i64" or not native_supported_expr(program, fn, locals, args[idx])) {
+                ^ false;
+            }
+            idx = idx + 1;
+        }
+        ^ true;
+    }
     ? (expr.tag == "bin") {
-        ? (expr.op != "+" and expr.op != "-" and expr.op != "*") {
+        ? (expr.op != "+" and expr.op != "-" and expr.op != "*" and expr.op != "/" and expr.op != "<" and expr.op != "<=" and expr.op != ">" and expr.op != ">=" and expr.op != "==" and expr.op != "!=" and expr.op != "and" and expr.op != "or") {
             ^ false;
         }
         ^ native_supported_expr(program, fn, locals, expr.left) and native_supported_expr(program, fn, locals, expr.right);
@@ -2065,7 +2137,36 @@
     ? (stmt.tag == "ret") {
         ^ infer_expr_type(program, fn, locals, stmt.expr) == "i64" and native_supported_expr(program, fn, locals, stmt.expr);
     }
+    ? (stmt.tag == "if") {
+        ? (infer_expr_type(program, fn, locals, stmt.expr) != "bool" or not native_supported_expr(program, fn, locals, stmt.expr)) {
+            ^ false;
+        }
+        body_ok := native_supported_items(program, fn, locals, stmt.body);
+        alt_ok := native_supported_items(program, fn, locals, stmt.alt);
+        ^ body_ok and alt_ok;
+    }
+    ? (stmt.tag == "while") {
+        ? (infer_expr_type(program, fn, locals, stmt.expr) != "bool" or not native_supported_expr(program, fn, locals, stmt.expr)) {
+            ^ false;
+        }
+        ^ native_supported_items(program, fn, locals, stmt.body);
+    }
     ^ false;
+}
+
+@native_supported_items(program: Program, fn: Function, locals: list<Binding>, items: list<i64>) -> bool {
+    idx := 0;
+    stmts := program.stmts;
+    ok := true;
+    ~ (idx < count(items)) {
+        stmt := stmts[items[idx]];
+        ? (not native_supported_stmt(program, fn, locals, stmt)) {
+            ok = false;
+        }
+        locals = extend_locals(program, fn, locals, stmt);
+        idx = idx + 1;
+    }
+    ^ ok;
 }
 
 @native_expr(program: Program, fn: Function, locals: list<Binding>, index: i64) -> text {
@@ -2078,9 +2179,44 @@
         abs := 0 - expr.value;
         ^ "    mov x0, #" + text_of(abs) + "\n    neg x0, x0\n";
     }
+    ? (expr.tag == "bool") {
+        ? (expr.value == 0) {
+            ^ "    mov x0, #0\n";
+        }
+        ^ "    mov x0, #1\n";
+    }
     ? (expr.tag == "name") {
         slot := native_slot_of(locals, expr.name);
         ^ "    ldr x0, [x29, #" + text_of(native_slot_offset(slot)) + "]\n";
+    }
+    ? (expr.tag == "unary") {
+        out := native_expr(program, fn, locals, expr.left);
+        ? (expr.op == "not") {
+            out = out + "    cmp x0, #0\n";
+            out = out + "    cset x0, eq\n";
+        }
+        ^ out;
+    }
+    ? (expr.tag == "call") {
+        args := expr.args;
+        out := "";
+        idx := count(args) - 1;
+        ~ (idx >= 0) {
+            out = out + native_expr(program, fn, locals, args[idx]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            idx = idx - 1;
+        }
+        idx = 0;
+        ~ (idx < count(args)) {
+            out = out + "    ldr " + native_arg_reg(idx) + ", [sp, #" + text_of(idx * 16) + "]\n";
+            idx = idx + 1;
+        }
+        ? (count(args) > 0) {
+            out = out + "    add sp, sp, #" + text_of(count(args) * 16) + "\n";
+        }
+        out = out + "    bl " + native_fn_label(expr.name) + "\n";
+        ^ out;
     }
     ? (expr.tag == "bin") {
         out := native_expr(program, fn, locals, expr.left);
@@ -2097,7 +2233,61 @@
                 out = out + "    sub x0, x1, x0\n";
             }
             | {
-                out = out + "    mul x0, x1, x0\n";
+                ? (expr.op == "*") {
+                    out = out + "    mul x0, x1, x0\n";
+                }
+                | {
+                    ? (expr.op == "/") {
+                        out = out + "    sdiv x0, x1, x0\n";
+                    }
+                    | {
+                        ? (expr.op == "and") {
+                            out = out + "    cmp x1, #0\n";
+                            out = out + "    cset x1, ne\n";
+                            out = out + "    cmp x0, #0\n";
+                            out = out + "    cset x0, ne\n";
+                            out = out + "    and x0, x1, x0\n";
+                        }
+                        | {
+                            ? (expr.op == "or") {
+                                out = out + "    cmp x1, #0\n";
+                                out = out + "    cset x1, ne\n";
+                                out = out + "    cmp x0, #0\n";
+                                out = out + "    cset x0, ne\n";
+                                out = out + "    orr x0, x1, x0\n";
+                            }
+                            | {
+                                out = out + "    cmp x1, x0\n";
+                                ? (expr.op == "<") {
+                                    out = out + "    cset x0, lt\n";
+                                }
+                                | {
+                                    ? (expr.op == "<=") {
+                                        out = out + "    cset x0, le\n";
+                                    }
+                                    | {
+                                        ? (expr.op == ">") {
+                                            out = out + "    cset x0, gt\n";
+                                        }
+                                        | {
+                                            ? (expr.op == ">=") {
+                                                out = out + "    cset x0, ge\n";
+                                            }
+                                            | {
+                                                ? (expr.op == "==") {
+                                                    out = out + "    cset x0, eq\n";
+                                                }
+                                                | {
+                                                    out = out + "    cset x0, ne\n";
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         ^ out;
@@ -2105,37 +2295,76 @@
     ^ "";
 }
 
+@native_emit_stmt(program: Program, fn: Function, locals: list<Binding>, stmt_id: i64, ret_label: text) -> text {
+    stmts := program.stmts;
+    stmt := stmts[stmt_id];
+    out := "";
+    ? (stmt.tag == "let") {
+        slot := count(locals);
+        out = out + native_expr(program, fn, locals, stmt.expr);
+        out = out + "    str x0, [x29, #" + text_of(native_slot_offset(slot)) + "]\n";
+        ^ out;
+    }
+    ? (stmt.tag == "assign") {
+        slot := native_slot_of(locals, stmt.name);
+        out = out + native_expr(program, fn, locals, stmt.expr);
+        out = out + "    str x0, [x29, #" + text_of(native_slot_offset(slot)) + "]\n";
+        ^ out;
+    }
+    ? (stmt.tag == "emit") {
+        out = out + native_expr(program, fn, locals, stmt.expr);
+        out = out + "    bl _noema_emit_i64_native\n";
+        ^ out;
+    }
+    ? (stmt.tag == "ret") {
+        out = out + native_expr(program, fn, locals, stmt.expr);
+        out = out + "    b " + ret_label + "\n";
+        ^ out;
+    }
+    ? (stmt.tag == "if") {
+        else_label := "L_if_else_" + text_of(stmt_id);
+        end_label := "L_if_end_" + text_of(stmt_id);
+        out = out + native_expr(program, fn, locals, stmt.expr);
+        out = out + "    cmp x0, #0\n";
+        ? (count(stmt.alt) > 0) {
+            out = out + "    b.eq " + else_label + "\n";
+            out = out + native_block(program, fn, locals, stmt.body, ret_label);
+            out = out + "    b " + end_label + "\n";
+            out = out + else_label + ":\n";
+            out = out + native_block(program, fn, locals, stmt.alt, ret_label);
+            out = out + end_label + ":\n";
+        }
+        | {
+            out = out + "    b.eq " + end_label + "\n";
+            out = out + native_block(program, fn, locals, stmt.body, ret_label);
+            out = out + end_label + ":\n";
+        }
+        ^ out;
+    }
+    ? (stmt.tag == "while") {
+        start_label := "L_while_start_" + text_of(stmt_id);
+        end_label := "L_while_end_" + text_of(stmt_id);
+        out = out + start_label + ":\n";
+        out = out + native_expr(program, fn, locals, stmt.expr);
+        out = out + "    cmp x0, #0\n";
+        out = out + "    b.eq " + end_label + "\n";
+        out = out + native_block(program, fn, locals, stmt.body, ret_label);
+        out = out + "    b " + start_label + "\n";
+        out = out + end_label + ":\n";
+        ^ out;
+    }
+    ^ out;
+}
+
 @native_block(program: Program, fn: Function, locals: list<Binding>, items: list<i64>, ret_label: text) -> text {
     out := "";
     idx := 0;
-    stmts := program.stmts;
     ~ (idx < count(items)) {
-        stmt := stmts[items[idx]];
-        ? (stmt.tag == "let") {
-            slot := count(locals);
-            out = out + native_expr(program, fn, locals, stmt.expr);
-            out = out + "    str x0, [x29, #" + text_of(native_slot_offset(slot)) + "]\n";
-            locals = append(locals, binding(stmt.name, "i64"));
-        }
-        | {
-            ? (stmt.tag == "assign") {
-                slot := native_slot_of(locals, stmt.name);
-                out = out + native_expr(program, fn, locals, stmt.expr);
-                out = out + "    str x0, [x29, #" + text_of(native_slot_offset(slot)) + "]\n";
-            }
-            | {
-                ? (stmt.tag == "emit") {
-                    out = out + native_expr(program, fn, locals, stmt.expr);
-                    out = out + "    bl _noema_emit_i64_native\n";
-                }
-                | {
-                    ? (stmt.tag == "ret") {
-                        out = out + native_expr(program, fn, locals, stmt.expr);
-                        out = out + "    b " + ret_label + "\n";
-                    }
-                }
-            }
-        }
+        stmt_id := items[idx];
+        stmts := program.stmts;
+        stmt := stmts[stmt_id];
+        out = out + native_emit_stmt(program, fn, locals, stmt_id, ret_label);
+        locals = extend_locals(program, fn, locals, stmt);
         idx = idx + 1;
     }
     ^ out;
@@ -2146,36 +2375,10 @@
         ^ "unsupported: native-arm64 direct currently does not support shapes";
     }
     funcs := program.funcs;
-    ? (count(funcs) != 1) {
-        ^ "unsupported: native-arm64 direct currently requires a single main function";
-    }
-    fn := funcs[0];
-    ? (fn.name != "main" or count(fn.params) != 0 or fn.return_ty != "i64") {
-        ^ "unsupported: native-arm64 direct currently supports only @main() -> i64";
-    }
-    locals := empty_bindings();
     idx := 0;
-    stmts := program.stmts;
-    body := fn.body;
-    ok := true;
-    ~ (idx < count(body)) {
-        stmt := stmts[body[idx]];
-        ? (not native_supported_stmt(program, fn, locals, stmt)) {
-            ok = false;
-        }
-        locals = extend_locals(program, fn, locals, stmt);
-        idx = idx + 1;
-    }
-    ? (not ok) {
-        ^ "unsupported: native-arm64 direct only supports linear i64 statements";
-    }
-
-    slots := native_count_slots(program, fn.body);
-    frame := native_align16(slots * 8);
-    ret_label := "Lnoema_ret";
     out := ".text\n";
     out = out + ".align 2\n";
-    out = out + ".globl _main\n";
+    out = out + ".globl _main\n\n";
     out = out + ".extern _write\n\n";
     out = out + "_noema_emit_i64_native:\n";
     out = out + "    stp x29, x30, [sp, #-16]!\n";
@@ -2226,18 +2429,55 @@
     out = out + "    add sp, sp, #80\n";
     out = out + "    ldp x29, x30, [sp], #16\n";
     out = out + "    ret\n\n";
+    ~ (idx < count(funcs)) {
+        fn := funcs[idx];
+        ? (fn.return_ty != "i64") {
+            ^ "unsupported: native-arm64 direct currently supports only i64 functions";
+        }
+        params := fn.params;
+        param_idx := 0;
+        ~ (param_idx < count(params)) {
+            param := params[param_idx];
+            ? (param.ty != "i64") {
+                ^ "unsupported: native-arm64 direct currently supports only i64 parameters";
+            }
+            param_idx = param_idx + 1;
+        }
+        ? (count(params) > 8) {
+            ^ "unsupported: native-arm64 direct currently supports at most eight parameters";
+        }
+        ? (not native_supported_items(program, fn, params, fn.body)) {
+            ^ "unsupported: native-arm64 direct currently supports only scalar i64 control flow";
+        }
+        slot_count := count(params) + native_count_slots(program, fn.body);
+        frame := native_align16(slot_count * 8);
+        ret_label := "L_ret_" + fn.name;
+        label := native_fn_label(fn.name);
+        out = out + label + ":\n";
+        out = out + "    stp x29, x30, [sp, #-16]!\n";
+        out = out + "    mov x29, sp\n";
+        ? (frame > 0) {
+            out = out + "    sub sp, sp, #" + text_of(frame) + "\n";
+        }
+        param_idx = 0;
+        ~ (param_idx < count(params)) {
+            out = out + "    str " + native_arg_reg(param_idx) + ", [x29, #" + text_of(native_slot_offset(param_idx)) + "]\n";
+            param_idx = param_idx + 1;
+        }
+        out = out + native_block(program, fn, params, fn.body, ret_label);
+        out = out + "    mov x0, #0\n";
+        out = out + ret_label + ":\n";
+        ? (frame > 0) {
+            out = out + "    add sp, sp, #" + text_of(frame) + "\n";
+        }
+        out = out + "    ldp x29, x30, [sp], #16\n";
+        out = out + "    ret\n\n";
+        idx = idx + 1;
+    }
     out = out + "_main:\n";
     out = out + "    stp x29, x30, [sp, #-16]!\n";
     out = out + "    mov x29, sp\n";
-    ? (frame > 0) {
-        out = out + "    sub sp, sp, #" + text_of(frame) + "\n";
-    }
-    out = out + native_block(program, fn, empty_bindings(), fn.body, ret_label);
-    out = out + "    mov x0, #0\n";
-    out = out + ret_label + ":\n";
-    ? (frame > 0) {
-        out = out + "    add sp, sp, #" + text_of(frame) + "\n";
-    }
+    out = out + "    bl " + native_fn_label("main") + "\n";
     out = out + "    ldp x29, x30, [sp], #16\n";
     out = out + "    ret\n";
     ^ out;

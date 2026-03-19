@@ -211,6 +211,8 @@ Current accepted subset:
 
 This is still intentionally narrow relative to full Noema, but it is now large enough to compile `examples/series.noe` through the Noema-written compiler itself. The long-term plan is to keep widening this compiler until the Rust compiler is just a bootstrap artifact.
 
+The self-hosted compiler also has an experimental pure-direct `native-arm64` backend for `arm64-apple-darwin`. Its direct subset currently covers scalar multi-function programs with up to 8 `i64` parameters, branching, loops, calls, comparisons, bool values, and basic integer arithmetic. Aggregate values, `text`, `list<T>`, and the compiler-shaped runtime still remain outside that pure-direct slice for now.
+
 ## Networking
 
 Noema has a first-pass low-level TCP client layer.
