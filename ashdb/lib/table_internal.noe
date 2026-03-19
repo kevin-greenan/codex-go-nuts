@@ -1,0 +1,144 @@
+& "pager.noe";
+
+@internal_count_width() -> i64 {
+    ^ 8;
+}
+
+@internal_child_width() -> i64 {
+    ^ 8;
+}
+
+@internal_key_width() -> i64 {
+    ^ 8;
+}
+
+@internal_cell_width() -> i64 {
+    ^ internal_key_width() + internal_child_width();
+}
+
+@internal_header_size() -> i64 {
+    ^ 1 + internal_count_width() + internal_child_width();
+}
+
+@internal_capacity(page_size: i64) -> i64 {
+    ^ (page_size - 1 - internal_header_size()) / internal_cell_width();
+}
+
+@internal_page_text(page_size: i64, key_count: i64, left_child: i64, cells: text) -> text {
+    body := "I" + pad_left_i64(key_count, internal_count_width()) + pad_left_i64(left_child, internal_child_width()) + cells;
+    max_body := page_size - 1;
+    ^ pad_right(body, max_body, ".");
+}
+
+@internal_empty_cell() -> text {
+    ^ repeat_unit(".", internal_cell_width());
+}
+
+@internal_build_cells(cell_count: i64, used_cells: text) -> text {
+    ^ used_cells + repeat_unit(internal_empty_cell(), cell_count);
+}
+
+@internal_key_count(page: text) -> i64 {
+    ^ i64_of(slice(page, 2, internal_count_width()));
+}
+
+@internal_left_child(page: text) -> i64 {
+    ^ i64_of(slice(page, 2 + internal_count_width(), internal_child_width()));
+}
+
+@internal_cells_region(page: text) -> text {
+    start := 1 + internal_header_size();
+    ^ slice(page, start, count(page) - start);
+}
+
+@internal_used_cells(page: text) -> text {
+    key_count := internal_key_count(page);
+    cells := internal_cells_region(page);
+    ^ slice(cells, 0, key_count * internal_cell_width());
+}
+
+@internal_cell_text(key: i64, right_child: i64) -> text {
+    ^ pad_left_i64(key, internal_key_width()) + pad_left_i64(right_child, internal_child_width());
+}
+
+@internal_cell_at(cells: text, cell_index: i64) -> text {
+    ^ slice(cells, cell_index * internal_cell_width(), internal_cell_width());
+}
+
+@internal_cell_key(cell: text) -> i64 {
+    ^ i64_of(slice(cell, 0, internal_key_width()));
+}
+
+@internal_cell_child(cell: text) -> i64 {
+    ^ i64_of(slice(cell, internal_key_width(), internal_child_width()));
+}
+
+@internal_used_insert_cell(used_cells: text, cell_count: i64, cell_index: i64, cell_text: text) -> text {
+    prefix := slice(used_cells, 0, cell_index * internal_cell_width());
+    moved := slice(used_cells, cell_index * internal_cell_width(), (cell_count - cell_index) * internal_cell_width());
+    ^ prefix + cell_text + moved;
+}
+
+@internal_find_insert_index(pager: Pager, page_id: i64, key: i64) -> i64 {
+    page := pager_read_page(pager, page_id);
+    key_count := internal_key_count(page);
+    cells := internal_used_cells(page);
+    cell_index := 0;
+    ~ (cell_index < key_count) {
+        cell := internal_cell_at(cells, cell_index);
+        ? (internal_cell_key(cell) >= key) {
+            ^ cell_index;
+        }
+        cell_index = cell_index + 1;
+    }
+    ^ key_count;
+}
+
+@internal_init_page(pager: Pager, page_id: i64, left_child: i64) -> i64 {
+    capacity := internal_capacity(pager.page_size);
+    cells := internal_build_cells(capacity, "");
+    ^ pager_write_page(pager, page_id, internal_page_text(pager.page_size, 0, left_child, cells));
+}
+
+@internal_insert_separator(pager: Pager, page_id: i64, key: i64, right_child: i64) -> i64 {
+    page := pager_read_page(pager, page_id);
+    key_count := internal_key_count(page);
+    capacity := internal_capacity(pager.page_size);
+    left_child := internal_left_child(page);
+    used_cells := internal_used_cells(page);
+    insert_index := internal_find_insert_index(pager, page_id, key);
+    ? (insert_index < key_count) {
+        existing := internal_cell_at(used_cells, insert_index);
+        ? (internal_cell_key(existing) == key) {
+            ^ -2;
+        }
+    }
+    ? (key_count >= capacity) {
+        ^ -1;
+    }
+    updated_used := internal_used_insert_cell(used_cells, key_count, insert_index, internal_cell_text(key, right_child));
+    updated_cells := internal_build_cells(capacity - (key_count + 1), updated_used);
+    wrote := pager_write_page(pager, page_id, internal_page_text(pager.page_size, key_count + 1, left_child, updated_cells));
+    ? (wrote == pager.page_size) {
+        ^ insert_index;
+    }
+    ^ -1;
+}
+
+@internal_child_for_key(pager: Pager, page_id: i64, key: i64) -> i64 {
+    page := pager_read_page(pager, page_id);
+    key_count := internal_key_count(page);
+    left_child := internal_left_child(page);
+    used_cells := internal_used_cells(page);
+    cell_index := 0;
+    child := left_child;
+    ~ (cell_index < key_count) {
+        cell := internal_cell_at(used_cells, cell_index);
+        ? (key < internal_cell_key(cell)) {
+            ^ child;
+        }
+        child = internal_cell_child(cell);
+        cell_index = cell_index + 1;
+    }
+    ^ child;
+}

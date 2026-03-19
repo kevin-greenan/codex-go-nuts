@@ -57,6 +57,36 @@ This folder should grow into:
 4. `ashdb/tests/` for integration fixtures and recovery cases.
 5. `ashdb/tools/` for inspection or debug utilities.
 
+## Current Status
+
+What is already working on `codex/ashdb-foundation`:
+
+1. The Noema compiler now has the file and bytes support AshDB needs.
+2. The canonical self-hosted compiler in [codex-lang/selfhost/compiler.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler.noe) is now native-only for its direct path.
+3. AshDB has a working pager foundation with:
+4. fixed-size pages
+5. a file header page
+6. page allocation
+7. free-page reuse
+8. simple page-kind markers
+9. AshDB also has a first leaf-page storage layer with:
+10. keyed rows
+11. row lookup by key
+12. smoke-test coverage through the direct self-hosted compiler
+
+What is not done yet:
+
+1. sorted leaf insertion
+2. duplicate-key update or reject semantics
+3. leaf splitting
+4. internal branch pages
+5. root-page management for growing trees
+6. a real table abstraction
+7. schema/catalog metadata
+8. transactions and crash recovery
+9. secondary indexes
+10. any SQL surface
+
 ## Architecture Overview
 
 AshDB should be built in layers:
@@ -207,6 +237,13 @@ Exit criteria:
 1. A Noema example can create a file, write bytes at a chosen offset, read them back, and verify the result.
 2. Bootstrap checks still pass.
 
+Status:
+
+1. Complete enough for AshDB feature work.
+2. `file` support is implemented.
+3. `bytes` support is implemented.
+4. AshDB examples compile and run with the self-hosted direct compiler.
+
 ### Phase 1: Pager and File Format
 
 Build the persistent storage skeleton:
@@ -221,6 +258,12 @@ Exit criteria:
 
 1. A Noema program can create a database file, allocate pages, reopen it, and recover page metadata correctly.
 
+Status:
+
+1. In progress, mostly complete for the first storage slice.
+2. Header page, allocation, free-page reuse, and page-kind markers are implemented.
+3. We still need the file format to settle around table roots, page headers, and invariants that later B-tree code can rely on.
+
 ### Phase 2: Table Storage
 
 Implement a B-tree table structure:
@@ -228,12 +271,25 @@ Implement a B-tree table structure:
 1. leaf pages
 2. internal pages
 3. row encoding
-4. insertion
+4. sorted insertion
 5. point lookup by primary key
+6. page split mechanics
+7. root promotion when a tree grows
 
 Exit criteria:
 
 1. A test database can insert, persist, reopen, and read hundreds of rows correctly.
+
+Status:
+
+1. In progress.
+2. The current branch has unsorted keyed leaf storage and point lookup.
+3. The next concrete milestones are:
+4. sorted leaf insert
+5. duplicate-key semantics
+6. leaf split output
+7. first internal node page format
+8. root-page traversal
 
 ### Phase 3: Transactions and Recovery
 
@@ -247,6 +303,11 @@ Add durability semantics:
 Exit criteria:
 
 1. Simulated interrupted writes recover to a valid prior state.
+
+Status:
+
+1. Not started.
+2. This should wait until the single-tree storage path is stable.
 
 ### Phase 4: Secondary Indexes and Query API
 
@@ -262,6 +323,11 @@ Exit criteria:
 
 1. Hearthlight-style data models can be expressed and queried through the AshDB API.
 
+Status:
+
+1. Not started.
+2. The API should begin as structured Noema calls, not SQL.
+
 ## Testing Strategy
 
 AshDB needs more than happy-path unit tests.
@@ -276,14 +342,20 @@ We should maintain:
 
 ## First Implementation Targets
 
-The first concrete deliverables to build after this plan are:
+Completed:
 
 1. a `bytes`-oriented runtime smoke test
 2. a random-access file I/O smoke test
 3. a page allocator prototype
-4. a page dump inspector tool
+4. keyed leaf-page smoke tests
 
-These are the smallest milestones that prove the compiler and runtime can support a real embedded database.
+Next:
+
+1. sorted keyed leaf insertion
+2. duplicate-key handling
+3. leaf split mechanics
+4. internal node pages
+5. a first `table_*` API
 
 ## Definition of Success
 
