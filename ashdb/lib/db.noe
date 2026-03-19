@@ -129,6 +129,47 @@
     ^ db_wal_committed(header);
 }
 
+@db_recovery_state_text(db: DB) -> text {
+    journal := file_open(db_journal_path(db));
+    journal_size := file_size(journal);
+    journal_header := "";
+    journal_active := false;
+    journal_entries := 0;
+    ? (journal_size >= db_journal_header_size()) {
+        journal_header = file_read(journal, 0, db_journal_header_size());
+        journal_active = db_journal_active(journal_header);
+        journal_entries = db_journal_entry_count(journal_header);
+    }
+    closed_journal := file_close(journal);
+
+    wal := file_open(db_wal_path(db));
+    wal_size := file_size(wal);
+    wal_header := "";
+    wal_committed := false;
+    wal_entries := 0;
+    ? (wal_size >= db_wal_header_size()) {
+        wal_header = file_read(wal, 0, db_wal_header_size());
+        wal_committed = db_wal_committed(wal_header);
+        wal_entries = db_wal_entry_count(wal_header);
+    }
+    closed_wal := file_close(wal);
+
+    out := "";
+    out = row_append(out, "journal_active", text_of(journal_active));
+    out = row_append(out, "journal_entries", text_of(journal_entries));
+    out = row_append(out, "wal_committed", text_of(wal_committed));
+    out = row_append(out, "wal_entries", text_of(wal_entries));
+    out = row_append(out, "page_count", text_of(pager_total_pages(db.pager)));
+    out = row_append(out, "free_head", text_of(pager_free_head(db.pager)));
+    ? (not closed_journal or not closed_wal) {
+        out = row_put(out, "ok", "false");
+        out = row_put(out, "error", "recovery-state-close-failed");
+        ^ out;
+    }
+    out = row_append(out, "ok", "true");
+    ^ out;
+}
+
 @db_apply_wal_pages(db: DB, wal: file, entry_count: i64) -> bool {
     idx := 0;
     ~ (idx < entry_count) {

@@ -118,7 +118,9 @@ What is already working on `codex/ashdb-foundation`:
 55. field-drop schema migration for non-indexed/non-reference columns
 56. compound equality predicate scans across multiple fields
 57. validation now flags unreachable pages as a corruption signal
-58. smoke-test coverage through the direct self-hosted compiler
+58. a recovery-state inspection helper for journal and WAL state
+59. written recovery and durability documentation in `ashdb/docs/recovery.md`
+60. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -149,7 +151,6 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 1. corruption fixtures and negative tests
 2. broader repair-oriented helpers beyond index rebuild and unreachable-page reclaim
-3. clear recovery behavior documentation for interrupted writes
 
 ### Operational Safety
 
