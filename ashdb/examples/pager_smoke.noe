@@ -6,32 +6,51 @@
         ^ 1;
     }
 
-    pager := pager_open(arg(1), 8);
-    wrote0 := pager_write_page(pager, 0, "page0000");
-    wrote1 := pager_write_page(pager, 1, "page0001");
+    pager := pager_open(arg(1), 32);
+    initial_pages := pager_total_pages(pager);
+    first_page := pager_alloc_page(pager);
+    second_page := pager_alloc_page(pager);
+    wrote0 := pager_write_page(pager, first_page, "page0000");
+    wrote1 := pager_write_page(pager, second_page, "page0001");
     synced := pager_sync(pager);
     size := pager_file_size(pager);
-    first := pager_read_page(pager, 0);
-    second := pager_read_page(pager, 1);
+    total_pages := pager_total_pages(pager);
+    header := pager_load_header(pager);
+    first := pager_read_page(pager, first_page);
+    second := pager_read_page(pager, second_page);
     closed := pager_close(pager);
 
-    ? (wrote0 != 8 or wrote1 != 8) {
+    ? (initial_pages != 1) {
         ^ 2;
     }
-    ? (not synced or not closed) {
+    ? (first_page != 1 or second_page != 2) {
         ^ 3;
     }
-    ? (size != 16) {
-        ! "unexpected_size=" + text_of(size);
+    ? (wrote0 != 32 or wrote1 != 32) {
         ^ 4;
     }
-    ? (first != "page0000") {
-        ! "first=" + first;
+    ? (not synced or not closed) {
         ^ 5;
     }
-    ? (second != "page0001") {
-        ! "second=" + second;
+    ? (size != 96) {
+        ! "unexpected_size=" + text_of(size);
         ^ 6;
+    }
+    ? (total_pages != 3) {
+        ! "unexpected_pages=" + text_of(total_pages);
+        ^ 7;
+    }
+    ? (slice(header, 0, 8) != "ASHDB001") {
+        ! "header=" + header;
+        ^ 8;
+    }
+    ? (slice(first, 0, 8) != "page0000") {
+        ! "first=" + first;
+        ^ 9;
+    }
+    ? (slice(second, 0, 8) != "page0001") {
+        ! "second=" + second;
+        ^ 10;
     }
 
     ! "ashdb pager smoke ok";
