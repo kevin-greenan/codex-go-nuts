@@ -95,7 +95,8 @@ What is already working on `codex/ashdb-foundation`:
 32. schema-declared unique `i64` fields with automatic index maintenance
 33. page-aware rollback journal records instead of a single whole-file snapshot blob
 34. schema-declared `i64` foreign-key style reference checks and delete protection
-35. smoke-test coverage through the direct self-hosted compiler
+35. additive schema migration for new fields with backfill
+36. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -119,7 +120,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 ### Schema and Data Model
 
 1. richer scalar validation and coercion rules
-2. schema evolution support for adding fields or changing table metadata safely
+2. broader schema evolution support beyond additive field migration
 
 ### Query Surface
 

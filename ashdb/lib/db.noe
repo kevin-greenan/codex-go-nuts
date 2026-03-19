@@ -759,6 +759,26 @@
     ^ true;
 }
 
+@db_schema_has_field(fields_spec: text, field_name: text) -> bool {
+    count0 := db_schema_field_count(fields_spec);
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_name(field_spec) == field_name) {
+            ^ true;
+        }
+        idx = idx + 1;
+    }
+    ^ false;
+}
+
+@db_schema_append_field(fields_spec: text, field_spec: text) -> text {
+    ? (count(fields_spec) == 0) {
+        ^ field_spec;
+    }
+    ^ fields_spec + "," + field_spec;
+}
+
 @db_create_schema_unique_indexes(db: DB, table_name: text, fields_spec: text) -> i64 {
     count0 := db_schema_field_count(fields_spec);
     created := 0;
@@ -883,6 +903,36 @@
     ^ out;
 }
 
+@db_backfill_add_field_payload(payload: text, field_spec: text) -> text {
+    field_name := db_schema_field_name(field_spec);
+    value := row_get(payload, field_name);
+    ? (count(value) > 0) {
+        ^ payload;
+    }
+    default0 := db_schema_field_default(field_spec);
+    ? (count(default0) > 0) {
+        ^ row_put(payload, field_name, default0);
+    }
+    ? (db_schema_field_is_nullable(field_spec)) {
+        ^ row_put(payload, field_name, "null");
+    }
+    ^ "";
+}
+
+@db_create_indexes_for_new_field(db: DB, table_name: text, field_spec: text) -> i64 {
+    ? (db_schema_field_is_unique(field_spec)) {
+        ^ db_create_index(db, table_name, db_schema_unique_index_name(field_spec));
+    }
+    ^ 0;
+}
+
+@db_rebuild_indexes_for_new_field(db: DB, table_name: text, field_spec: text) -> i64 {
+    ? (db_schema_field_is_unique(field_spec)) {
+        ^ db_rebuild_index_from_field(db, table_name, db_schema_unique_index_name(field_spec), db_schema_field_name(field_spec));
+    }
+    ^ 0;
+}
+
 @db_unique_fields_precheck(db: DB, table_name: text, primary_key: i64, payload: text, fields_spec: text) -> i64 {
     count0 := db_schema_field_count(fields_spec);
     idx := 0;
@@ -891,12 +941,14 @@
         ? (db_schema_field_is_unique(field_spec)) {
             field_name := db_schema_field_name(field_spec);
             value_text := row_get(payload, field_name);
-            ? (not db_text_is_i64(value_text)) {
-                ^ -3;
-            }
-            existing := db_index_get(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text));
-            ? (existing >= 0 and existing != primary_key) {
-                ^ -4;
+            ? (value_text != "null") {
+                ? (not db_text_is_i64(value_text)) {
+                    ^ -3;
+                }
+                existing := db_index_get(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text));
+                ? (existing >= 0 and existing != primary_key) {
+                    ^ -4;
+                }
             }
         }
         idx = idx + 1;
@@ -937,11 +989,13 @@
         ? (db_schema_field_is_unique(field_spec)) {
             field_name := db_schema_field_name(field_spec);
             value_text := row_get(payload, field_name);
-            wrote := db_index_insert_unique(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text), primary_key);
-            ? (wrote < 0) {
-                ^ wrote;
+            ? (value_text != "null") {
+                wrote := db_index_insert_unique(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text), primary_key);
+                ? (wrote < 0) {
+                    ^ wrote;
+                }
+                inserted = inserted + 1;
             }
-            inserted = inserted + 1;
         }
         idx = idx + 1;
     }
@@ -958,8 +1012,14 @@
             old_value := row_get(old_payload, field_name);
             new_value := row_get(new_payload, field_name);
             ? (old_value != new_value) {
-                deleted := db_index_delete(db, table_name, db_schema_unique_index_name(field_spec), i64_of(old_value));
-                inserted := db_index_insert_unique(db, table_name, db_schema_unique_index_name(field_spec), i64_of(new_value), primary_key);
+                deleted := 0;
+                ? (db_text_is_i64(old_value)) {
+                    deleted = db_index_delete(db, table_name, db_schema_unique_index_name(field_spec), i64_of(old_value));
+                }
+                inserted := 0;
+                ? (db_text_is_i64(new_value)) {
+                    inserted = db_index_insert_unique(db, table_name, db_schema_unique_index_name(field_spec), i64_of(new_value), primary_key);
+                }
                 ? (deleted < 0 or inserted < 0) {
                     ^ -5;
                 }
@@ -979,9 +1039,11 @@
         ? (db_schema_field_is_unique(field_spec)) {
             field_name := db_schema_field_name(field_spec);
             value_text := row_get(payload, field_name);
-            removed := db_index_delete(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text));
-            ? (removed >= 0) {
-                deleted = deleted + 1;
+            ? (db_text_is_i64(value_text)) {
+                removed := db_index_delete(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text));
+                ? (removed >= 0) {
+                    deleted = deleted + 1;
+                }
             }
         }
         idx = idx + 1;
@@ -1147,6 +1209,56 @@
     ^ deleted;
 }
 
+@db_alter_table_add_field(db: DB, table_name: text, field_spec: text) -> i64 {
+    schema_payload := db_table_schema(db, table_name);
+    ? (count(schema_payload) == 0) {
+        ^ -1;
+    }
+    field_name := db_schema_field_name(field_spec);
+    ? (count(field_name) == 0 or not db_schema_fields_supported(field_spec)) {
+        ^ -2;
+    }
+    old_fields := row_get(schema_payload, "fields");
+    ? (db_schema_has_field(old_fields, field_name)) {
+        ^ -3;
+    }
+    backfill_probe := db_backfill_add_field_payload("", field_spec);
+    ? (count(backfill_probe) == 0) {
+        ^ -4;
+    }
+    new_fields := db_schema_append_field(old_fields, field_spec);
+    updated_schema := row_put(schema_payload, "fields", new_fields);
+    schema_key := db_table_root(db, table_name);
+    schema_updated := db_update(db, db_schema_table_name(), schema_key, updated_schema);
+    ? (schema_updated < 0) {
+        ^ -5;
+    }
+    index_created := db_create_indexes_for_new_field(db, table_name, field_spec);
+    ? (index_created < 0 and index_created != -2) {
+        ^ -6;
+    }
+    key := db_first_key(db, table_name);
+    updated_count := 0;
+    ~ (key >= 0) {
+        payload := db_get(db, table_name, key);
+        updated_payload := db_backfill_add_field_payload(payload, field_spec);
+        ? (count(updated_payload) == 0) {
+            ^ -7;
+        }
+        wrote := db_update_row(db, table_name, key, updated_payload);
+        ? (wrote < 0) {
+            ^ wrote;
+        }
+        updated_count = updated_count + 1;
+        key = db_next_key(db, table_name, key);
+    }
+    rebuilt := db_rebuild_indexes_for_new_field(db, table_name, field_spec);
+    ? (rebuilt < 0) {
+        ^ rebuilt;
+    }
+    ^ updated_count;
+}
+
 @db_scan_keys_text(db: DB, table_name: text, separator: text) -> text {
     table := db_bind_table(db, table_name);
     ? (table.root_page < 0 or table.slot_width < 0) {
@@ -1192,14 +1304,19 @@
             primary_key := leaf_slot_key(slot);
             payload := leaf_slot_payload(slot);
             secondary_text := row_get(payload, field_name);
-            ? (count(secondary_text) == 0 or not db_text_is_i64(secondary_text)) {
+            ? (count(secondary_text) == 0) {
                 ^ -3;
             }
-            inserted := db_index_insert_unique(db, table_name, index_name, i64_of(secondary_text), primary_key);
-            ? (inserted < 0) {
-                ^ inserted;
+            ? (secondary_text != "null") {
+                ? (not db_text_is_i64(secondary_text)) {
+                    ^ -3;
+                }
+                inserted := db_index_insert_unique(db, table_name, index_name, i64_of(secondary_text), primary_key);
+                ? (inserted < 0) {
+                    ^ inserted;
+                }
+                built = built + 1;
             }
-            built = built + 1;
             slot_index = slot_index + 1;
         }
         ^ built;
