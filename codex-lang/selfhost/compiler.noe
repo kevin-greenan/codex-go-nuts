@@ -1,0 +1,3478 @@
+%Token {
+    kind: text;
+    lex: text;
+}
+
+%Expr {
+    tag: text;
+    value: i64;
+    name: text;
+    ty: text;
+    op: text;
+    left: i64;
+    right: i64;
+    args: list<i64>;
+    names: list<text>;
+}
+
+%Stmt {
+    tag: text;
+    name: text;
+    ty: text;
+    expr: i64;
+    body: list<i64>;
+    alt: list<i64>;
+}
+
+%Binding {
+    name: text;
+    ty: text;
+}
+
+%Field {
+    name: text;
+    ty: text;
+}
+
+%Shape {
+    name: text;
+    fields: list<Field>;
+}
+
+%Function {
+    name: text;
+    params: list<Binding>;
+    return_ty: text;
+    body: list<i64>;
+}
+
+%State {
+    tokens: list<Token>;
+    pos: i64;
+    exprs: list<Expr>;
+    stmts: list<Stmt>;
+    shapes: list<Shape>;
+    funcs: list<Function>;
+    ok: bool;
+    err: text;
+}
+
+%TokenizeResult {
+    tokens: list<Token>;
+    ok: bool;
+    err: text;
+}
+
+%ExprResult {
+    state: State;
+    index: i64;
+}
+
+%StmtResult {
+    state: State;
+    index: i64;
+}
+
+%BlockResult {
+    state: State;
+    items: list<i64>;
+}
+
+%ParamResult {
+    state: State;
+    params: list<Binding>;
+}
+
+%Program {
+    exprs: list<Expr>;
+    stmts: list<Stmt>;
+    shapes: list<Shape>;
+    funcs: list<Function>;
+}
+
+%ProgramResult {
+    program: Program;
+    ok: bool;
+    err: text;
+}
+
+%StringScan {
+    ok: bool;
+    value: text;
+    pos: i64;
+    err: text;
+}
+
+@char_at(src: text, pos: i64) -> text {
+    ^ slice(src, pos, 1);
+}
+
+@is_space(ch: text) -> bool {
+    ^ ch == " " or ch == "\n" or ch == "\t" or ch == "\r";
+}
+
+@is_digit(ch: text) -> bool {
+    ^ find("0123456789", ch) >= 0;
+}
+
+@is_alpha(ch: text) -> bool {
+    ^ find("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_", ch) >= 0;
+}
+
+@empty_i64s() -> list<i64> {
+    xs :: list<i64> := [];
+    ^ xs;
+}
+
+@empty_texts() -> list<text> {
+    xs :: list<text> := [];
+    ^ xs;
+}
+
+@empty_exprs() -> list<Expr> {
+    xs :: list<Expr> := [];
+    ^ xs;
+}
+
+@empty_stmts() -> list<Stmt> {
+    xs :: list<Stmt> := [];
+    ^ xs;
+}
+
+@empty_funcs() -> list<Function> {
+    xs :: list<Function> := [];
+    ^ xs;
+}
+
+@empty_bindings() -> list<Binding> {
+    xs :: list<Binding> := [];
+    ^ xs;
+}
+
+@empty_fields() -> list<Field> {
+    xs :: list<Field> := [];
+    ^ xs;
+}
+
+@empty_shapes() -> list<Shape> {
+    xs :: list<Shape> := [];
+    ^ xs;
+}
+
+@token(kind: text, lex: text) -> Token {
+    ^ Token { kind: kind, lex: lex };
+}
+
+@binding(name: text, ty: text) -> Binding {
+    ^ Binding { name: name, ty: ty };
+}
+
+@field(name: text, ty: text) -> Field {
+    ^ Field { name: name, ty: ty };
+}
+
+@shape_decl(name: text, fields: list<Field>) -> Shape {
+    ^ Shape { name: name, fields: fields };
+}
+
+@expr_int(value: i64) -> Expr {
+    args := empty_i64s();
+    names := empty_texts();
+    ^ Expr { tag: "int", value: value, name: "", ty: "i64", op: "", left: -1, right: -1, args: args, names: names };
+}
+
+@expr_bool(value: bool) -> Expr {
+    args := empty_i64s();
+    names := empty_texts();
+    ? (value) {
+        ^ Expr { tag: "bool", value: 1, name: "", ty: "bool", op: "", left: -1, right: -1, args: args, names: names };
+    }
+    ^ Expr { tag: "bool", value: 0, name: "", ty: "bool", op: "", left: -1, right: -1, args: args, names: names };
+}
+
+@expr_text(value: text) -> Expr {
+    args := empty_i64s();
+    names := empty_texts();
+    ^ Expr { tag: "text", value: 0, name: value, ty: "text", op: "", left: -1, right: -1, args: args, names: names };
+}
+
+@expr_name(name: text) -> Expr {
+    args := empty_i64s();
+    names := empty_texts();
+    ^ Expr { tag: "name", value: 0, name: name, ty: "", op: "", left: -1, right: -1, args: args, names: names };
+}
+
+@expr_unary(op: text, inner: i64) -> Expr {
+    args := empty_i64s();
+    names := empty_texts();
+    ^ Expr { tag: "unary", value: 0, name: "", ty: "", op: op, left: inner, right: -1, args: args, names: names };
+}
+
+@expr_bin(op: text, left: i64, right: i64) -> Expr {
+    args := empty_i64s();
+    names := empty_texts();
+    ^ Expr { tag: "bin", value: 0, name: "", ty: "", op: op, left: left, right: right, args: args, names: names };
+}
+
+@expr_call(name: text, args: list<i64>) -> Expr {
+    names := empty_texts();
+    ^ Expr { tag: "call", value: 0, name: name, ty: "", op: "", left: -1, right: -1, args: args, names: names };
+}
+
+@expr_field(left: i64, name: text) -> Expr {
+    args := empty_i64s();
+    names := empty_texts();
+    ^ Expr { tag: "field", value: 0, name: name, ty: "", op: "", left: left, right: -1, args: args, names: names };
+}
+
+@expr_index(left: i64, right: i64) -> Expr {
+    args := empty_i64s();
+    names := empty_texts();
+    ^ Expr { tag: "index", value: 0, name: "", ty: "", op: "", left: left, right: right, args: args, names: names };
+}
+
+@expr_list(ty: text, args: list<i64>) -> Expr {
+    names := empty_texts();
+    ^ Expr { tag: "list", value: 0, name: "", ty: ty, op: "", left: -1, right: -1, args: args, names: names };
+}
+
+@expr_struct(ty: text, names: list<text>, args: list<i64>) -> Expr {
+    ^ Expr { tag: "struct", value: 0, name: "", ty: ty, op: "", left: -1, right: -1, args: args, names: names };
+}
+
+@stmt_simple(tag: text, name: text, ty: text, expr: i64) -> Stmt {
+    body := empty_i64s();
+    alt := empty_i64s();
+    ^ Stmt { tag: tag, name: name, ty: ty, expr: expr, body: body, alt: alt };
+}
+
+@stmt_branch(tag: text, expr: i64, body: list<i64>, alt: list<i64>) -> Stmt {
+    ^ Stmt { tag: tag, name: "", ty: "", expr: expr, body: body, alt: alt };
+}
+
+@func_decl(name: text, params: list<Binding>, return_ty: text, body: list<i64>) -> Function {
+    ^ Function { name: name, params: params, return_ty: return_ty, body: body };
+}
+
+@ok_tokens(tokens: list<Token>) -> TokenizeResult {
+    ^ TokenizeResult { tokens: tokens, ok: true, err: "" };
+}
+
+@fail_tokens(tokens: list<Token>, err: text) -> TokenizeResult {
+    ^ TokenizeResult { tokens: tokens, ok: false, err: err };
+}
+
+@make_state(tokens: list<Token>) -> State {
+    exprs := empty_exprs();
+    stmts := empty_stmts();
+    shapes := empty_shapes();
+    funcs := empty_funcs();
+    ^ State { tokens: tokens, pos: 0, exprs: exprs, stmts: stmts, shapes: shapes, funcs: funcs, ok: true, err: "" };
+}
+
+@copy_state(state: State, pos: i64, exprs: list<Expr>, stmts: list<Stmt>, shapes: list<Shape>, funcs: list<Function>, ok: bool, err: text) -> State {
+    ^ State { tokens: state.tokens, pos: pos, exprs: exprs, stmts: stmts, shapes: shapes, funcs: funcs, ok: ok, err: err };
+}
+
+@fail_state(state: State, err: text) -> State {
+    ^ copy_state(state, state.pos, state.exprs, state.stmts, state.shapes, state.funcs, false, err);
+}
+
+@advance_state(state: State) -> State {
+    ^ copy_state(state, state.pos + 1, state.exprs, state.stmts, state.shapes, state.funcs, state.ok, state.err);
+}
+
+@append_expr(state: State, expr: Expr) -> ExprResult {
+    exprs := append(state.exprs, expr);
+    next := copy_state(state, state.pos, exprs, state.stmts, state.shapes, state.funcs, state.ok, state.err);
+    ^ ExprResult { state: next, index: count(exprs) - 1 };
+}
+
+@append_stmt(state: State, stmt: Stmt) -> StmtResult {
+    stmts := append(state.stmts, stmt);
+    next := copy_state(state, state.pos, state.exprs, stmts, state.shapes, state.funcs, state.ok, state.err);
+    ^ StmtResult { state: next, index: count(stmts) - 1 };
+}
+
+@append_shape(state: State, shape: Shape) -> State {
+    shapes := append(state.shapes, shape);
+    ^ copy_state(state, state.pos, state.exprs, state.stmts, shapes, state.funcs, state.ok, state.err);
+}
+
+@append_func(state: State, func: Function) -> State {
+    funcs := append(state.funcs, func);
+    ^ copy_state(state, state.pos, state.exprs, state.stmts, state.shapes, funcs, state.ok, state.err);
+}
+
+@current_token(state: State) -> Token {
+    ? (state.pos >= count(state.tokens)) {
+        ^ token("eof", "");
+    }
+    tokens := state.tokens;
+    ^ tokens[state.pos];
+}
+
+@peek_kind(state: State, delta: i64) -> text {
+    idx := state.pos + delta;
+    ? (idx >= count(state.tokens)) {
+        ^ "eof";
+    }
+    tokens := state.tokens;
+    tok := tokens[idx];
+    ^ tok.kind;
+}
+
+@expect_kind(state: State, kind: text) -> State {
+    ? (not state.ok) {
+        ^ state;
+    }
+    cur := current_token(state);
+    ? (cur.kind == kind) {
+        ^ advance_state(state);
+    }
+    ^ fail_state(state, "expected " + kind + ", got " + cur.kind + " '" + cur.lex + "'");
+}
+
+@expect_name_value(state: State, value: text) -> State {
+    ? (not state.ok) {
+        ^ state;
+    }
+    cur := current_token(state);
+    ? (cur.kind == "name" and cur.lex == value) {
+        ^ advance_state(state);
+    }
+    ^ fail_state(state, "expected name '" + value + "', got " + cur.kind + " '" + cur.lex + "'");
+}
+
+@parse_type_name(state: State) -> ParamResult {
+    cur := current_token(state);
+    ? (cur.kind != "name") {
+        bad := fail_state(state, "expected type name");
+        ^ ParamResult { state: bad, params: empty_bindings() };
+    }
+    state = advance_state(state);
+    ty := cur.lex;
+    next_tok := current_token(state);
+    ? (cur.lex == "list" and next_tok.kind == "lt") {
+        inner_res := parse_type_name(advance_state(state));
+        state = expect_kind(inner_res.state, "gt");
+        inner_items := inner_res.params;
+        inner_item := inner_items[0];
+        ty = "list<" + inner_item.ty + ">";
+    }
+    params := empty_bindings();
+    params = append(params, binding("", ty));
+    ^ ParamResult { state: state, params: params };
+}
+
+@append_token(tokens: list<Token>, kind: text, lex: text) -> list<Token> {
+    ^ append(tokens, token(kind, lex));
+}
+
+@scan_string(src: text, start: i64) -> StringScan {
+    out := "";
+    pos := start + 1;
+
+    ~ (pos < count(src)) {
+        ch := char_at(src, pos);
+        ? (ch == "\"") {
+            ^ StringScan { ok: true, value: out, pos: pos + 1, err: "" };
+        }
+        ? (ch == "\\") {
+            pos = pos + 1;
+            ? (pos >= count(src)) {
+                ^ StringScan { ok: false, value: out, pos: pos, err: "unterminated string escape" };
+            }
+            esc := char_at(src, pos);
+            ? (esc == "n") {
+                out = out + "\n";
+            }
+            | {
+                ? (esc == "r") {
+                    out = out + "\r";
+                }
+                | {
+                    ? (esc == "t") {
+                        out = out + "\t";
+                    }
+                    | {
+                        ? (esc == "\"") {
+                            out = out + "\"";
+                        }
+                        | {
+                            ? (esc == "\\") {
+                                out = out + "\\";
+                            }
+                            | {
+                                out = out + esc;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        | {
+            out = out + ch;
+        }
+        pos = pos + 1;
+    }
+
+    ^ StringScan { ok: false, value: out, pos: pos, err: "unterminated string literal" };
+}
+
+@tokenize(src: text) -> TokenizeResult {
+    tokens :: list<Token> := [];
+    pos := 0;
+
+    ~ (pos < count(src)) {
+        ch := char_at(src, pos);
+
+        ? (is_space(ch)) {
+            pos = pos + 1;
+        }
+        | {
+            ? (ch == "\"") {
+                scanned := scan_string(src, pos);
+                ? (not scanned.ok) {
+                    ^ fail_tokens(tokens, scanned.err);
+                }
+                tokens = append_token(tokens, "string", scanned.value);
+                pos = scanned.pos;
+            }
+            | {
+                ? (is_alpha(ch)) {
+                    start := pos;
+                    pos = pos + 1;
+                    ~ (pos < count(src) and (is_alpha(char_at(src, pos)) or is_digit(char_at(src, pos)))) {
+                        pos = pos + 1;
+                    }
+                    lex := slice(src, start, pos - start);
+                    tokens = append_token(tokens, "name", lex);
+                }
+                | {
+                    ? (is_digit(ch)) {
+                        start := pos;
+                        pos = pos + 1;
+                        ~ (pos < count(src) and is_digit(char_at(src, pos))) {
+                            pos = pos + 1;
+                        }
+                        lex := slice(src, start, pos - start);
+                        tokens = append_token(tokens, "int", lex);
+                    }
+                    | {
+                        next := "";
+                        ? (pos + 1 < count(src)) {
+                            next = char_at(src, pos + 1);
+                        }
+
+                        ? (ch == ":" and next == "=") {
+                            tokens = append_token(tokens, "bind", ch + next);
+                            pos = pos + 2;
+                        }
+                        | {
+                            ? (ch == ":" and next == ":") {
+                                tokens = append_token(tokens, "typed", ch + next);
+                                pos = pos + 2;
+                            }
+                            | {
+                                ? (ch == "-" and next == ">") {
+                                    tokens = append_token(tokens, "arrow", ch + next);
+                                    pos = pos + 2;
+                                }
+                                | {
+                                    ? (ch == "<" and next == "=") {
+                                        tokens = append_token(tokens, "le", ch + next);
+                                        pos = pos + 2;
+                                    }
+                                    | {
+                                        ? (ch == ">" and next == "=") {
+                                            tokens = append_token(tokens, "ge", ch + next);
+                                            pos = pos + 2;
+                                        }
+                                        | {
+                                            ? (ch == "=" and next == "=") {
+                                                tokens = append_token(tokens, "eqeq", ch + next);
+                                                pos = pos + 2;
+                                            }
+                                            | {
+                                                ? (ch == "!" and next == "=") {
+                                                    tokens = append_token(tokens, "neq", ch + next);
+                                                    pos = pos + 2;
+                                                }
+                                                | {
+                                                    ? (ch == "%") {
+                                                        tokens = append_token(tokens, "percent", ch);
+                                                        pos = pos + 1;
+                                                    }
+                                                    | {
+                                                        ? (ch == "@") {
+                                                            tokens = append_token(tokens, "at", ch);
+                                                            pos = pos + 1;
+                                                        }
+                                                        | {
+                                                            ? (ch == "(") {
+                                                                tokens = append_token(tokens, "lparen", ch);
+                                                                pos = pos + 1;
+                                                            }
+                                                            | {
+                                                                ? (ch == ")") {
+                                                                    tokens = append_token(tokens, "rparen", ch);
+                                                                    pos = pos + 1;
+                                                                }
+                                                                | {
+                                                                    ? (ch == "[") {
+                                                                        tokens = append_token(tokens, "lbracket", ch);
+                                                                        pos = pos + 1;
+                                                                    }
+                                                                    | {
+                                                                        ? (ch == "]") {
+                                                                            tokens = append_token(tokens, "rbracket", ch);
+                                                                            pos = pos + 1;
+                                                                        }
+                                                                        | {
+                                                                            ? (ch == "{") {
+                                                                                tokens = append_token(tokens, "lbrace", ch);
+                                                                                pos = pos + 1;
+                                                                            }
+                                                                            | {
+                                                                                ? (ch == "}") {
+                                                                                    tokens = append_token(tokens, "rbrace", ch);
+                                                                                    pos = pos + 1;
+                                                                                }
+                                                                                | {
+                                                                                    ? (ch == ".") {
+                                                                                        tokens = append_token(tokens, "dot", ch);
+                                                                                        pos = pos + 1;
+                                                                                    }
+                                                                                    | {
+                                                                                        ? (ch == ";") {
+                                                                                            tokens = append_token(tokens, "semi", ch);
+                                                                                            pos = pos + 1;
+                                                                                        }
+                                                                                        | {
+                                                                                            ? (ch == ",") {
+                                                                                                tokens = append_token(tokens, "comma", ch);
+                                                                                                pos = pos + 1;
+                                                                                            }
+                                                                                            | {
+                                                                                                ? (ch == ":") {
+                                                                                                    tokens = append_token(tokens, "colon", ch);
+                                                                                                    pos = pos + 1;
+                                                                                                }
+                                                                                                | {
+                                                                                                    ? (ch == "?") {
+                                                                                                        tokens = append_token(tokens, "if", ch);
+                                                                                                        pos = pos + 1;
+                                                                                                    }
+                                                                                                    | {
+                                                                                                        ? (ch == "|") {
+                                                                                                            tokens = append_token(tokens, "else", ch);
+                                                                                                            pos = pos + 1;
+                                                                                                        }
+                                                                                                        | {
+                                                                                                            ? (ch == "~") {
+                                                                                                                tokens = append_token(tokens, "while", ch);
+                                                                                                                pos = pos + 1;
+                                                                                                            }
+                                                                                                            | {
+                                                                                                                ? (ch == "!") {
+                                                                                                                    tokens = append_token(tokens, "emit", ch);
+                                                                                                                    pos = pos + 1;
+                                                                                                                }
+                                                                                                                | {
+                                                                                                                    ? (ch == "^") {
+                                                                                                                        tokens = append_token(tokens, "ret", ch);
+                                                                                                                        pos = pos + 1;
+                                                                                                                    }
+                                                                                                                    | {
+                                                                                                                        ? (ch == "+") {
+                                                                                                                            tokens = append_token(tokens, "plus", ch);
+                                                                                                                            pos = pos + 1;
+                                                                                                                        }
+                                                                                                                        | {
+                                                                                                                            ? (ch == "-") {
+                                                                                                                                tokens = append_token(tokens, "minus", ch);
+                                                                                                                                pos = pos + 1;
+                                                                                                                            }
+                                                                                                                            | {
+                                                                                                                                ? (ch == "*") {
+                                                                                                                                    tokens = append_token(tokens, "star", ch);
+                                                                                                                                    pos = pos + 1;
+                                                                                                                                }
+                                                                                                                                | {
+                                                                                                                                    ? (ch == "/") {
+                                                                                                                                        tokens = append_token(tokens, "slash", ch);
+                                                                                                                                        pos = pos + 1;
+                                                                                                                                    }
+                                                                                                                                    | {
+                                                                                                                                        ? (ch == "<") {
+                                                                                                                                            tokens = append_token(tokens, "lt", ch);
+                                                                                                                                            pos = pos + 1;
+                                                                                                                                        }
+                                                                                                                                        | {
+                                                                                                                                            ? (ch == ">") {
+                                                                                                                                                tokens = append_token(tokens, "gt", ch);
+                                                                                                                                                pos = pos + 1;
+                                                                                                                                            }
+                                                                                                                                            | {
+                                                                                                                                                ? (ch == "=") {
+                                                                                                                                                    tokens = append_token(tokens, "assign", ch);
+                                                                                                                                                    pos = pos + 1;
+                                                                                                                                                }
+                                                                                                                                                | {
+                                                                                                                                                    ^ fail_tokens(tokens, "unsupported character '" + ch + "'");
+                                                                                                                                                }
+                                                                                                                                            }
+                                                                                                                                        }
+                                                                                                                                    }
+                                                                                                                                }
+                                                                                                                            }
+                                                                                                                        }
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            }
+                                                                                                        }
+                                                                                                    }
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    tokens = append_token(tokens, "eof", "");
+    ^ ok_tokens(tokens);
+}
+
+@parse_args(state: State) -> BlockResult {
+    args := empty_i64s();
+    cur := current_token(state);
+    ? (cur.kind == "rparen") {
+        ^ BlockResult { state: state, items: args };
+    }
+
+    ~ (state.ok) {
+        item := parse_cmp(state);
+        args = append(args, item.index);
+        state = item.state;
+        cur = current_token(state);
+        ? (cur.kind == "comma") {
+            state = advance_state(state);
+        }
+        | {
+            ^ BlockResult { state: state, items: args };
+        }
+    }
+
+    ^ BlockResult { state: state, items: args };
+}
+
+@parse_list_items(state: State, end_kind: text) -> BlockResult {
+    args := empty_i64s();
+    cur := current_token(state);
+    ? (cur.kind == end_kind) {
+        ^ BlockResult { state: state, items: args };
+    }
+
+    ~ (state.ok) {
+        item := parse_cmp(state);
+        args = append(args, item.index);
+        state = item.state;
+        cur = current_token(state);
+        ? (cur.kind == "comma") {
+            state = advance_state(state);
+        }
+        | {
+            ^ BlockResult { state: state, items: args };
+        }
+    }
+
+    ^ BlockResult { state: state, items: args };
+}
+
+@parse_struct_expr(state: State, ty: text) -> ExprResult {
+    names := empty_texts();
+    args := empty_i64s();
+    cur := current_token(state);
+    ? (cur.kind == "rbrace") {
+        closed := expect_kind(state, "rbrace");
+        ^ append_expr(closed, expr_struct(ty, names, args));
+    }
+
+    ~ (state.ok) {
+        cur = current_token(state);
+        ? (cur.kind != "name") {
+            bad := fail_state(state, "expected field name in struct literal");
+            ^ ExprResult { state: bad, index: 0 };
+        }
+        field_name := cur.lex;
+        state = advance_state(state);
+        state = expect_kind(state, "colon");
+        value_res := parse_cmp(state);
+        state = value_res.state;
+        names = append(names, field_name);
+        args = append(args, value_res.index);
+        cur = current_token(state);
+        ? (cur.kind == "comma") {
+            state = advance_state(state);
+        }
+        | {
+            state = expect_kind(state, "rbrace");
+            ^ append_expr(state, expr_struct(ty, names, args));
+        }
+    }
+
+    ^ ExprResult { state: state, index: 0 };
+}
+
+@parse_atom(state: State) -> ExprResult {
+    ? (not state.ok) {
+        ^ ExprResult { state: state, index: 0 };
+    }
+
+    cur := current_token(state);
+
+    ? (cur.kind == "int") {
+        next := advance_state(state);
+        ^ append_expr(next, expr_int(i64_of(cur.lex)));
+    }
+
+    ? (cur.kind == "string") {
+        next := advance_state(state);
+        ^ append_expr(next, expr_text(cur.lex));
+    }
+
+    ? (cur.kind == "name") {
+        ? (cur.lex == "true") {
+            next := advance_state(state);
+            ^ append_expr(next, expr_bool(true));
+        }
+        ? (cur.lex == "false") {
+            next := advance_state(state);
+            ^ append_expr(next, expr_bool(false));
+        }
+        next := advance_state(state);
+        next_cur := current_token(next);
+        ? (next_cur.kind == "lparen") {
+            after_lparen := advance_state(next);
+            args_res := parse_args(after_lparen);
+            closed := expect_kind(args_res.state, "rparen");
+            expr := expr_call(cur.lex, args_res.items);
+            ^ append_expr(closed, expr);
+        }
+        ? (next_cur.kind == "lbrace") {
+            ^ parse_struct_expr(advance_state(next), cur.lex);
+        }
+        ^ append_expr(next, expr_name(cur.lex));
+    }
+
+    ? (cur.kind == "lbracket") {
+        items_res := parse_list_items(advance_state(state), "rbracket");
+        closed := expect_kind(items_res.state, "rbracket");
+        ^ append_expr(closed, expr_list("", items_res.items));
+    }
+
+    ? (cur.kind == "lparen") {
+        inner := parse_cmp(advance_state(state));
+        closed := expect_kind(inner.state, "rparen");
+        ^ ExprResult { state: closed, index: inner.index };
+    }
+
+    bad := fail_state(state, "expected expression, got " + cur.kind + " '" + cur.lex + "'");
+    ^ ExprResult { state: bad, index: 0 };
+}
+
+@parse_primary(state: State) -> ExprResult {
+    left := parse_atom(state);
+    loop_state := left.state;
+    cur := current_token(loop_state);
+
+    ~ (loop_state.ok and (cur.kind == "dot" or cur.kind == "lbracket")) {
+        ? (cur.kind == "dot") {
+            name_tok := current_token(advance_state(loop_state));
+            next := expect_kind(advance_state(loop_state), "name");
+            left = append_expr(next, expr_field(left.index, name_tok.lex));
+        }
+        | {
+            inner := parse_cmp(advance_state(loop_state));
+            next := expect_kind(inner.state, "rbracket");
+            left = append_expr(next, expr_index(left.index, inner.index));
+        }
+        loop_state = left.state;
+        cur = current_token(loop_state);
+    }
+
+    ^ left;
+}
+
+@parse_unary(state: State) -> ExprResult {
+    cur := current_token(state);
+    ? (cur.kind == "minus") {
+        inner := parse_unary(advance_state(state));
+        zero := append_expr(inner.state, expr_int(0));
+        ^ append_expr(zero.state, expr_bin("-", zero.index, inner.index));
+    }
+    ? (cur.kind == "name" and cur.lex == "not") {
+        inner := parse_unary(advance_state(state));
+        ^ append_expr(inner.state, expr_unary("not", inner.index));
+    }
+    ^ parse_primary(state);
+}
+
+@parse_mul(state: State) -> ExprResult {
+    left := parse_unary(state);
+    loop_state := left.state;
+    loop_token := current_token(loop_state);
+
+    ~ (loop_state.ok and (loop_token.kind == "star" or loop_token.kind == "slash")) {
+        op := loop_token.lex;
+        after_op := advance_state(loop_state);
+        right := parse_unary(after_op);
+        left = append_expr(right.state, expr_bin(op, left.index, right.index));
+        loop_state = left.state;
+        loop_token = current_token(loop_state);
+    }
+
+    ^ left;
+}
+
+@parse_add(state: State) -> ExprResult {
+    left := parse_mul(state);
+    loop_state := left.state;
+    loop_token := current_token(loop_state);
+
+    ~ (loop_state.ok and (loop_token.kind == "plus" or loop_token.kind == "minus")) {
+        op := loop_token.lex;
+        after_op := advance_state(loop_state);
+        right := parse_mul(after_op);
+        left = append_expr(right.state, expr_bin(op, left.index, right.index));
+        loop_state = left.state;
+        loop_token = current_token(loop_state);
+    }
+
+    ^ left;
+}
+
+@is_cmp(kind: text) -> bool {
+    ^ kind == "le" or kind == "ge" or kind == "lt" or kind == "gt" or kind == "eqeq" or kind == "neq";
+}
+
+@parse_cmp_only(state: State) -> ExprResult {
+    left := parse_add(state);
+    loop_state := left.state;
+    loop_token := current_token(loop_state);
+
+    ~ (loop_state.ok and is_cmp(loop_token.kind)) {
+        op := loop_token.lex;
+        after_op := advance_state(loop_state);
+        right := parse_add(after_op);
+        left = append_expr(right.state, expr_bin(op, left.index, right.index));
+        loop_state = left.state;
+        loop_token = current_token(loop_state);
+    }
+
+    ^ left;
+}
+
+@parse_and(state: State) -> ExprResult {
+    left := parse_cmp_only(state);
+    loop_state := left.state;
+    loop_token := current_token(loop_state);
+
+    ~ (loop_state.ok and loop_token.kind == "name" and loop_token.lex == "and") {
+        right := parse_cmp_only(advance_state(loop_state));
+        left = append_expr(right.state, expr_bin("and", left.index, right.index));
+        loop_state = left.state;
+        loop_token = current_token(loop_state);
+    }
+
+    ^ left;
+}
+
+@parse_cmp(state: State) -> ExprResult {
+    left := parse_and(state);
+    loop_state := left.state;
+    loop_token := current_token(loop_state);
+
+    ~ (loop_state.ok and loop_token.kind == "name" and loop_token.lex == "or") {
+        right := parse_and(advance_state(loop_state));
+        left = append_expr(right.state, expr_bin("or", left.index, right.index));
+        loop_state = left.state;
+        loop_token = current_token(loop_state);
+    }
+
+    ^ left;
+}
+
+@parse_block(state: State) -> BlockResult {
+    items := empty_i64s();
+    cur := current_token(state);
+
+    ~ (state.ok and cur.kind != "rbrace" and cur.kind != "eof") {
+        stmt_res := parse_stmt(state);
+        items = append(items, stmt_res.index);
+        state = stmt_res.state;
+        cur = current_token(state);
+    }
+
+    state = expect_kind(state, "rbrace");
+    ^ BlockResult { state: state, items: items };
+}
+
+@parse_stmt(state: State) -> StmtResult {
+    cur := current_token(state);
+
+    ? (cur.kind == "emit") {
+        expr := parse_cmp(advance_state(state));
+        next := expect_kind(expr.state, "semi");
+        ^ append_stmt(next, stmt_simple("emit", "", "", expr.index));
+    }
+
+    ? (cur.kind == "ret") {
+        expr := parse_cmp(advance_state(state));
+        next := expect_kind(expr.state, "semi");
+        ^ append_stmt(next, stmt_simple("ret", "", "", expr.index));
+    }
+
+    ? (cur.kind == "if") {
+        next := expect_kind(advance_state(state), "lparen");
+        cond := parse_cmp(next);
+        next = expect_kind(cond.state, "rparen");
+        next = expect_kind(next, "lbrace");
+        body_res := parse_block(next);
+        alt := empty_i64s();
+        state = body_res.state;
+        cur = current_token(state);
+        ? (cur.kind == "else") {
+            state = expect_kind(advance_state(state), "lbrace");
+            alt_res := parse_block(state);
+            alt = alt_res.items;
+            state = alt_res.state;
+        }
+        ^ append_stmt(state, stmt_branch("if", cond.index, body_res.items, alt));
+    }
+
+    ? (cur.kind == "while") {
+        next := expect_kind(advance_state(state), "lparen");
+        cond := parse_cmp(next);
+        next = expect_kind(cond.state, "rparen");
+        next = expect_kind(next, "lbrace");
+        body_res := parse_block(next);
+        ^ append_stmt(body_res.state, stmt_branch("while", cond.index, body_res.items, empty_i64s()));
+    }
+
+    ? (cur.kind == "name" and peek_kind(state, 1) == "typed") {
+        name := cur.lex;
+        next := advance_state(state);
+        next = expect_kind(next, "typed");
+        ty_res := parse_type_name(next);
+        next = ty_res.state;
+        ty_items := ty_res.params;
+        ty_item := ty_items[0];
+        next = expect_kind(next, "bind");
+        expr := parse_cmp(next);
+        next = expect_kind(expr.state, "semi");
+        ^ append_stmt(next, stmt_simple("let", name, ty_item.ty, expr.index));
+    }
+
+    ? (cur.kind == "name" and peek_kind(state, 1) == "bind") {
+        name := cur.lex;
+        next := advance_state(state);
+        next = expect_kind(next, "bind");
+        expr := parse_cmp(next);
+        next = expect_kind(expr.state, "semi");
+        ^ append_stmt(next, stmt_simple("let", name, "", expr.index));
+    }
+
+    ? (cur.kind == "name" and peek_kind(state, 1) == "assign") {
+        name := cur.lex;
+        next := advance_state(state);
+        next = expect_kind(next, "assign");
+        expr := parse_cmp(next);
+        next = expect_kind(expr.state, "semi");
+        ^ append_stmt(next, stmt_simple("assign", name, "", expr.index));
+    }
+
+    bad := fail_state(state, "unsupported statement starting with " + cur.kind + " '" + cur.lex + "'");
+    ^ StmtResult { state: bad, index: 0 };
+}
+
+@parse_params(state: State) -> ParamResult {
+    params := empty_bindings();
+    cur := current_token(state);
+    ? (cur.kind == "rparen") {
+        ^ ParamResult { state: state, params: params };
+    }
+    ~ (state.ok) {
+        cur = current_token(state);
+        ? (cur.kind != "name") {
+            bad := fail_state(state, "expected parameter name");
+            ^ ParamResult { state: bad, params: params };
+        }
+        name := cur.lex;
+        state = advance_state(state);
+        state = expect_kind(state, "colon");
+        type_res := parse_type_name(state);
+        state = type_res.state;
+        tys := type_res.params;
+        first_ty := tys[0];
+        ty := first_ty.ty;
+        params = append(params, binding(name, ty));
+        cur = current_token(state);
+        ? (cur.kind == "comma") {
+            state = advance_state(state);
+        }
+        | {
+            ^ ParamResult { state: state, params: params };
+        }
+    }
+
+    ^ ParamResult { state: state, params: params };
+}
+
+@parse_shape(state: State) -> State {
+    state = expect_kind(state, "percent");
+    name_tok := current_token(state);
+    state = expect_kind(state, "name");
+    state = expect_kind(state, "lbrace");
+    fields := empty_fields();
+    cur := current_token(state);
+
+    ~ (state.ok and cur.kind != "rbrace") {
+        field_tok := cur;
+        ? (field_tok.kind != "name") {
+            ^ fail_state(state, "expected field name in shape");
+        }
+        state = advance_state(state);
+        state = expect_kind(state, "colon");
+        type_res := parse_type_name(state);
+        state = type_res.state;
+        type_items := type_res.params;
+        type_item := type_items[0];
+        state = expect_kind(state, "semi");
+        fields = append(fields, field(field_tok.lex, type_item.ty));
+        cur = current_token(state);
+    }
+
+    state = expect_kind(state, "rbrace");
+    ^ append_shape(state, shape_decl(name_tok.lex, fields));
+}
+
+@parse_function(state: State) -> State {
+    state = expect_kind(state, "at");
+    ? (not state.ok) {
+        ^ state;
+    }
+
+    name_tok := current_token(state);
+    state = expect_kind(state, "name");
+    state = expect_kind(state, "lparen");
+    params_res := parse_params(state);
+    state = params_res.state;
+    params := params_res.params;
+    state = expect_kind(state, "rparen");
+    state = expect_kind(state, "arrow");
+    return_res := parse_type_name(state);
+    state = return_res.state;
+    return_items := return_res.params;
+    return_item := return_items[0];
+    return_ty := return_item.ty;
+    state = expect_kind(state, "lbrace");
+    body_res := parse_block(state);
+    state = body_res.state;
+    func := func_decl(name_tok.lex, params, return_ty, body_res.items);
+    ^ append_func(state, func);
+}
+
+@empty_program() -> Program {
+    exprs := empty_exprs();
+    stmts := empty_stmts();
+    shapes := empty_shapes();
+    funcs := empty_funcs();
+    ^ Program { exprs: exprs, stmts: stmts, shapes: shapes, funcs: funcs };
+}
+
+@parse_program(tokens: list<Token>) -> ProgramResult {
+    state := make_state(tokens);
+    cur := current_token(state);
+
+    ~ (state.ok and cur.kind != "eof") {
+        ? (cur.kind == "percent") {
+            state = parse_shape(state);
+        }
+        | {
+            ? (cur.kind == "at") {
+                state = parse_function(state);
+            }
+            | {
+                bad := fail_state(state, "expected declaration");
+                ^ ProgramResult { program: empty_program(), ok: false, err: bad.err };
+            }
+        }
+        cur = current_token(state);
+    }
+
+    ? (not state.ok) {
+        ^ ProgramResult { program: empty_program(), ok: false, err: state.err };
+    }
+
+    program := Program { exprs: state.exprs, stmts: state.stmts, shapes: state.shapes, funcs: state.funcs };
+    ^ ProgramResult { program: program, ok: true, err: "" };
+}
+
+@pad(level: i64) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx < level) {
+        out = out + "    ";
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@lookup_binding(bindings: list<Binding>, name: text) -> text {
+    idx := 0;
+    ~ (idx < count(bindings)) {
+        item := bindings[idx];
+        ? (item.name == name) {
+            ^ item.ty;
+        }
+        idx = idx + 1;
+    }
+    ^ "";
+}
+
+@lookup_shape(program: Program, name: text) -> Shape {
+    shapes := program.shapes;
+    idx := 0;
+    ~ (idx < count(shapes)) {
+        item := shapes[idx];
+        ? (item.name == name) {
+            ^ item;
+        }
+        idx = idx + 1;
+    }
+    fields := empty_fields();
+    ^ Shape { name: name, fields: fields };
+}
+
+@lookup_field_type(program: Program, shape_name: text, field_name: text) -> text {
+    shape := lookup_shape(program, shape_name);
+    fields := shape.fields;
+    idx := 0;
+    ~ (idx < count(fields)) {
+        item := fields[idx];
+        ? (item.name == field_name) {
+            ^ item.ty;
+        }
+        idx = idx + 1;
+    }
+    ^ "";
+}
+
+@is_list_type(ty: text) -> bool {
+    ^ count(ty) > 6 and slice(ty, 0, 5) == "list<" and slice(ty, count(ty) - 1, 1) == ">";
+}
+
+@list_item_type(ty: text) -> text {
+    ? (not is_list_type(ty)) {
+        ^ "";
+    }
+    ^ slice(ty, 5, count(ty) - 6);
+}
+
+@shape_c_name(name: text) -> text {
+    ^ "noema_shape_" + name;
+}
+
+@append_helper_name(ty: text) -> text {
+    ? (ty == "i64") {
+        ^ "noema_list_append_i64";
+    }
+    ? (ty == "bool") {
+        ^ "noema_list_append_bool";
+    }
+    ? (ty == "text") {
+        ^ "noema_list_append_text";
+    }
+    ? (ty == "socket") {
+        ^ "noema_list_append_socket";
+    }
+    ? (ty == "list") {
+        ^ "noema_list_append_list";
+    }
+    ? (is_list_type(ty)) {
+        ^ "noema_list_append_list";
+    }
+    ^ "noema_list_append_" + ty;
+}
+
+@find_function(program: Program, name: text) -> Function {
+    funcs := program.funcs;
+    idx := 0;
+    ~ (idx < count(funcs)) {
+        fn := funcs[idx];
+        ? (fn.name == name) {
+            ^ fn;
+        }
+        idx = idx + 1;
+    }
+    params := empty_bindings();
+    body := empty_i64s();
+    ^ Function { name: name, params: params, return_ty: "i64", body: body };
+}
+
+@c_name(name: text) -> text {
+    ? (name == "main") {
+        ^ "noema_main";
+    }
+    ^ name;
+}
+
+@c_type(ty: text) -> text {
+    ? (ty == "i64") {
+        ^ "noema_i64";
+    }
+    ? (ty == "bool") {
+        ^ "bool";
+    }
+    ? (ty == "text") {
+        ^ "noema_text";
+    }
+    ? (ty == "socket") {
+        ^ "noema_socket";
+    }
+    ? (is_list_type(ty)) {
+        ^ "noema_list";
+    }
+    ? (count(ty) > 0) {
+        ^ shape_c_name(ty);
+    }
+    ^ "noema_i64";
+}
+
+@infer_expr_type(program: Program, fn: Function, locals: list<Binding>, index: i64) -> text {
+    exprs := program.exprs;
+    expr := exprs[index];
+
+    ? (expr.tag == "int") {
+        ^ "i64";
+    }
+    ? (expr.tag == "bool") {
+        ^ "bool";
+    }
+    ? (expr.tag == "text") {
+        ^ "text";
+    }
+    ? (expr.tag == "name") {
+        ty := lookup_binding(locals, expr.name);
+        ? (count(ty) > 0) {
+            ^ ty;
+        }
+        ty = lookup_binding(fn.params, expr.name);
+        ? (count(ty) > 0) {
+            ^ ty;
+        }
+        ^ "i64";
+    }
+    ? (expr.tag == "field") {
+        left_ty := infer_expr_type(program, fn, locals, expr.left);
+        ^ lookup_field_type(program, left_ty, expr.name);
+    }
+    ? (expr.tag == "index") {
+        left_ty := infer_expr_type(program, fn, locals, expr.left);
+        ^ list_item_type(left_ty);
+    }
+    ? (expr.tag == "list") {
+        ? (count(expr.ty) > 0) {
+            ^ expr.ty;
+        }
+        ? (count(expr.args) > 0) {
+            args := expr.args;
+            ^ "list<" + infer_expr_type(program, fn, locals, args[0]) + ">";
+        }
+        ^ "list<i64>";
+    }
+    ? (expr.tag == "struct") {
+        ^ expr.ty;
+    }
+    ? (expr.tag == "unary") {
+        ? (expr.op == "not") {
+            ^ "bool";
+        }
+        ^ infer_expr_type(program, fn, locals, expr.left);
+    }
+    ? (expr.tag == "bin") {
+        left_ty := infer_expr_type(program, fn, locals, expr.left);
+        right_ty := infer_expr_type(program, fn, locals, expr.right);
+        ? (expr.op == "+" and (left_ty == "text" or right_ty == "text")) {
+            ^ "text";
+        }
+        ? (expr.op == "==" or expr.op == "!=" or expr.op == "<" or expr.op == "<=" or expr.op == ">" or expr.op == ">=" or expr.op == "and" or expr.op == "or") {
+            ^ "bool";
+        }
+        ^ left_ty;
+    }
+    ? (expr.tag == "call") {
+        ? (expr.name == "arg_count") {
+            ^ "i64";
+        }
+        ? (expr.name == "arg") {
+            ^ "text";
+        }
+        ? (expr.name == "read_text") {
+            ^ "text";
+        }
+        ? (expr.name == "write_text") {
+            ^ "bool";
+        }
+        ? (expr.name == "host_cc") {
+            ^ "i64";
+        }
+        ? (expr.name == "count") {
+            ^ "i64";
+        }
+        ? (expr.name == "append") {
+            base_args := expr.args;
+            base_ty := infer_expr_type(program, fn, locals, base_args[0]);
+            ^ base_ty;
+        }
+        ? (expr.name == "find") {
+            ^ "i64";
+        }
+        ? (expr.name == "slice") {
+            ^ "text";
+        }
+        ? (expr.name == "text_of") {
+            ^ "text";
+        }
+        ? (expr.name == "i64_of") {
+            ^ "i64";
+        }
+        ? (expr.name == "socket_open") {
+            ^ "socket";
+        }
+        ? (expr.name == "socket_send") {
+            ^ "i64";
+        }
+        ? (expr.name == "socket_recv") {
+            ^ "text";
+        }
+        ? (expr.name == "socket_recv_all") {
+            ^ "text";
+        }
+        ? (expr.name == "socket_close") {
+            ^ "bool";
+        }
+        called := find_function(program, expr.name);
+        ^ called.return_ty;
+    }
+    ^ "i64";
+}
+
+@escape_c_string(src: text) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx < count(src)) {
+        ch := slice(src, idx, 1);
+        ? (ch == "\\") {
+            out = out + "\\\\";
+        }
+        | {
+            ? (ch == "\"") {
+                out = out + "\\\"";
+            }
+            | {
+                ? (ch == "\n") {
+                    out = out + "\\n";
+                }
+                | {
+                    ? (ch == "\r") {
+                        out = out + "\\r";
+                    }
+                    | {
+                        ? (ch == "\t") {
+                            out = out + "\\t";
+                        }
+                        | {
+                            out = out + ch;
+                        }
+                    }
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@emit_args(program: Program, fn: Function, locals: list<Binding>, args: list<i64>) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx < count(args)) {
+        ? (idx > 0) {
+            out = out + ", ";
+        }
+        out = out + emit_expr(program, fn, locals, args[idx]);
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@emit_call(program: Program, fn: Function, locals: list<Binding>, name: text, args: list<i64>) -> text {
+    ? (name == "arg_count") {
+        ^ "noema_arg_count()";
+    }
+    ? (name == "arg") {
+        ^ "noema_arg(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "read_text") {
+        ^ "noema_read_text(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "write_text") {
+        ^ "noema_write_text(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "host_cc") {
+        ^ "noema_host_cc(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "count") {
+        arg_ty := infer_expr_type(program, fn, locals, args[0]);
+        ? (is_list_type(arg_ty)) {
+            ^ "noema_list_count(" + emit_args(program, fn, locals, args) + ")";
+        }
+        ^ "noema_text_count(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "append") {
+        list_ty := infer_expr_type(program, fn, locals, args[0]);
+        item_ty := list_item_type(list_ty);
+        list_code := emit_expr(program, fn, locals, args[0]);
+        item_code := emit_expr(program, fn, locals, args[1]);
+        ^ append_helper_name(item_ty) + "(" + list_code + ", " + item_code + ")";
+    }
+    ? (name == "find") {
+        ^ "noema_text_find(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "slice") {
+        ^ "noema_text_slice(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "i64_of") {
+        ^ "noema_i64_of(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "socket_open") {
+        ^ "noema_socket_open(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "socket_send") {
+        ^ "noema_socket_send(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "socket_recv") {
+        ^ "noema_socket_recv(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "socket_recv_all") {
+        ^ "noema_socket_recv_all(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "socket_close") {
+        ^ "noema_socket_close(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "text_of") {
+        arg_ty := infer_expr_type(program, fn, locals, args[0]);
+        arg_code := emit_expr(program, fn, locals, args[0]);
+        ? (arg_ty == "i64") {
+            ^ "noema_text_from_i64(" + arg_code + ")";
+        }
+        ? (arg_ty == "bool") {
+            ^ "noema_text_from_bool(" + arg_code + ")";
+        }
+        ^ arg_code;
+    }
+    ^ c_name(name) + "(" + emit_args(program, fn, locals, args) + ")";
+}
+
+@emit_expr(program: Program, fn: Function, locals: list<Binding>, index: i64) -> text {
+    exprs := program.exprs;
+    expr := exprs[index];
+
+    ? (expr.tag == "int") {
+        ^ text_of(expr.value);
+    }
+
+    ? (expr.tag == "bool") {
+        ? (expr.value == 0) {
+            ^ "false";
+        }
+        ^ "true";
+    }
+
+    ? (expr.tag == "text") {
+        escaped := escape_c_string(expr.name);
+        ^ "noema_text_literal(\"" + escaped + "\", " + text_of(count(expr.name)) + ")";
+    }
+
+    ? (expr.tag == "name") {
+        ^ expr.name;
+    }
+
+    ? (expr.tag == "field") {
+        ^ "(" + emit_expr(program, fn, locals, expr.left) + ")." + expr.name;
+    }
+
+    ? (expr.tag == "index") {
+        left_ty := infer_expr_type(program, fn, locals, expr.left);
+        item_ty := list_item_type(left_ty);
+        left_code := emit_expr(program, fn, locals, expr.left);
+        right_code := emit_expr(program, fn, locals, expr.right);
+        ^ "(((" + c_type(item_ty) + " *)(" + left_code + ").items)[" + right_code + "])";
+    }
+
+    ? (expr.tag == "list") {
+        list_ty := infer_expr_type(program, fn, locals, index);
+        item_ty := list_item_type(list_ty);
+        args := expr.args;
+        ? (count(args) == 0) {
+            ^ "noema_list_build((void *)0, 0, sizeof(" + c_type(item_ty) + "))";
+        }
+        items_code := "";
+        idx := 0;
+        ~ (idx < count(args)) {
+            ? (idx > 0) {
+                items_code = items_code + ", ";
+            }
+            items_code = items_code + emit_expr(program, fn, locals, args[idx]);
+            idx = idx + 1;
+        }
+        ^ "noema_list_build((" + c_type(item_ty) + "[]){" + items_code + "}, " + text_of(count(args)) + ", sizeof(" + c_type(item_ty) + "))";
+    }
+
+    ? (expr.tag == "struct") {
+        out := "(" + c_type(expr.ty) + "){";
+        idx := 0;
+        names := expr.names;
+        args := expr.args;
+        ~ (idx < count(args)) {
+            ? (idx > 0) {
+                out = out + ", ";
+            }
+            out = out + "." + names[idx] + " = " + emit_expr(program, fn, locals, args[idx]);
+            idx = idx + 1;
+        }
+        out = out + "}";
+        ^ out;
+    }
+
+    ? (expr.tag == "unary") {
+        ? (expr.op == "not") {
+            ^ "(!" + emit_expr(program, fn, locals, expr.left) + ")";
+        }
+        ^ emit_expr(program, fn, locals, expr.left);
+    }
+
+    ? (expr.tag == "call") {
+        ^ emit_call(program, fn, locals, expr.name, expr.args);
+    }
+
+    ? (expr.tag == "bin") {
+        left_ty := infer_expr_type(program, fn, locals, expr.left);
+        right_ty := infer_expr_type(program, fn, locals, expr.right);
+        left_code := emit_expr(program, fn, locals, expr.left);
+        right_code := emit_expr(program, fn, locals, expr.right);
+        ? (expr.op == "+" and (left_ty == "text" or right_ty == "text")) {
+            ^ "noema_text_concat(" + left_code + ", " + right_code + ")";
+        }
+        ? (expr.op == "==" and left_ty == "text" and right_ty == "text") {
+            ^ "noema_text_eq(" + left_code + ", " + right_code + ")";
+        }
+        ? (expr.op == "!=" and left_ty == "text" and right_ty == "text") {
+            ^ "(!noema_text_eq(" + left_code + ", " + right_code + "))";
+        }
+        ? (expr.op == "and") {
+            ^ "(" + left_code + " && " + right_code + ")";
+        }
+        ? (expr.op == "or") {
+            ^ "(" + left_code + " || " + right_code + ")";
+        }
+        ^ "(" + left_code + " " + expr.op + " " + right_code + ")";
+    }
+
+    ^ "0";
+}
+
+@extend_locals(program: Program, fn: Function, locals: list<Binding>, stmt: Stmt) -> list<Binding> {
+    ? (stmt.tag == "let") {
+        ? (count(stmt.ty) > 0) {
+            ^ append(locals, binding(stmt.name, stmt.ty));
+        }
+        ty := infer_expr_type(program, fn, locals, stmt.expr);
+        ^ append(locals, binding(stmt.name, ty));
+    }
+    ^ locals;
+}
+
+@emit_block(program: Program, fn: Function, locals: list<Binding>, items: list<i64>, level: i64) -> text {
+    out := "";
+    idx := 0;
+    stmts := program.stmts;
+    ~ (idx < count(items)) {
+        stmt := stmts[items[idx]];
+        out = out + emit_stmt(program, fn, locals, stmt, level);
+        locals = extend_locals(program, fn, locals, stmt);
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@emit_stmt(program: Program, fn: Function, locals: list<Binding>, stmt: Stmt, level: i64) -> text {
+    p := pad(level);
+
+    ? (stmt.tag == "let") {
+        ty := stmt.ty;
+        ? (count(ty) == 0) {
+            ty = infer_expr_type(program, fn, locals, stmt.expr);
+        }
+        ^ p + c_type(ty) + " " + stmt.name + " = " + emit_expr(program, fn, locals, stmt.expr) + ";\n";
+    }
+
+    ? (stmt.tag == "assign") {
+        ^ p + stmt.name + " = " + emit_expr(program, fn, locals, stmt.expr) + ";\n";
+    }
+
+    ? (stmt.tag == "emit") {
+        ty := infer_expr_type(program, fn, locals, stmt.expr);
+        ? (ty == "text") {
+            ^ p + "noema_emit_text(" + emit_expr(program, fn, locals, stmt.expr) + ");\n";
+        }
+        ? (ty == "bool") {
+            ^ p + "noema_emit_bool(" + emit_expr(program, fn, locals, stmt.expr) + ");\n";
+        }
+        ^ p + "noema_emit_i64(" + emit_expr(program, fn, locals, stmt.expr) + ");\n";
+    }
+
+    ? (stmt.tag == "ret") {
+        ^ p + "return " + emit_expr(program, fn, locals, stmt.expr) + ";\n";
+    }
+
+    ? (stmt.tag == "while") {
+        out := p + "while (" + emit_expr(program, fn, locals, stmt.expr) + ") {\n";
+        out = out + emit_block(program, fn, locals, stmt.body, level + 1);
+        out = out + p + "}\n";
+        ^ out;
+    }
+
+    ? (stmt.tag == "if") {
+        out := p + "if (" + emit_expr(program, fn, locals, stmt.expr) + ") {\n";
+        out = out + emit_block(program, fn, locals, stmt.body, level + 1);
+        out = out + p + "}";
+        ? (count(stmt.alt) > 0) {
+            out = out + " else {\n";
+            out = out + emit_block(program, fn, locals, stmt.alt, level + 1);
+            out = out + p + "}\n";
+        }
+        | {
+            out = out + "\n";
+        }
+        ^ out;
+    }
+
+    ^ "";
+}
+
+@emit_params(params: list<Binding>) -> text {
+    ? (count(params) == 0) {
+        ^ "void";
+    }
+    out := "";
+    idx := 0;
+    ~ (idx < count(params)) {
+        ? (idx > 0) {
+            out = out + ", ";
+        }
+        param := params[idx];
+        out = out + c_type(param.ty) + " " + param.name;
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@emit_shapes(program: Program) -> text {
+    out := "";
+    shapes := program.shapes;
+    idx := 0;
+    ~ (idx < count(shapes)) {
+        shape := shapes[idx];
+        out = out + "typedef struct {\n";
+        field_idx := 0;
+        fields := shape.fields;
+        ~ (field_idx < count(fields)) {
+            item := fields[field_idx];
+            out = out + "    " + c_type(item.ty) + " " + item.name + ";\n";
+            field_idx = field_idx + 1;
+        }
+        out = out + "} " + c_type(shape.name) + ";\n\n";
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@emit_list_append_helpers(program: Program) -> text {
+    out := "";
+    out = out + "static noema_list noema_list_append_i64(noema_list list, noema_i64 value) { return noema_list_append_raw(list, &value, sizeof(noema_i64)); }\n";
+    out = out + "static noema_list noema_list_append_bool(noema_list list, bool value) { return noema_list_append_raw(list, &value, sizeof(bool)); }\n";
+    out = out + "static noema_list noema_list_append_text(noema_list list, noema_text value) { return noema_list_append_raw(list, &value, sizeof(noema_text)); }\n";
+    out = out + "static noema_list noema_list_append_socket(noema_list list, noema_socket value) { return noema_list_append_raw(list, &value, sizeof(noema_socket)); }\n";
+    out = out + "static noema_list noema_list_append_list(noema_list list, noema_list value) { return noema_list_append_raw(list, &value, sizeof(noema_list)); }\n";
+    shapes := program.shapes;
+    idx := 0;
+    ~ (idx < count(shapes)) {
+        shape := shapes[idx];
+        out = out + "static noema_list " + append_helper_name(shape.name) + "(noema_list list, " + c_type(shape.name) + " value) { return noema_list_append_raw(list, &value, sizeof(" + c_type(shape.name) + ")); }\n";
+        idx = idx + 1;
+    }
+    out = out + "\n";
+    ^ out;
+}
+
+@emit_prototypes(program: Program) -> text {
+    out := "";
+    idx := 0;
+    funcs := program.funcs;
+    ~ (idx < count(funcs)) {
+        fn := funcs[idx];
+        out = out + "static " + c_type(fn.return_ty) + " " + c_name(fn.name) + "(" + emit_params(fn.params) + ");\n";
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@emit_functions(program: Program) -> text {
+    out := "";
+    idx := 0;
+    funcs := program.funcs;
+    ~ (idx < count(funcs)) {
+        fn := funcs[idx];
+        out = out + "static " + c_type(fn.return_ty) + " " + c_name(fn.name) + "(" + emit_params(fn.params) + ") {\n";
+        locals := empty_bindings();
+        out = out + emit_block(program, fn, locals, fn.body, 1);
+        ? (fn.return_ty == "text") {
+            out = out + "    return noema_text_literal(\"\", 0);\n";
+        }
+        | {
+            ? (fn.return_ty == "socket") {
+                out = out + "    return (noema_socket){0};\n";
+            }
+            | {
+                ? (fn.return_ty == "bool") {
+                    out = out + "    return 0;\n";
+                }
+                | {
+                    ? (is_list_type(fn.return_ty)) {
+                        out = out + "    return (noema_list){0};\n";
+                    }
+                    | {
+                        ? (fn.return_ty == "i64") {
+                            out = out + "    return 0;\n";
+                        }
+                        | {
+                            out = out + "    return (" + c_type(fn.return_ty) + "){0};\n";
+                        }
+                    }
+                }
+            }
+        }
+        out = out + "}\n\n";
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@emit_runtime() -> text {
+    out := "/* generated by selfhost mini_compiler */\n";
+    out = out + "%:include <stdbool.h>\n";
+    out = out + "%:include <stdint.h>\n";
+    out = out + "%:include <stdio.h>\n";
+    out = out + "%:include <stdlib.h>\n";
+    out = out + "%:include <string.h>\n";
+    out = out + "%:include <netdb.h>\n";
+    out = out + "%:include <sys/socket.h>\n";
+    out = out + "%:include <sys/types.h>\n";
+    out = out + "%:include <unistd.h>\n\n";
+    out = out + "typedef int64_t noema_i64;\n\n";
+    out = out + "typedef struct { noema_i64 len; const char *data; } noema_text;\n";
+    out = out + "typedef struct { int fd; } noema_socket;\n";
+    out = out + "typedef struct { noema_i64 len; void *items; } noema_list;\n";
+    out = out + "static int noema_argc = 0;\n";
+    out = out + "static char **noema_argv = NULL;\n\n";
+    out = out + "static void *noema_alloc(size_t size) {\n";
+    out = out + "    void *ptr = malloc(size);\n";
+    out = out + "    if (!ptr) { fprintf(stderr, \"alloc failed\\n\"); exit(1); }\n";
+    out = out + "    return ptr;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_text_literal(const char *data, noema_i64 len) {\n";
+    out = out + "    noema_text text; text.len = len; text.data = data; return text;\n";
+    out = out + "}\n\n";
+    out = out + "static char *noema_text_to_cstr(noema_text text) {\n";
+    out = out + "    char *buffer = (char *)noema_alloc((size_t)text.len + 1);\n";
+    out = out + "    memcpy(buffer, text.data, (size_t)text.len);\n";
+    out = out + "    buffer[text.len] = '\\0';\n";
+    out = out + "    return buffer;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_i64 noema_text_count(noema_text text) { return text.len; }\n\n";
+    out = out + "static noema_list noema_list_build(const void *items, noema_i64 len, size_t item_size) {\n";
+    out = out + "    noema_list list;\n";
+    out = out + "    list.len = len;\n";
+    out = out + "    if (len == 0) {\n";
+    out = out + "        list.items = NULL;\n";
+    out = out + "        return list;\n";
+    out = out + "    }\n";
+    out = out + "    list.items = noema_alloc((size_t)len * item_size);\n";
+    out = out + "    memcpy(list.items, items, (size_t)len * item_size);\n";
+    out = out + "    return list;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_i64 noema_list_count(noema_list list) { return list.len; }\n\n";
+    out = out + "static noema_list noema_list_append_raw(noema_list list, const void *item, size_t item_size) {\n";
+    out = out + "    noema_list result;\n";
+    out = out + "    result.len = list.len + 1;\n";
+    out = out + "    result.items = noema_alloc((size_t)result.len * item_size);\n";
+    out = out + "    if (list.len > 0) {\n";
+    out = out + "        memcpy(result.items, list.items, (size_t)list.len * item_size);\n";
+    out = out + "    }\n";
+    out = out + "    memcpy(((char *)result.items) + ((size_t)list.len * item_size), item, item_size);\n";
+    out = out + "    return result;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_i64 noema_text_find(noema_text haystack, noema_text needle) {\n";
+    out = out + "    noema_i64 index = 0;\n";
+    out = out + "    if (needle.len == 0) return 0;\n";
+    out = out + "    if (needle.len > haystack.len) return -1;\n";
+    out = out + "    while (index <= haystack.len - needle.len) {\n";
+    out = out + "        if (memcmp(haystack.data + index, needle.data, (size_t)needle.len) == 0) return index;\n";
+    out = out + "        index += 1;\n";
+    out = out + "    }\n";
+    out = out + "    return -1;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_text_slice(noema_text text, noema_i64 start, noema_i64 len) {\n";
+    out = out + "    return noema_text_literal(text.data + start, len);\n";
+    out = out + "}\n\n";
+    out = out + "static bool noema_text_eq(noema_text left, noema_text right) {\n";
+    out = out + "    if (left.len != right.len) return 0;\n";
+    out = out + "    return memcmp(left.data, right.data, (size_t)left.len) == 0;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_text_concat(noema_text left, noema_text right) {\n";
+    out = out + "    char *buffer = (char *)noema_alloc((size_t)(left.len + right.len + 1));\n";
+    out = out + "    memcpy(buffer, left.data, (size_t)left.len);\n";
+    out = out + "    memcpy(buffer + left.len, right.data, (size_t)right.len);\n";
+    out = out + "    buffer[left.len + right.len] = '\\0';\n";
+    out = out + "    return noema_text_literal(buffer, left.len + right.len);\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_text_from_i64(noema_i64 value) {\n";
+    out = out + "    char stack_buffer[64];\n";
+    out = out + "    int length = snprintf(stack_buffer, sizeof(stack_buffer), \"%lld\", value);\n";
+    out = out + "    char *buffer = (char *)noema_alloc((size_t)length + 1);\n";
+    out = out + "    memcpy(buffer, stack_buffer, (size_t)length + 1);\n";
+    out = out + "    return noema_text_literal(buffer, (noema_i64)length);\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_text_from_bool(bool value) {\n";
+    out = out + "    return value ? noema_text_literal(\"true\", 4) : noema_text_literal(\"false\", 5);\n";
+    out = out + "}\n\n";
+    out = out + "static noema_i64 noema_i64_of(noema_text text) {\n";
+    out = out + "    char *buffer = noema_text_to_cstr(text);\n";
+    out = out + "    return strtoll(buffer, (void *)0, 10);\n";
+    out = out + "}\n\n";
+    out = out + "static void noema_emit_i64(noema_i64 value) { printf(\"%lld\\n\", value); }\n";
+    out = out + "static void noema_emit_bool(bool value) { puts(value ? \"true\" : \"false\"); }\n";
+    out = out + "static void noema_emit_text(noema_text text) { fwrite(text.data, 1, (size_t)text.len, stdout); fputc('\\n', stdout); }\n\n";
+    out = out + "static noema_i64 noema_arg_count(void) { return (noema_i64)noema_argc; }\n";
+    out = out + "static noema_text noema_arg(noema_i64 index) { return noema_text_literal(noema_argv[index], (noema_i64)strlen(noema_argv[index])); }\n\n";
+    out = out + "static noema_text noema_read_text(noema_text path) {\n";
+    out = out + "    char *path_c = noema_text_to_cstr(path);\n";
+    out = out + "    FILE *file = fopen(path_c, \"rb\");\n";
+    out = out + "    if (!file) { fprintf(stderr, \"open failed %s\\n\", path_c); exit(1); }\n";
+    out = out + "    fseek(file, 0, 2);\n";
+    out = out + "    long size = ftell(file);\n";
+    out = out + "    rewind(file);\n";
+    out = out + "    char *buffer = (char *)noema_alloc((size_t)size + 1);\n";
+    out = out + "    fread(buffer, 1, (size_t)size, file);\n";
+    out = out + "    fclose(file);\n";
+    out = out + "    buffer[size] = '\\0';\n";
+    out = out + "    return noema_text_literal(buffer, (noema_i64)size);\n";
+    out = out + "}\n\n";
+    out = out + "static bool noema_write_text(noema_text path, noema_text text) {\n";
+    out = out + "    char *path_c = noema_text_to_cstr(path);\n";
+    out = out + "    FILE *file = fopen(path_c, \"wb\");\n";
+    out = out + "    if (!file) return 0;\n";
+    out = out + "    size_t written = fwrite(text.data, 1, (size_t)text.len, file);\n";
+    out = out + "    fclose(file);\n";
+    out = out + "    return written == (size_t)text.len;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_i64 noema_host_cc(noema_text source_path, noema_text output_path) {\n";
+    out = out + "    char *source_c = noema_text_to_cstr(source_path);\n";
+    out = out + "    char *output_c = noema_text_to_cstr(output_path);\n";
+    out = out + "    size_t command_len = strlen(source_c) + strlen(output_c) + 128;\n";
+    out = out + "    char *command = (char *)noema_alloc(command_len);\n";
+    out = out + "    snprintf(command, command_len, \"cc -O3 %s -o %s\", source_c, output_c);\n";
+    out = out + "    return system(command);\n";
+    out = out + "}\n\n";
+    out = out + "static noema_socket noema_socket_open(noema_text host, noema_i64 port) {\n";
+    out = out + "    char *host_c = noema_text_to_cstr(host);\n";
+    out = out + "    char port_buffer[32]; struct addrinfo hints; struct addrinfo *result = NULL; struct addrinfo *cursor = NULL; int fd = -1; noema_socket socket_value;\n";
+    out = out + "    memset(&hints, 0, sizeof(hints)); hints.ai_socktype = SOCK_STREAM; hints.ai_family = AF_UNSPEC;\n";
+    out = out + "    snprintf(port_buffer, sizeof(port_buffer), \"%lld\", (long long)port);\n";
+    out = out + "    if (getaddrinfo(host_c, port_buffer, &hints, &result) != 0) { fprintf(stderr, \"getaddrinfo failed\\n\"); exit(1); }\n";
+    out = out + "    for (cursor = result; cursor != NULL; cursor = cursor->ai_next) {\n";
+    out = out + "        fd = socket(cursor->ai_family, cursor->ai_socktype, cursor->ai_protocol);\n";
+    out = out + "        if (fd < 0) continue;\n";
+    out = out + "        if (connect(fd, cursor->ai_addr, cursor->ai_addrlen) == 0) break;\n";
+    out = out + "        close(fd); fd = -1;\n";
+    out = out + "    }\n";
+    out = out + "    freeaddrinfo(result);\n";
+    out = out + "    if (fd < 0) { fprintf(stderr, \"connect failed\\n\"); exit(1); }\n";
+    out = out + "    socket_value.fd = fd; return socket_value;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_i64 noema_socket_send(noema_socket socket_value, noema_text text) {\n";
+    out = out + "    noema_i64 total = 0;\n";
+    out = out + "    while (total < text.len) {\n";
+    out = out + "        ssize_t wrote = send(socket_value.fd, text.data + total, (size_t)(text.len - total), 0);\n";
+    out = out + "        if (wrote <= 0) { fprintf(stderr, \"socket send failed\\n\"); exit(1); }\n";
+    out = out + "        total += (noema_i64)wrote;\n";
+    out = out + "    }\n";
+    out = out + "    return total;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_socket_recv(noema_socket socket_value, noema_i64 limit) {\n";
+    out = out + "    char *buffer = (char *)noema_alloc((size_t)limit + 1);\n";
+    out = out + "    ssize_t got = recv(socket_value.fd, buffer, (size_t)limit, 0);\n";
+    out = out + "    if (got < 0) { fprintf(stderr, \"socket recv failed\\n\"); exit(1); }\n";
+    out = out + "    buffer[got] = '\\0';\n";
+    out = out + "    return noema_text_literal(buffer, (noema_i64)got);\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_socket_recv_all(noema_socket socket_value) {\n";
+    out = out + "    noema_i64 cap = 4096; noema_i64 len = 0; char *buffer = (char *)noema_alloc((size_t)cap + 1);\n";
+    out = out + "    while (1) {\n";
+    out = out + "        ssize_t got = recv(socket_value.fd, buffer + len, (size_t)(cap - len), 0);\n";
+    out = out + "        if (got < 0) { fprintf(stderr, \"socket recv failed\\n\"); exit(1); }\n";
+    out = out + "        if (got == 0) break;\n";
+    out = out + "        len += (noema_i64)got;\n";
+    out = out + "        if (len == cap) { cap *= 2; buffer = (char *)realloc(buffer, (size_t)cap + 1); }\n";
+    out = out + "    }\n";
+    out = out + "    buffer[len] = '\\0'; return noema_text_literal(buffer, len);\n";
+    out = out + "}\n\n";
+    out = out + "static bool noema_socket_close(noema_socket socket_value) { return close(socket_value.fd) == 0; }\n\n";
+    ^ out;
+}
+
+@emit_program(program: Program) -> text {
+    out := emit_runtime();
+    out = out + emit_shapes(program);
+    out = out + emit_list_append_helpers(program);
+    out = out + emit_prototypes(program);
+    out = out + "\n";
+    out = out + emit_functions(program);
+    out = out + "int main(int argc, char **argv) {\n";
+    out = out + "    noema_argc = argc;\n";
+    out = out + "    noema_argv = argv;\n";
+    out = out + "    return (int)noema_main();\n";
+    out = out + "}\n";
+    ^ out;
+}
+
+@native_align16(bytes: i64) -> i64 {
+    rem := bytes - ((bytes / 16) * 16);
+    ? (rem == 0) {
+        ^ bytes;
+    }
+    ^ bytes + (16 - rem);
+}
+
+@native_slot_offset(slot: i64) -> i64 {
+    ^ -8 * (slot + 1);
+}
+
+@native_slot_of(locals: list<Binding>, name: text) -> i64 {
+    idx := 0;
+    ~ (idx < count(locals)) {
+        item := locals[idx];
+        ? (item.name == name) {
+            ^ idx;
+        }
+        idx = idx + 1;
+    }
+    ^ -1;
+}
+
+@native_fn_label(name: text) -> text {
+    ? (name == "main") {
+        ^ "_noema_user_main";
+    }
+    ^ "_noema_" + name;
+}
+
+@native_text_label(index: i64) -> text {
+    ^ "L_text_" + text_of(index);
+}
+
+@native_load_label(reg: text, label: text) -> text {
+    out := "    adrp " + reg + ", " + label + "@PAGE\n";
+    out = out + "    add " + reg + ", " + reg + ", " + label + "@PAGEOFF\n";
+    ^ out;
+}
+
+@emit_native_data(program: Program) -> text {
+    out := ".data\n";
+    out = out + ".align 3\n";
+    out = out + "_noema_argc_native:\n";
+    out = out + "    .quad 0\n";
+    out = out + "_noema_argv_native:\n";
+    out = out + "    .quad 0\n";
+    out = out + "L_native_newline:\n";
+    out = out + "    .asciz \"\\n\"\n";
+    out = out + "L_native_true:\n";
+    out = out + "    .asciz \"true\"\n";
+    out = out + "L_native_false:\n";
+    out = out + "    .asciz \"false\"\n";
+    out = out + "L_native_i64_fmt:\n";
+    out = out + "    .asciz \"%lld\"\n";
+    out = out + "L_native_cc_prefix:\n";
+    out = out + "    .asciz \"cc -O3 \"\n";
+    out = out + "L_native_cc_infix:\n";
+    out = out + "    .asciz \" -o \"\n";
+    idx := 0;
+    exprs := program.exprs;
+    ~ (idx < count(exprs)) {
+        expr := exprs[idx];
+        ? (expr.tag == "text") {
+            escaped := escape_c_string(expr.name);
+            out = out + native_text_label(idx) + ":\n";
+            out = out + "    .asciz \"" + escaped + "\"\n";
+        }
+        idx = idx + 1;
+    }
+    out = out + "\n";
+    ^ out;
+}
+
+@native_field_index(program: Program, shape_name: text, field_name: text) -> i64 {
+    shape := lookup_shape(program, shape_name);
+    fields := shape.fields;
+    idx := 0;
+    ~ (idx < count(fields)) {
+        item := fields[idx];
+        ? (item.name == field_name) {
+            ^ idx;
+        }
+        idx = idx + 1;
+    }
+    ^ -1;
+}
+
+@native_count_stmt_slots(program: Program, stmt: Stmt) -> i64 {
+    ? (stmt.tag == "let") {
+        ^ 1;
+    }
+    ? (stmt.tag == "if") {
+        ^ native_count_slots(program, stmt.body) + native_count_slots(program, stmt.alt);
+    }
+    ? (stmt.tag == "while") {
+        ^ native_count_slots(program, stmt.body);
+    }
+    ^ 0;
+}
+
+@native_count_slots(program: Program, items: list<i64>) -> i64 {
+    count_slots := 0;
+    idx := 0;
+    stmts := program.stmts;
+    ~ (idx < count(items)) {
+        stmt := stmts[items[idx]];
+        count_slots = count_slots + native_count_stmt_slots(program, stmt);
+        idx = idx + 1;
+    }
+    ^ count_slots;
+}
+
+@native_small_imm(value: i64) -> bool {
+    abs := value;
+    ? (abs < 0) {
+        abs = 0 - abs;
+    }
+    ^ abs < 65536;
+}
+
+@native_i64_chunks(value: i64, shift: i64) -> i64 {
+    base := 1;
+    idx := 0;
+    ~ (idx < shift) {
+        base = base * 65536;
+        idx = idx + 1;
+    }
+    upper := value / base;
+    next_upper := upper / 65536;
+    ^ upper - (next_upper * 65536);
+}
+
+@native_load_i64(value: i64) -> text {
+    abs := value;
+    negate := false;
+    ? (abs < 0) {
+        abs = 0 - abs;
+        negate = true;
+    }
+    part0 := native_i64_chunks(abs, 0);
+    part1 := native_i64_chunks(abs, 1);
+    part2 := native_i64_chunks(abs, 2);
+    part3 := native_i64_chunks(abs, 3);
+    out := "    movz x0, #" + text_of(part0) + "\n";
+    ? (part1 != 0) {
+        out = out + "    movk x0, #" + text_of(part1) + ", lsl #16\n";
+    }
+    ? (part2 != 0) {
+        out = out + "    movk x0, #" + text_of(part2) + ", lsl #32\n";
+    }
+    ? (part3 != 0) {
+        out = out + "    movk x0, #" + text_of(part3) + ", lsl #48\n";
+    }
+    ? (negate) {
+        out = out + "    neg x0, x0\n";
+    }
+    ^ out;
+}
+
+@native_arg_reg(idx: i64) -> text {
+    ? (idx == 0) {
+        ^ "x0";
+    }
+    ? (idx == 1) {
+        ^ "x1";
+    }
+    ? (idx == 2) {
+        ^ "x2";
+    }
+    ? (idx == 3) {
+        ^ "x3";
+    }
+    ? (idx == 4) {
+        ^ "x4";
+    }
+    ? (idx == 5) {
+        ^ "x5";
+    }
+    ? (idx == 6) {
+        ^ "x6";
+    }
+    ^ "x7";
+}
+
+@native_supported_expr(program: Program, fn: Function, locals: list<Binding>, index: i64) -> bool {
+    exprs := program.exprs;
+    expr := exprs[index];
+    ? (expr.tag == "int") {
+        ^ true;
+    }
+    ? (expr.tag == "bool") {
+        ^ true;
+    }
+    ? (expr.tag == "text") {
+        ^ true;
+    }
+    ? (expr.tag == "name") {
+        ^ native_slot_of(locals, expr.name) >= 0;
+    }
+    ? (expr.tag == "field") {
+        left_ty := infer_expr_type(program, fn, locals, expr.left);
+        field_idx := native_field_index(program, left_ty, expr.name);
+        left_ok := native_supported_expr(program, fn, locals, expr.left);
+        ^ count(left_ty) > 0 and field_idx >= 0 and left_ok;
+    }
+    ? (expr.tag == "index") {
+        left_ty := infer_expr_type(program, fn, locals, expr.left);
+        left_ok := native_supported_expr(program, fn, locals, expr.left);
+        right_ok := native_supported_expr(program, fn, locals, expr.right);
+        ^ is_list_type(left_ty) and left_ok and right_ok;
+    }
+    ? (expr.tag == "list") {
+        idx := 0;
+        args := expr.args;
+        ~ (idx < count(args)) {
+            ? (not native_supported_expr(program, fn, locals, args[idx])) {
+                ^ false;
+            }
+            idx = idx + 1;
+        }
+        ^ true;
+    }
+    ? (expr.tag == "struct") {
+        idx := 0;
+        args := expr.args;
+        ~ (idx < count(args)) {
+            ? (not native_supported_expr(program, fn, locals, args[idx])) {
+                ^ false;
+            }
+            idx = idx + 1;
+        }
+        ^ true;
+    }
+    ? (expr.tag == "unary") {
+        ? (expr.op != "not") {
+            ^ false;
+        }
+        ^ infer_expr_type(program, fn, locals, expr.left) == "bool" and native_supported_expr(program, fn, locals, expr.left);
+    }
+    ? (expr.tag == "call") {
+        ? (expr.name == "arg_count") {
+            ^ true;
+        }
+        ? (expr.name == "arg") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            arg0 := args[0];
+            arg0_ok := native_supported_expr(program, fn, locals, arg0);
+            ^ arg0_ok;
+        }
+        ? (expr.name == "read_text") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            arg0 := args[0];
+            arg0_ok := native_supported_expr(program, fn, locals, arg0);
+            ^ arg0_ok;
+        }
+        ? (expr.name == "write_text") {
+            args := expr.args;
+            ? (count(args) != 2) {
+                ^ false;
+            }
+            arg0 := args[0];
+            arg1 := args[1];
+            arg0_ok := native_supported_expr(program, fn, locals, arg0);
+            arg1_ok := native_supported_expr(program, fn, locals, arg1);
+            ^ arg0_ok and arg1_ok;
+        }
+        ? (expr.name == "find") {
+            args := expr.args;
+            ? (count(args) != 2) {
+                ^ false;
+            }
+            arg0 := args[0];
+            arg1 := args[1];
+            arg0_ok := native_supported_expr(program, fn, locals, arg0);
+            arg1_ok := native_supported_expr(program, fn, locals, arg1);
+            ^ arg0_ok and arg1_ok;
+        }
+        ? (expr.name == "slice") {
+            args := expr.args;
+            ? (count(args) != 3) {
+                ^ false;
+            }
+            arg0 := args[0];
+            arg1 := args[1];
+            arg2 := args[2];
+            arg0_ok := native_supported_expr(program, fn, locals, arg0);
+            arg1_ok := native_supported_expr(program, fn, locals, arg1);
+            arg2_ok := native_supported_expr(program, fn, locals, arg2);
+            ^ arg0_ok and arg1_ok and arg2_ok;
+        }
+        ? (expr.name == "text_of") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            arg0 := args[0];
+            arg0_ok := native_supported_expr(program, fn, locals, arg0);
+            ^ arg0_ok;
+        }
+        ? (expr.name == "i64_of") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            arg0 := args[0];
+            arg0_ok := native_supported_expr(program, fn, locals, arg0);
+            ^ arg0_ok;
+        }
+        ? (expr.name == "host_cc") {
+            args := expr.args;
+            ? (count(args) != 2) {
+                ^ false;
+            }
+            arg0 := args[0];
+            arg1 := args[1];
+            arg0_ok := native_supported_expr(program, fn, locals, arg0);
+            arg1_ok := native_supported_expr(program, fn, locals, arg1);
+            ^ arg0_ok and arg1_ok;
+        }
+        ? (expr.name == "count") {
+            ? (count(expr.args) != 1) {
+                ^ false;
+            }
+            args := expr.args;
+            arg0 := args[0];
+            arg_ty := infer_expr_type(program, fn, locals, arg0);
+            arg_ok := native_supported_expr(program, fn, locals, arg0);
+            ^ (is_list_type(arg_ty) or arg_ty == "text") and arg_ok;
+        }
+        ? (expr.name == "append") {
+            ? (count(expr.args) != 2) {
+                ^ false;
+            }
+            args := expr.args;
+            list_arg := args[0];
+            item_arg := args[1];
+            list_ty := infer_expr_type(program, fn, locals, list_arg);
+            ? (not is_list_type(list_ty)) {
+                ^ false;
+            }
+            list_ok := native_supported_expr(program, fn, locals, list_arg);
+            item_ok := native_supported_expr(program, fn, locals, item_arg);
+            ^ list_ok and item_ok;
+        }
+        called := find_function(program, expr.name);
+        called_name_len := count(called.name);
+        arg_count_local := count(expr.args);
+        param_count_local := count(called.params);
+        ? (called_name_len == 0 or param_count_local != arg_count_local) {
+            ^ false;
+        }
+        ? (arg_count_local > 8) {
+            ^ false;
+        }
+        idx := 0;
+        params := called.params;
+        args := expr.args;
+        ~ (idx < count(args)) {
+            ? (not native_supported_expr(program, fn, locals, args[idx])) {
+                ^ false;
+            }
+            idx = idx + 1;
+        }
+        ^ true;
+    }
+    ? (expr.tag == "bin") {
+        left_ty := infer_expr_type(program, fn, locals, expr.left);
+        right_ty := infer_expr_type(program, fn, locals, expr.right);
+        ? (expr.op == "+" and (left_ty == "text" or right_ty == "text")) {
+            ^ native_supported_expr(program, fn, locals, expr.left) and native_supported_expr(program, fn, locals, expr.right);
+        }
+        text_cmp := expr.op == "==" or expr.op == "!=";
+        ? (text_cmp and left_ty == "text" and right_ty == "text") {
+            ^ native_supported_expr(program, fn, locals, expr.left) and native_supported_expr(program, fn, locals, expr.right);
+        }
+        ? (expr.op != "+" and expr.op != "-" and expr.op != "*" and expr.op != "/" and expr.op != "<" and expr.op != "<=" and expr.op != ">" and expr.op != ">=" and expr.op != "==" and expr.op != "!=" and expr.op != "and" and expr.op != "or") {
+            ^ false;
+        }
+        ^ native_supported_expr(program, fn, locals, expr.left) and native_supported_expr(program, fn, locals, expr.right);
+    }
+    ^ false;
+}
+
+@native_supported_stmt(program: Program, fn: Function, locals: list<Binding>, stmt: Stmt) -> bool {
+    ? (stmt.tag == "let") {
+        ^ native_supported_expr(program, fn, locals, stmt.expr);
+    }
+    ? (stmt.tag == "assign") {
+        ^ native_slot_of(locals, stmt.name) >= 0 and native_supported_expr(program, fn, locals, stmt.expr);
+    }
+    ? (stmt.tag == "emit") {
+        ^ native_supported_expr(program, fn, locals, stmt.expr);
+    }
+    ? (stmt.tag == "ret") {
+        ^ native_supported_expr(program, fn, locals, stmt.expr);
+    }
+    ? (stmt.tag == "if") {
+        ? (infer_expr_type(program, fn, locals, stmt.expr) != "bool" or not native_supported_expr(program, fn, locals, stmt.expr)) {
+            ^ false;
+        }
+        body_ok := native_supported_items(program, fn, locals, stmt.body);
+        alt_ok := native_supported_items(program, fn, locals, stmt.alt);
+        ^ body_ok and alt_ok;
+    }
+    ? (stmt.tag == "while") {
+        ? (infer_expr_type(program, fn, locals, stmt.expr) != "bool" or not native_supported_expr(program, fn, locals, stmt.expr)) {
+            ^ false;
+        }
+        ^ native_supported_items(program, fn, locals, stmt.body);
+    }
+    ^ false;
+}
+
+@native_supported_items(program: Program, fn: Function, locals: list<Binding>, items: list<i64>) -> bool {
+    idx := 0;
+    stmts := program.stmts;
+    ok := true;
+    ~ (idx < count(items)) {
+        stmt := stmts[items[idx]];
+        ? (not native_supported_stmt(program, fn, locals, stmt)) {
+            ok = false;
+        }
+        locals = extend_locals(program, fn, locals, stmt);
+        idx = idx + 1;
+    }
+    ^ ok;
+}
+
+@native_expr(program: Program, fn: Function, locals: list<Binding>, index: i64) -> text {
+    exprs := program.exprs;
+    expr := exprs[index];
+    ? (expr.tag == "int") {
+        ^ native_load_i64(expr.value);
+    }
+    ? (expr.tag == "bool") {
+        ? (expr.value == 0) {
+            ^ "    mov x0, #0\n";
+        }
+        ^ "    mov x0, #1\n";
+    }
+    ? (expr.tag == "text") {
+        label := native_text_label(index);
+        out := native_load_label("x0", label);
+        out = out + "    mov x1, #" + text_of(count(expr.name)) + "\n";
+        out = out + "    bl _noema_text_from_parts_native\n";
+        ^ out;
+    }
+    ? (expr.tag == "name") {
+        slot := native_slot_of(locals, expr.name);
+        ^ "    ldr x0, [x29, #" + text_of(native_slot_offset(slot)) + "]\n";
+    }
+    ? (expr.tag == "field") {
+        left_ty := infer_expr_type(program, fn, locals, expr.left);
+        field_idx := native_field_index(program, left_ty, expr.name);
+        out := native_expr(program, fn, locals, expr.left);
+        field_offset := field_idx * 8;
+        out = out + "    ldr x0, [x0, #" + text_of(field_offset) + "]\n";
+        ^ out;
+    }
+    ? (expr.tag == "index") {
+        out := native_expr(program, fn, locals, expr.left);
+        out = out + "    sub sp, sp, #16\n";
+        out = out + "    str x0, [sp]\n";
+        out = out + native_expr(program, fn, locals, expr.right);
+        out = out + "    ldr x1, [sp]\n";
+        out = out + "    add sp, sp, #16\n";
+        out = out + "    ldr x1, [x1, #8]\n";
+        out = out + "    ldr x0, [x1, x0, lsl #3]\n";
+        ^ out;
+    }
+    ? (expr.tag == "list") {
+        args := expr.args;
+        out := "";
+        idx := count(args) - 1;
+        ~ (idx >= 0) {
+            out = out + native_expr(program, fn, locals, args[idx]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            idx = idx - 1;
+        }
+        ? (count(args) > 0) {
+            out = out + "    mov x0, sp\n";
+        }
+        | {
+            out = out + "    mov x0, #0\n";
+        }
+        arg_count_local := count(args);
+        out = out + "    mov x1, #" + text_of(arg_count_local) + "\n";
+        out = out + "    bl _noema_list_from_stack_native\n";
+        ? (arg_count_local > 0) {
+            stack_bytes := arg_count_local * 16;
+            out = out + "    add sp, sp, #" + text_of(stack_bytes) + "\n";
+        }
+        ^ out;
+    }
+    ? (expr.tag == "struct") {
+        out := "";
+        args := expr.args;
+        names := expr.names;
+        idx := count(args) - 1;
+        ~ (idx >= 0) {
+            out = out + native_expr(program, fn, locals, args[idx]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            idx = idx - 1;
+        }
+        shape := lookup_shape(program, expr.ty);
+        fields := shape.fields;
+        out = out + "    mov x0, #" + text_of(count(fields)) + "\n";
+        out = out + "    bl _noema_alloc_words_native\n";
+        out = out + "    mov x9, x0\n";
+        idx = 0;
+        ~ (idx < count(args)) {
+            field_idx := native_field_index(program, expr.ty, names[idx]);
+            stack_offset := idx * 16;
+            field_offset := field_idx * 8;
+            out = out + "    ldr x10, [sp, #" + text_of(stack_offset) + "]\n";
+            out = out + "    str x10, [x9, #" + text_of(field_offset) + "]\n";
+            idx = idx + 1;
+        }
+        ? (count(args) > 0) {
+            stack_bytes := count(args) * 16;
+            out = out + "    add sp, sp, #" + text_of(stack_bytes) + "\n";
+        }
+        out = out + "    mov x0, x9\n";
+        ^ out;
+    }
+    ? (expr.tag == "unary") {
+        out := native_expr(program, fn, locals, expr.left);
+        ? (expr.op == "not") {
+            out = out + "    cmp x0, #0\n";
+            out = out + "    cset x0, eq\n";
+        }
+        ^ out;
+    }
+    ? (expr.tag == "call") {
+        args := expr.args;
+        ? (expr.name == "arg_count") {
+            ^ "    bl _noema_arg_count_native\n";
+        }
+        ? (expr.name == "arg") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_arg_native\n";
+            ^ out;
+        }
+        ? (expr.name == "read_text") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_read_text_native\n";
+            ^ out;
+        }
+        ? (expr.name == "write_text") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, args[1]);
+            out = out + "    mov x1, x0\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_write_text_native\n";
+            ^ out;
+        }
+        ? (expr.name == "count") {
+            out := native_expr(program, fn, locals, args[0]);
+            arg_ty := infer_expr_type(program, fn, locals, args[0]);
+            ? (arg_ty == "text") {
+                out = out + "    bl _noema_text_count_native\n";
+            }
+            | {
+                out = out + "    bl _noema_list_count_native\n";
+            }
+            ^ out;
+        }
+        ? (expr.name == "append") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, args[1]);
+            out = out + "    mov x1, x0\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_list_append_native\n";
+            ^ out;
+        }
+        ? (expr.name == "find") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, args[1]);
+            out = out + "    mov x1, x0\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_text_find_native\n";
+            ^ out;
+        }
+        ? (expr.name == "slice") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    sub sp, sp, #32\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, args[1]);
+            out = out + "    str x0, [sp, #16]\n";
+            out = out + native_expr(program, fn, locals, args[2]);
+            out = out + "    mov x2, x0\n";
+            out = out + "    ldr x1, [sp, #16]\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #32\n";
+            out = out + "    bl _noema_text_slice_native\n";
+            ^ out;
+        }
+        ? (expr.name == "text_of") {
+            arg_ty := infer_expr_type(program, fn, locals, args[0]);
+            out := native_expr(program, fn, locals, args[0]);
+            ? (arg_ty == "i64") {
+                out = out + "    bl _noema_text_from_i64_native\n";
+                ^ out;
+            }
+            ? (arg_ty == "bool") {
+                out = out + "    bl _noema_text_from_bool_native\n";
+                ^ out;
+            }
+            ^ out;
+        }
+        ? (expr.name == "i64_of") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_i64_of_native\n";
+            ^ out;
+        }
+        ? (expr.name == "host_cc") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, args[1]);
+            out = out + "    mov x1, x0\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_host_cc_native\n";
+            ^ out;
+        }
+        out := "";
+        idx := count(args) - 1;
+        ~ (idx >= 0) {
+            out = out + native_expr(program, fn, locals, args[idx]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            idx = idx - 1;
+        }
+        idx = 0;
+        ~ (idx < count(args)) {
+            stack_offset := idx * 16;
+            out = out + "    ldr " + native_arg_reg(idx) + ", [sp, #" + text_of(stack_offset) + "]\n";
+            idx = idx + 1;
+        }
+        ? (count(args) > 0) {
+            stack_bytes := count(args) * 16;
+            out = out + "    add sp, sp, #" + text_of(stack_bytes) + "\n";
+        }
+        out = out + "    bl " + native_fn_label(expr.name) + "\n";
+        ^ out;
+    }
+    ? (expr.tag == "bin") {
+        left_ty := infer_expr_type(program, fn, locals, expr.left);
+        right_ty := infer_expr_type(program, fn, locals, expr.right);
+        ? (expr.op == "+" and (left_ty == "text" or right_ty == "text")) {
+            out := native_expr(program, fn, locals, expr.left);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, expr.right);
+            out = out + "    mov x1, x0\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_text_concat_native\n";
+            ^ out;
+        }
+        text_cmp := expr.op == "==" or expr.op == "!=";
+        ? (text_cmp and left_ty == "text" and right_ty == "text") {
+            out := native_expr(program, fn, locals, expr.left);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, expr.right);
+            out = out + "    mov x1, x0\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_text_eq_native\n";
+            ? (expr.op == "!=") {
+                out = out + "    eor x0, x0, #1\n";
+            }
+            ^ out;
+        }
+        out := native_expr(program, fn, locals, expr.left);
+        out = out + "    sub sp, sp, #16\n";
+        out = out + "    str x0, [sp]\n";
+        out = out + native_expr(program, fn, locals, expr.right);
+        out = out + "    ldr x1, [sp]\n";
+        out = out + "    add sp, sp, #16\n";
+        ? (expr.op == "+") {
+            out = out + "    add x0, x1, x0\n";
+        }
+        | {
+            ? (expr.op == "-") {
+                out = out + "    sub x0, x1, x0\n";
+            }
+            | {
+                ? (expr.op == "*") {
+                    out = out + "    mul x0, x1, x0\n";
+                }
+                | {
+                    ? (expr.op == "/") {
+                        out = out + "    sdiv x0, x1, x0\n";
+                    }
+                    | {
+                        ? (expr.op == "and") {
+                            out = out + "    cmp x1, #0\n";
+                            out = out + "    cset x1, ne\n";
+                            out = out + "    cmp x0, #0\n";
+                            out = out + "    cset x0, ne\n";
+                            out = out + "    and x0, x1, x0\n";
+                        }
+                        | {
+                            ? (expr.op == "or") {
+                                out = out + "    cmp x1, #0\n";
+                                out = out + "    cset x1, ne\n";
+                                out = out + "    cmp x0, #0\n";
+                                out = out + "    cset x0, ne\n";
+                                out = out + "    orr x0, x1, x0\n";
+                            }
+                            | {
+                                out = out + "    cmp x1, x0\n";
+                                ? (expr.op == "<") {
+                                    out = out + "    cset x0, lt\n";
+                                }
+                                | {
+                                    ? (expr.op == "<=") {
+                                        out = out + "    cset x0, le\n";
+                                    }
+                                    | {
+                                        ? (expr.op == ">") {
+                                            out = out + "    cset x0, gt\n";
+                                        }
+                                        | {
+                                            ? (expr.op == ">=") {
+                                                out = out + "    cset x0, ge\n";
+                                            }
+                                            | {
+                                                ? (expr.op == "==") {
+                                                    out = out + "    cset x0, eq\n";
+                                                }
+                                                | {
+                                                    out = out + "    cset x0, ne\n";
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        ^ out;
+    }
+    ^ "";
+}
+
+@native_emit_stmt(program: Program, fn: Function, locals: list<Binding>, stmt_id: i64, ret_label: text) -> text {
+    stmts := program.stmts;
+    stmt := stmts[stmt_id];
+    out := "";
+    ? (stmt.tag == "let") {
+        slot := count(locals);
+        out = out + native_expr(program, fn, locals, stmt.expr);
+        out = out + "    str x0, [x29, #" + text_of(native_slot_offset(slot)) + "]\n";
+        ^ out;
+    }
+    ? (stmt.tag == "assign") {
+        slot := native_slot_of(locals, stmt.name);
+        out = out + native_expr(program, fn, locals, stmt.expr);
+        out = out + "    str x0, [x29, #" + text_of(native_slot_offset(slot)) + "]\n";
+        ^ out;
+    }
+    ? (stmt.tag == "emit") {
+        out = out + native_expr(program, fn, locals, stmt.expr);
+        ty := infer_expr_type(program, fn, locals, stmt.expr);
+        ? (ty == "text") {
+            out = out + "    bl _noema_emit_text_native\n";
+            ^ out;
+        }
+        ? (ty == "bool") {
+            out = out + "    bl _noema_text_from_bool_native\n";
+            out = out + "    bl _noema_emit_text_native\n";
+            ^ out;
+        }
+        out = out + "    bl _noema_emit_i64_native\n";
+        ^ out;
+    }
+    ? (stmt.tag == "ret") {
+        out = out + native_expr(program, fn, locals, stmt.expr);
+        out = out + "    b " + ret_label + "\n";
+        ^ out;
+    }
+    ? (stmt.tag == "if") {
+        else_label := "L_if_else_" + text_of(stmt_id);
+        end_label := "L_if_end_" + text_of(stmt_id);
+        out = out + native_expr(program, fn, locals, stmt.expr);
+        out = out + "    cmp x0, #0\n";
+        ? (count(stmt.alt) > 0) {
+            out = out + "    b.eq " + else_label + "\n";
+            out = out + native_block(program, fn, locals, stmt.body, ret_label);
+            out = out + "    b " + end_label + "\n";
+            out = out + else_label + ":\n";
+            out = out + native_block(program, fn, locals, stmt.alt, ret_label);
+            out = out + end_label + ":\n";
+        }
+        | {
+            out = out + "    b.eq " + end_label + "\n";
+            out = out + native_block(program, fn, locals, stmt.body, ret_label);
+            out = out + end_label + ":\n";
+        }
+        ^ out;
+    }
+    ? (stmt.tag == "while") {
+        start_label := "L_while_start_" + text_of(stmt_id);
+        end_label := "L_while_end_" + text_of(stmt_id);
+        out = out + start_label + ":\n";
+        out = out + native_expr(program, fn, locals, stmt.expr);
+        out = out + "    cmp x0, #0\n";
+        out = out + "    b.eq " + end_label + "\n";
+        out = out + native_block(program, fn, locals, stmt.body, ret_label);
+        out = out + "    b " + start_label + "\n";
+        out = out + end_label + ":\n";
+        ^ out;
+    }
+    ^ out;
+}
+
+@native_block(program: Program, fn: Function, locals: list<Binding>, items: list<i64>, ret_label: text) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx < count(items)) {
+        stmt_id := items[idx];
+        stmts := program.stmts;
+        stmt := stmts[stmt_id];
+        out = out + native_emit_stmt(program, fn, locals, stmt_id, ret_label);
+        locals = extend_locals(program, fn, locals, stmt);
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@emit_native_arm64_program(program: Program) -> text {
+    funcs := program.funcs;
+    idx := 0;
+    out := emit_native_data(program);
+    out = out + ".text\n";
+    out = out + ".align 2\n";
+    out = out + ".globl _main\n\n";
+    out = out + ".extern _write\n";
+    out = out + ".extern _malloc\n";
+    out = out + ".extern _memcpy\n";
+    out = out + ".extern _memcmp\n";
+    out = out + ".extern _strlen\n";
+    out = out + ".extern _open\n";
+    out = out + ".extern _read\n";
+    out = out + ".extern _close\n";
+    out = out + ".extern _chmod\n";
+    out = out + ".extern _lseek\n";
+    out = out + ".extern _snprintf\n";
+    out = out + ".extern _strtoll\n";
+    out = out + ".extern _system\n\n";
+    out = out + "_noema_text_from_parts_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #16\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    str x1, [sp, #8]\n";
+    out = out + "    mov x0, #16\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    mov x9, x0\n";
+    out = out + "    ldr x10, [sp, #8]\n";
+    out = out + "    str x10, [x9]\n";
+    out = out + "    ldr x11, [sp]\n";
+    out = out + "    str x11, [x9, #8]\n";
+    out = out + "    mov x0, x9\n";
+    out = out + "    add sp, sp, #16\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_text_count_native:\n";
+    out = out + "    ldr x0, [x0]\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_text_to_cstr_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #32\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    ldr x1, [x0]\n";
+    out = out + "    add x0, x1, #1\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    str x0, [sp, #8]\n";
+    out = out + "    ldr x10, [sp]\n";
+    out = out + "    ldr x2, [x10]\n";
+    out = out + "    ldr x1, [x10, #8]\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    bl _memcpy\n";
+    out = out + "    ldr x10, [sp]\n";
+    out = out + "    ldr x11, [x10]\n";
+    out = out + "    ldr x9, [sp, #8]\n";
+    out = out + "    strb wzr, [x9, x11]\n";
+    out = out + "    mov x0, x9\n";
+    out = out + "    add sp, sp, #32\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_emit_i64_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #80\n";
+    out = out + "    mov x9, x0\n";
+    out = out + "    mov x10, #0\n";
+    out = out + "    cmp x9, #0\n";
+    out = out + "    b.ge L_emit_abs\n";
+    out = out + "    mov x10, #1\n";
+    out = out + "    neg x9, x9\n";
+    out = out + "L_emit_abs:\n";
+    out = out + "    add x11, sp, #79\n";
+    out = out + "    mov w12, #10\n";
+    out = out + "    strb w12, [x11]\n";
+    out = out + "    mov x13, #1\n";
+    out = out + "    sub x11, x11, #1\n";
+    out = out + "    cmp x9, #0\n";
+    out = out + "    b.ne L_emit_loop\n";
+    out = out + "    mov w12, #48\n";
+    out = out + "    strb w12, [x11]\n";
+    out = out + "    sub x11, x11, #1\n";
+    out = out + "    add x13, x13, #1\n";
+    out = out + "    b L_emit_sign\n";
+    out = out + "L_emit_loop:\n";
+    out = out + "    mov x12, #10\n";
+    out = out + "    udiv x14, x9, x12\n";
+    out = out + "    msub x15, x14, x12, x9\n";
+    out = out + "    add x15, x15, #48\n";
+    out = out + "    strb w15, [x11]\n";
+    out = out + "    sub x11, x11, #1\n";
+    out = out + "    add x13, x13, #1\n";
+    out = out + "    mov x9, x14\n";
+    out = out + "    cmp x9, #0\n";
+    out = out + "    b.ne L_emit_loop\n";
+    out = out + "L_emit_sign:\n";
+    out = out + "    cmp x10, #0\n";
+    out = out + "    b.eq L_emit_write\n";
+    out = out + "    mov w12, #45\n";
+    out = out + "    strb w12, [x11]\n";
+    out = out + "    sub x11, x11, #1\n";
+    out = out + "    add x13, x13, #1\n";
+    out = out + "L_emit_write:\n";
+    out = out + "    add x1, x11, #1\n";
+    out = out + "    mov x0, #1\n";
+    out = out + "    mov x2, x13\n";
+    out = out + "    bl _write\n";
+    out = out + "    add sp, sp, #80\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_emit_text_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    ldr x2, [x0]\n";
+    out = out + "    ldr x1, [x0, #8]\n";
+    out = out + "    mov x0, #1\n";
+    out = out + "    bl _write\n";
+    newline_label := native_load_label("x1", "L_native_newline");
+    out = out + newline_label;
+    out = out + "    mov x0, #1\n";
+    out = out + "    mov x2, #1\n";
+    out = out + "    bl _write\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_arg_count_native:\n";
+    argc_label := native_load_label("x9", "_noema_argc_native");
+    out = out + argc_label;
+    out = out + "    ldr x0, [x9]\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_arg_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #16\n";
+    out = out + "    str x0, [sp]\n";
+    argv_label := native_load_label("x9", "_noema_argv_native");
+    out = out + argv_label;
+    out = out + "    ldr x9, [x9]\n";
+    out = out + "    ldr x10, [sp]\n";
+    out = out + "    ldr x10, [x9, x10, lsl #3]\n";
+    out = out + "    str x10, [sp, #8]\n";
+    out = out + "    mov x0, x10\n";
+    out = out + "    bl _strlen\n";
+    out = out + "    mov x1, x0\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    bl _noema_text_from_parts_native\n";
+    out = out + "    add sp, sp, #16\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_read_text_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #48\n";
+    out = out + "    bl _noema_text_to_cstr_native\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    mov x1, #0\n";
+    out = out + "    mov x2, #0\n";
+    out = out + "    bl _open\n";
+    out = out + "    str x0, [sp, #8]\n";
+    out = out + "    mov x1, #0\n";
+    out = out + "    mov x2, #2\n";
+    out = out + "    bl _lseek\n";
+    out = out + "    str x0, [sp, #16]\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    mov x1, #0\n";
+    out = out + "    mov x2, #0\n";
+    out = out + "    bl _lseek\n";
+    out = out + "    ldr x0, [sp, #16]\n";
+    out = out + "    add x0, x0, #1\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    str x0, [sp, #24]\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    ldr x1, [sp, #24]\n";
+    out = out + "    ldr x2, [sp, #16]\n";
+    out = out + "    bl _read\n";
+    out = out + "    str x0, [sp, #32]\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    bl _close\n";
+    out = out + "    ldr x9, [sp, #24]\n";
+    out = out + "    ldr x10, [sp, #32]\n";
+    out = out + "    strb wzr, [x9, x10]\n";
+    out = out + "    mov x0, x9\n";
+    out = out + "    mov x1, x10\n";
+    out = out + "    bl _noema_text_from_parts_native\n";
+    out = out + "    add sp, sp, #48\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_write_text_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #48\n";
+    out = out + "    str x1, [sp, #8]\n";
+    out = out + "    bl _noema_text_to_cstr_native\n";
+    out = out + "    str x0, [sp, #24]\n";
+    out = out + "    mov x1, #1537\n";
+    out = out + "    mov x2, #420\n";
+    out = out + "    bl _open\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    cmp x0, #0\n";
+    out = out + "    b.lt L_write_text_fail\n";
+    out = out + "    ldr x10, [sp, #8]\n";
+    out = out + "    ldr x1, [x10, #8]\n";
+    out = out + "    ldr x2, [x10]\n";
+    out = out + "    bl _write\n";
+    out = out + "    str x0, [sp, #16]\n";
+    out = out + "    ldr x0, [sp]\n";
+    out = out + "    bl _close\n";
+    out = out + "    ldr x0, [sp, #24]\n";
+    out = out + "    mov x1, #420\n";
+    out = out + "    bl _chmod\n";
+    out = out + "    ldr x10, [sp, #8]\n";
+    out = out + "    ldr x11, [x10]\n";
+    out = out + "    ldr x9, [sp, #16]\n";
+    out = out + "    cmp x9, x11\n";
+    out = out + "    cset x0, eq\n";
+    out = out + "    add sp, sp, #48\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n";
+    out = out + "L_write_text_fail:\n";
+    out = out + "    mov x0, #0\n";
+    out = out + "    add sp, sp, #48\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_text_eq_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #32\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    str x1, [sp, #8]\n";
+    out = out + "    ldr x9, [x0]\n";
+    out = out + "    ldr x10, [x1]\n";
+    out = out + "    cmp x9, x10\n";
+    out = out + "    b.ne L_text_eq_false\n";
+    out = out + "    ldr x0, [x0, #8]\n";
+    out = out + "    ldr x1, [x1, #8]\n";
+    out = out + "    mov x2, x9\n";
+    out = out + "    bl _memcmp\n";
+    out = out + "    cmp x0, #0\n";
+    out = out + "    cset x0, eq\n";
+    out = out + "    add sp, sp, #32\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n";
+    out = out + "L_text_eq_false:\n";
+    out = out + "    mov x0, #0\n";
+    out = out + "    add sp, sp, #32\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_text_concat_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #64\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    str x1, [sp, #8]\n";
+    out = out + "    ldr x9, [x0]\n";
+    out = out + "    ldr x10, [x1]\n";
+    out = out + "    add x11, x9, x10\n";
+    out = out + "    str x11, [sp, #16]\n";
+    out = out + "    add x0, x11, #1\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    str x0, [sp, #24]\n";
+    out = out + "    ldr x12, [sp]\n";
+    out = out + "    ldr x9, [x12]\n";
+    out = out + "    ldr x12, [sp]\n";
+    out = out + "    ldr x1, [x12, #8]\n";
+    out = out + "    mov x2, x9\n";
+    out = out + "    bl _memcpy\n";
+    out = out + "    ldr x13, [sp, #24]\n";
+    out = out + "    add x0, x13, x9\n";
+    out = out + "    ldr x12, [sp, #8]\n";
+    out = out + "    ldr x10, [x12]\n";
+    out = out + "    ldr x12, [sp, #8]\n";
+    out = out + "    ldr x1, [x12, #8]\n";
+    out = out + "    mov x2, x10\n";
+    out = out + "    bl _memcpy\n";
+    out = out + "    ldr x13, [sp, #24]\n";
+    out = out + "    ldr x11, [sp, #16]\n";
+    out = out + "    strb wzr, [x13, x11]\n";
+    out = out + "    mov x0, x13\n";
+    out = out + "    mov x1, x11\n";
+    out = out + "    bl _noema_text_from_parts_native\n";
+    out = out + "    add sp, sp, #64\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_text_find_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #64\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    str x1, [sp, #8]\n";
+    out = out + "    ldr x9, [x1]\n";
+    out = out + "    str x9, [sp, #16]\n";
+    out = out + "    cbz x9, L_text_find_zero\n";
+    out = out + "    ldr x10, [x0]\n";
+    out = out + "    str x10, [sp, #24]\n";
+    out = out + "    cmp x9, x10\n";
+    out = out + "    b.gt L_text_find_missing\n";
+    out = out + "    mov x11, #0\n";
+    out = out + "    str x11, [sp, #32]\n";
+    out = out + "L_text_find_loop:\n";
+    out = out + "    ldr x10, [sp, #24]\n";
+    out = out + "    ldr x9, [sp, #16]\n";
+    out = out + "    ldr x11, [sp, #32]\n";
+    out = out + "    sub x12, x10, x9\n";
+    out = out + "    cmp x11, x12\n";
+    out = out + "    b.gt L_text_find_missing\n";
+    out = out + "    ldr x13, [sp]\n";
+    out = out + "    ldr x0, [x13, #8]\n";
+    out = out + "    add x0, x0, x11\n";
+    out = out + "    ldr x13, [sp, #8]\n";
+    out = out + "    ldr x1, [x13, #8]\n";
+    out = out + "    mov x2, x9\n";
+    out = out + "    bl _memcmp\n";
+    out = out + "    cbz x0, L_text_find_found\n";
+    out = out + "    add x11, x11, #1\n";
+    out = out + "    str x11, [sp, #32]\n";
+    out = out + "    b L_text_find_loop\n";
+    out = out + "L_text_find_found:\n";
+    out = out + "    mov x0, x11\n";
+    out = out + "    add sp, sp, #64\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n";
+    out = out + "L_text_find_zero:\n";
+    out = out + "    mov x0, #0\n";
+    out = out + "    add sp, sp, #64\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n";
+    out = out + "L_text_find_missing:\n";
+    out = out + "    mov x0, #-1\n";
+    out = out + "    add sp, sp, #64\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_text_slice_native:\n";
+    out = out + "    ldr x9, [x0, #8]\n";
+    out = out + "    add x0, x9, x1\n";
+    out = out + "    mov x1, x2\n";
+    out = out + "    b _noema_text_from_parts_native\n\n";
+    out = out + "_noema_text_from_i64_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #32\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    mov x0, #64\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    str x0, [sp, #8]\n";
+    i64_fmt_label := native_load_label("x2", "L_native_i64_fmt");
+    out = out + i64_fmt_label;
+    out = out + "    ldr x3, [sp]\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    mov x1, #64\n";
+    out = out + "    bl _snprintf\n";
+    out = out + "    mov x1, x0\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    bl _noema_text_from_parts_native\n";
+    out = out + "    add sp, sp, #32\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_text_from_bool_native:\n";
+    out = out + "    cmp x0, #0\n";
+    out = out + "    b.eq L_text_from_bool_false\n";
+    true_label := native_load_label("x0", "L_native_true");
+    out = out + true_label;
+    out = out + "    mov x1, #4\n";
+    out = out + "    b _noema_text_from_parts_native\n";
+    out = out + "L_text_from_bool_false:\n";
+    false_label := native_load_label("x0", "L_native_false");
+    out = out + false_label;
+    out = out + "    mov x1, #5\n";
+    out = out + "    b _noema_text_from_parts_native\n\n";
+    out = out + "_noema_i64_of_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    bl _noema_text_to_cstr_native\n";
+    out = out + "    mov x1, #0\n";
+    out = out + "    mov x2, #10\n";
+    out = out + "    bl _strtoll\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_host_cc_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #48\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    str x1, [sp, #8]\n";
+    out = out + "    bl _noema_text_to_cstr_native\n";
+    out = out + "    str x0, [sp, #16]\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    bl _noema_text_to_cstr_native\n";
+    out = out + "    str x0, [sp, #24]\n";
+    out = out + "    ldr x10, [sp]\n";
+    out = out + "    ldr x11, [x10]\n";
+    out = out + "    ldr x12, [sp, #8]\n";
+    out = out + "    ldr x13, [x12]\n";
+    out = out + "    add x0, x11, x13\n";
+    out = out + "    add x0, x0, #64\n";
+    out = out + "    str x0, [sp, #40]\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    str x0, [sp, #32]\n";
+    out = out + "    ldr x14, [sp, #32]\n";
+    cc_prefix_label := native_load_label("x1", "L_native_cc_prefix");
+    out = out + cc_prefix_label;
+    out = out + "    mov x0, x14\n";
+    out = out + "    mov x2, #7\n";
+    out = out + "    bl _memcpy\n";
+    out = out + "    add x14, x14, #7\n";
+    out = out + "    ldr x0, [sp]\n";
+    out = out + "    ldr x2, [x0]\n";
+    out = out + "    ldr x1, [sp, #16]\n";
+    out = out + "    mov x0, x14\n";
+    out = out + "    bl _memcpy\n";
+    out = out + "    ldr x0, [sp]\n";
+    out = out + "    ldr x15, [x0]\n";
+    out = out + "    add x14, x14, x15\n";
+    cc_infix_label := native_load_label("x1", "L_native_cc_infix");
+    out = out + cc_infix_label;
+    out = out + "    mov x0, x14\n";
+    out = out + "    mov x2, #4\n";
+    out = out + "    bl _memcpy\n";
+    out = out + "    add x14, x14, #4\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    ldr x2, [x0]\n";
+    out = out + "    ldr x1, [sp, #24]\n";
+    out = out + "    mov x0, x14\n";
+    out = out + "    bl _memcpy\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    ldr x15, [x0]\n";
+    out = out + "    add x14, x14, x15\n";
+    out = out + "    strb wzr, [x14]\n";
+    out = out + "    ldr x0, [sp, #32]\n";
+    out = out + "    bl _system\n";
+    out = out + "    add sp, sp, #48\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_alloc_words_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    lsl x0, x0, #3\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_list_count_native:\n";
+    out = out + "    ldr x0, [x0]\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_list_from_stack_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #32\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    str x1, [sp, #8]\n";
+    out = out + "    mov x2, #0\n";
+    out = out + "    ldr x1, [sp, #8]\n";
+    out = out + "    cbz x1, L_list_from_stack_no_items\n";
+    out = out + "    lsl x0, x1, #3\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    str x0, [sp, #16]\n";
+    out = out + "    mov x2, #0\n";
+    out = out + "L_list_from_stack_copy:\n";
+    out = out + "    ldr x3, [sp, #8]\n";
+    out = out + "    cmp x2, x3\n";
+    out = out + "    b.ge L_list_from_stack_copy_done\n";
+    out = out + "    ldr x4, [sp]\n";
+    out = out + "    add x5, x4, x2, lsl #4\n";
+    out = out + "    ldr x6, [x5]\n";
+    out = out + "    ldr x7, [sp, #16]\n";
+    out = out + "    add x8, x7, x2, lsl #3\n";
+    out = out + "    str x6, [x8]\n";
+    out = out + "    add x2, x2, #1\n";
+    out = out + "    b L_list_from_stack_copy\n";
+    out = out + "L_list_from_stack_copy_done:\n";
+    out = out + "    b L_list_from_stack_build\n";
+    out = out + "L_list_from_stack_no_items:\n";
+    out = out + "    mov x0, #0\n";
+    out = out + "    str x0, [sp, #16]\n";
+    out = out + "L_list_from_stack_build:\n";
+    out = out + "    mov x0, #16\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    mov x9, x0\n";
+    out = out + "    ldr x10, [sp, #8]\n";
+    out = out + "    str x10, [x9]\n";
+    out = out + "    ldr x11, [sp, #16]\n";
+    out = out + "    str x11, [x9, #8]\n";
+    out = out + "    mov x0, x9\n";
+    out = out + "    add sp, sp, #32\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_list_append_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #48\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    str x1, [sp, #8]\n";
+    out = out + "    ldr x2, [x0]\n";
+    out = out + "    str x2, [sp, #16]\n";
+    out = out + "    ldr x3, [x0, #8]\n";
+    out = out + "    str x3, [sp, #24]\n";
+    out = out + "    add x4, x2, #1\n";
+    out = out + "    str x4, [sp, #32]\n";
+    out = out + "    lsl x0, x4, #3\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    str x0, [sp, #40]\n";
+    out = out + "    mov x5, #0\n";
+    out = out + "L_list_append_copy:\n";
+    out = out + "    ldr x6, [sp, #16]\n";
+    out = out + "    cmp x5, x6\n";
+    out = out + "    b.ge L_list_append_done_copy\n";
+    out = out + "    ldr x7, [sp, #24]\n";
+    out = out + "    ldr x8, [x7, x5, lsl #3]\n";
+    out = out + "    ldr x9, [sp, #40]\n";
+    out = out + "    str x8, [x9, x5, lsl #3]\n";
+    out = out + "    add x5, x5, #1\n";
+    out = out + "    b L_list_append_copy\n";
+    out = out + "L_list_append_done_copy:\n";
+    out = out + "    ldr x6, [sp, #16]\n";
+    out = out + "    ldr x9, [sp, #40]\n";
+    out = out + "    ldr x10, [sp, #8]\n";
+    out = out + "    str x10, [x9, x6, lsl #3]\n";
+    out = out + "    mov x0, #16\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    mov x11, x0\n";
+    out = out + "    ldr x12, [sp, #32]\n";
+    out = out + "    str x12, [x11]\n";
+    out = out + "    ldr x13, [sp, #40]\n";
+    out = out + "    str x13, [x11, #8]\n";
+    out = out + "    mov x0, x11\n";
+    out = out + "    add sp, sp, #48\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    ~ (idx < count(funcs)) {
+        fn := funcs[idx];
+        params := fn.params;
+        param_idx := 0;
+        ~ (param_idx < count(params)) {
+            param_idx = param_idx + 1;
+        }
+        ? (count(params) > 8) {
+            ^ "unsupported: native-arm64 direct currently supports at most eight parameters";
+        }
+        ? (not native_supported_items(program, fn, params, fn.body)) {
+            ^ "unsupported: native-arm64 direct currently does not support function '" + fn.name + "' yet";
+        }
+        slot_count := count(params) + native_count_slots(program, fn.body);
+        frame := native_align16(slot_count * 8);
+        ret_label := "L_ret_" + fn.name;
+        label := native_fn_label(fn.name);
+        out = out + label + ":\n";
+        out = out + "    stp x29, x30, [sp, #-16]!\n";
+        out = out + "    mov x29, sp\n";
+        ? (frame > 0) {
+            out = out + "    sub sp, sp, #" + text_of(frame) + "\n";
+        }
+        param_idx = 0;
+        ~ (param_idx < count(params)) {
+            out = out + "    str " + native_arg_reg(param_idx) + ", [x29, #" + text_of(native_slot_offset(param_idx)) + "]\n";
+            param_idx = param_idx + 1;
+        }
+        out = out + native_block(program, fn, params, fn.body, ret_label);
+        out = out + "    mov x0, #0\n";
+        out = out + ret_label + ":\n";
+        ? (frame > 0) {
+            out = out + "    add sp, sp, #" + text_of(frame) + "\n";
+        }
+        out = out + "    ldp x29, x30, [sp], #16\n";
+        out = out + "    ret\n\n";
+        idx = idx + 1;
+    }
+    out = out + "_main:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    argc_store_label := native_load_label("x9", "_noema_argc_native");
+    out = out + argc_store_label;
+    out = out + "    str x0, [x9]\n";
+    argv_store_label := native_load_label("x9", "_noema_argv_native");
+    out = out + argv_store_label;
+    out = out + "    str x1, [x9]\n";
+    out = out + "    bl " + native_fn_label("main") + "\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n";
+    ^ out;
+}
+
+@main() -> i64 {
+    ? (arg_count() < 3) {
+        ! "usage: compiler <input.noe> <output-binary> [backend]";
+        ^ 1;
+    }
+
+    source := read_text(arg(1));
+    tokenized := tokenize(source);
+    ? (not tokenized.ok) {
+        ! "tokenize: " + tokenized.err;
+        ^ 1;
+    }
+
+    parsed := parse_program(tokenized.tokens);
+    ? (not parsed.ok) {
+        ! "parse: " + parsed.err;
+        ^ 1;
+    }
+
+    backend := "c";
+    ? (arg_count() >= 4) {
+        backend = arg(3);
+    }
+
+    generated := "";
+    artifact_path := "";
+    ? (backend == "native-arm64") {
+        generated = emit_native_arm64_program(parsed.program);
+        ? (count(generated) >= 13 and slice(generated, 0, 13) == "unsupported: ") {
+            ! generated;
+            ^ 1;
+        }
+        artifact_path = arg(2) + ".generated.s";
+    }
+    | {
+        generated = emit_program(parsed.program);
+        artifact_path = arg(2) + ".generated.c";
+    }
+
+    wrote := write_text(artifact_path, generated);
+    ? (not wrote) {
+        ! "write failed";
+        ^ 1;
+    }
+
+    status := host_cc(artifact_path, arg(2));
+    ? (status != 0) {
+        ! "host_cc failed: " + text_of(status);
+        ^ 1;
+    }
+
+    ^ 0;
+}

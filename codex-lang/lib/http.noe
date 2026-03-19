@@ -1,0 +1,109 @@
+%HttpUrl {
+    host: text;
+    port: i64;
+    path: text;
+}
+
+%HttpResponse {
+    status: i64;
+    status_line: text;
+    headers: text;
+    body: text;
+    raw: text;
+}
+
+@http_parse_url(url: text) -> HttpUrl {
+    scheme_sep := find(url, "://");
+    start := 0;
+    ? (scheme_sep >= 0) {
+        start = scheme_sep + 3;
+    }
+
+    tail := slice(url, start, count(url) - start);
+    slash_rel := find(tail, "/");
+    host_port := "";
+    path := "/";
+
+    ? (slash_rel >= 0) {
+        host_port = slice(tail, 0, slash_rel);
+        path = slice(tail, slash_rel, count(tail) - slash_rel);
+    }
+    | {
+        host_port = tail;
+    }
+
+    colon_rel := find(host_port, ":");
+    host := host_port;
+    port := 80;
+
+    ? (colon_rel >= 0) {
+        host = slice(host_port, 0, colon_rel);
+        port = i64_of(slice(host_port, colon_rel + 1, count(host_port) - colon_rel - 1));
+    }
+
+    ^ HttpUrl { host: host, port: port, path: path };
+}
+
+@http_parse_response(raw: text) -> HttpResponse {
+    header_sep := find(raw, "\r\n\r\n");
+    line_end := find(raw, "\r\n");
+    body := "";
+    status_line := raw;
+    headers := "";
+
+    ? (line_end >= 0) {
+        status_line = slice(raw, 0, line_end);
+    }
+
+    ? (header_sep >= 0) {
+        body_start := header_sep + 4;
+        body = slice(raw, body_start, count(raw) - body_start);
+
+        headers_start := line_end + 2;
+        ? (line_end >= 0 and headers_start <= header_sep) {
+            headers = slice(raw, headers_start, header_sep - headers_start);
+        }
+    }
+
+    status_tail := status_line;
+    first_space := find(status_line, " ");
+    ? (first_space >= 0) {
+        status_tail = slice(status_line, first_space + 1, count(status_line) - first_space - 1);
+    }
+
+    second_space := find(status_tail, " ");
+    status_code_text := status_tail;
+    ? (second_space >= 0) {
+        status_code_text = slice(status_tail, 0, second_space);
+    }
+
+    ^ HttpResponse { status: i64_of(status_code_text), status_line: status_line, headers: headers, body: body, raw: raw };
+}
+
+@http_request(method: text, url: text, body: text) -> HttpResponse {
+    part := http_parse_url(url);
+    request := method + " " + part.path + " HTTP/1.1\r\n";
+    request = request + "Host: " + part.host + "\r\n";
+    request = request + "Connection: close\r\n";
+    request = request + "User-Agent: noema/0\r\n";
+    request = request + "Content-Length: " + text_of(count(body)) + "\r\n";
+    ? (count(body) > 0) {
+        request = request + "Content-Type: text/plain\r\n";
+    }
+    request = request + "\r\n" + body;
+
+    sock := socket_open(part.host, part.port);
+    socket_send(sock, request);
+    raw := socket_recv_all(sock);
+    socket_close(sock);
+
+    ^ http_parse_response(raw);
+}
+
+@http_get(url: text) -> HttpResponse {
+    ^ http_request("GET", url, "");
+}
+
+@http_post(url: text, body: text) -> HttpResponse {
+    ^ http_request("POST", url, body);
+}

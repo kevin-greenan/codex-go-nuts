@@ -1,0 +1,50 @@
+%Token {
+    kind: text;
+    lexeme: text;
+    line: i64;
+}
+
+%Node {
+    tag: text;
+    payload: text;
+    arity: i64;
+}
+
+@make_source_token(source: text) -> Token {
+    ^ Token { kind: "source", lexeme: source, line: 1 };
+}
+
+@synth_ast(source: text) -> Node {
+    seed := make_source_token(source);
+    tokens :: list<Token> := [seed];
+    first := tokens[0];
+    ^ Node { tag: "unit", payload: first.kind + ":" + text_of(count(first.lexeme)), arity: count(tokens) };
+}
+
+@render(node: Node) -> text {
+    ^ node.tag + " [" + text_of(node.arity) + "] " + node.payload;
+}
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: compiler_frontend <input-path> [output-path]";
+        ^ 1;
+    }
+
+    source := read_text(arg(1));
+    ast := synth_ast(source);
+    generated := render(ast);
+
+    ? (arg_count() >= 3) {
+        wrote := write_text(arg(2), generated);
+        ? (not wrote) {
+            ! "write failed";
+            ^ 1;
+        }
+    }
+    | {
+        ! generated;
+    }
+
+    ^ 0;
+}

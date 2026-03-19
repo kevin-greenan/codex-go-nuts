@@ -1,0 +1,48 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+IMAGE_NAME=codex-lang-rust
+BACKEND=${NOEMA_BACKEND:-c}
+
+if [ "$#" -ne 2 ]; then
+  echo "usage: $0 <input.noe> <output-binary>" >&2
+  exit 1
+fi
+
+if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+  docker build -t "$IMAGE_NAME" -f "$ROOT_DIR/container/Dockerfile" "$ROOT_DIR"
+fi
+
+OUTPUT_DIR=$(dirname "$2")
+mkdir -p "$OUTPUT_DIR"
+
+case "$BACKEND" in
+  c)
+    GENERATED="$2.generated.c"
+    ;;
+  native-arm64)
+    GENERATED="$2.generated.s"
+    SUPPORT_C="$2.generated.s.support.c"
+    ;;
+  *)
+    echo "unsupported NOEMA_BACKEND: $BACKEND" >&2
+    exit 1
+    ;;
+esac
+
+docker run --rm \
+  -v "$ROOT_DIR":/workspace \
+  -w /workspace \
+  "$IMAGE_NAME" \
+  cargo run --manifest-path compiler/Cargo.toml --release -- "$1" "$GENERATED" "$BACKEND"
+
+case "$BACKEND" in
+  c)
+    cc -O3 -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-function "$GENERATED" -o "$2"
+    ;;
+  native-arm64)
+    cc -O3 -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-function "$GENERATED" "$SUPPORT_C" -o "$2"
+    ;;
+esac
