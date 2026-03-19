@@ -1,0 +1,56 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: inspect_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    defined := db_define_table(db, "users", 48, "name:text,email_key:i64!");
+
+    key := 1;
+    ~ (key <= 12) {
+        payload := "";
+        payload = row_append(payload, "name", "user" + text_of(key));
+        payload = row_append(payload, "email_key", text_of(1000 + key));
+        inserted := db_insert_row(db, "users", key, payload);
+        ? (inserted < 0) {
+            ! "inserted=" + text_of(key) + ":" + text_of(inserted);
+            ^ 2;
+        }
+        key = key + 1;
+    }
+
+    layout0 := db_table_layout_text(db, "users", "|");
+    index_layout0 := db_table_layout_text(db, db_index_table_name("users", "email_key"), "|");
+    page0 := db_page_text(db, 0);
+    root0 := db_table_root(db, "users");
+    page_root := db_page_text(db, root0);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    layout1 := db_table_layout_text(reopened, "users", "|");
+    validate0 := db_validate_report(reopened);
+    closed1 := db_close(reopened);
+
+    ? (defined <= 0) {
+        ! "defined=" + text_of(defined);
+        ^ 3;
+    }
+    ? (find(layout0, "internal page=") < 0 or find(layout0, "leaf page=") < 0 or find(layout0, "sep key=") < 0) {
+        ! "layout0=" + layout0;
+        ^ 4;
+    }
+    ? (find(index_layout0, "leaf page=") < 0 or find(page0, "HASHDB001") < 0 or slice(page_root, 1, 1) == "") {
+        ! "inspect=" + index_layout0 + ":" + page0 + ":" + page_root;
+        ^ 5;
+    }
+    ? (layout1 != layout0 or validate0 != "ok" or not closed0 or not closed1) {
+        ! "layout1=" + layout1 + ":" + validate0;
+        ^ 6;
+    }
+
+    ! "ashdb inspect smoke ok";
+    ^ 0;
+}

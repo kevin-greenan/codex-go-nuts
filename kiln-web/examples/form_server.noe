@@ -1,0 +1,28 @@
+& "../lib/server.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: form_server <port>";
+        ^ 1;
+    }
+
+    port := i64_of(arg(1));
+    server := kiln_server_receive_once(port, 4096);
+    request := server.request;
+
+    body := "path=" + kiln_http_path_only(request.path);
+    body = body + ";query_name=" + kiln_http_query_value(request.path, "name");
+    body = body + ";query_tags=" + kiln_http_query_values(request.path, "tag");
+    body = body + ";form_name=" + kiln_http_form_value(request, "name");
+    body = body + ";form_note=" + kiln_http_form_value(request, "note");
+    body = body + ";form_tags=" + kiln_http_form_values(request, "tag");
+
+    ? (request.version != "HTTP/1.1") {
+        ^ 2;
+    }
+    finished := kiln_server_finish_reply(server, kiln_reply_text(200, body));
+    ? (not finished) {
+        ^ 3;
+    }
+    ^ 0;
+}

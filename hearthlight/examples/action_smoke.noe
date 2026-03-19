@@ -1,0 +1,51 @@
+& "../lib/app.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: action_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := hearthlight_open(arg(1));
+
+    add_request := kiln_http_parse_request("POST /groceries HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=Tomatoes&section=Produce");
+    add_dispatch := kiln_dispatch(hearthlight_routes(), add_request);
+    add_reply := hearthlight_route_reply(db, add_dispatch, add_request);
+    add_response := kiln_reply_response(add_reply);
+    tomatoes := db_scan_where_field_equals_rows_text(db, hearthlight_groceries_table(), "name", "Tomatoes", "|");
+
+    chore_request := kiln_http_parse_request("POST /chores/1/complete HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n");
+    chore_dispatch := kiln_dispatch(hearthlight_routes(), chore_request);
+    chore_reply := hearthlight_route_reply(db, chore_dispatch, chore_request);
+    chore_response := kiln_reply_response(chore_reply);
+    chore_status := db_row_get(db, hearthlight_chores_table(), 1, "status");
+    chore_due := db_row_get(db, hearthlight_chores_table(), 1, "due_label");
+    chore_owner := db_row_get(db, hearthlight_chores_table(), 1, "owner");
+
+    validate := db_validate_report(db);
+    closed := db_close(db);
+
+    ? (find(add_response, "HTTP/1.1 302") < 0 or find(add_response, "Added Tomatoes to the grocery list.") < 0) {
+        ! "add response mismatch";
+        ^ 2;
+    }
+    ? (find(tomatoes, "section=Produce;") < 0) {
+        ! "tomatoes missing=" + tomatoes;
+        ^ 3;
+    }
+    ? (find(chore_response, "Set-Cookie: kiln_flash=success|Chore completed and advanced.; Path=/") < 0 or find(chore_response, "Location: /chores") < 0) {
+        ! "chore response mismatch";
+        ^ 4;
+    }
+    ? (chore_status != "todo" or chore_due != "Tomorrow" or chore_owner != "Avery") {
+        ! "chore state=" + chore_status + "|" + chore_due + "|" + chore_owner;
+        ^ 5;
+    }
+    ? (validate != "ok" or not closed) {
+        ! "validate=" + validate;
+        ^ 6;
+    }
+
+    ! "hearthlight action smoke ok";
+    ^ 0;
+}

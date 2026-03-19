@@ -1,0 +1,92 @@
+& "../lib/db.noe";
+
+@user_payload(name: text, email_key: i64) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "email_key", text_of(email_key));
+    ^ payload;
+}
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: compact_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 256);
+    defined := db_define_table(db, "users", 80, "name:text,email_key:i64!");
+    key := 1;
+    ~ (key <= 60) {
+        inserted := db_insert_row(db, "users", key, user_payload("user" + text_of(key), 1000 + key));
+        ? (inserted < 0) {
+            ! "insert=" + text_of(key) + ":" + text_of(inserted);
+            ^ 2;
+        }
+        key = key + 1;
+    }
+    key = 2;
+    ~ (key <= 60) {
+        deleted := db_delete_row(db, "users", key);
+        ? (deleted < 0) {
+            ! "delete=" + text_of(key) + ":" + text_of(deleted);
+            ^ 3;
+        }
+        key = key + 2;
+    }
+
+    root0 := db_table_root(db, "users");
+    idx_root0 := db_table_root(db, db_index_table_name("users", "email_key"));
+    free0 := pager_free_head(db.pager);
+    validate0 := db_validate_report(db);
+
+    compacted := db_compact_table_with_indexes(db, "users");
+    root1 := db_table_root(db, "users");
+    idx_root1 := db_table_root(db, db_index_table_name("users", "email_key"));
+    free1 := pager_free_head(db.pager);
+    validate1 := db_validate_report(db);
+    row1 := db_get(db, "users", 1);
+    row2 := db_get(db, "users", 2);
+    indexed1 := db_scan_where_field_equals(db, "users", "email_key", "1001", "|");
+    indexed3 := db_scan_where_field_equals_rows_text(db, "users", "email_key", "1003", "|");
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 256);
+    validate2 := db_validate_report(reopened);
+    root2 := db_table_root(reopened, "users");
+    idx_root2 := db_table_root(reopened, db_index_table_name("users", "email_key"));
+    row3 := db_get(reopened, "users", 3);
+    row4 := db_get(reopened, "users", 4);
+    closed1 := db_close(reopened);
+
+    ? (defined <= 0) {
+        ! "defined=" + text_of(defined);
+        ^ 4;
+    }
+    ? (root0 <= 0 or idx_root0 <= 0 or validate0 != "ok") {
+        ! "before=" + text_of(root0) + ":" + text_of(idx_root0) + ":" + validate0;
+        ^ 5;
+    }
+    ? (compacted != 30 or root1 <= 0 or idx_root1 <= 0 or root1 == root0) {
+        ! "compacted=" + text_of(compacted) + ":" + text_of(root0) + ":" + text_of(root1) + ":" + text_of(idx_root0) + ":" + text_of(idx_root1);
+        ^ 6;
+    }
+    ? (free1 <= free0 or validate1 != "ok") {
+        ! "free=" + text_of(free0) + ":" + text_of(free1) + ":" + validate1;
+        ^ 7;
+    }
+    ? (row_get(row1, "name") != "user1" or count(row2) != 0) {
+        ! "rows0=" + row1 + ":" + row2;
+        ^ 8;
+    }
+    ? (row_get(indexed1, "name") != "user1" or row_get(indexed3, "__key") != "3") {
+        ! "index=" + indexed1 + ":" + indexed3;
+        ^ 9;
+    }
+    ? (validate2 != "ok" or root2 != root1 or idx_root2 != idx_root1 or row_get(row3, "name") != "user3" or count(row4) != 0 or not closed0 or not closed1) {
+        ! "reopen=" + validate2 + ":" + text_of(root2) + ":" + text_of(idx_root2) + ":" + row3 + ":" + row4;
+        ^ 10;
+    }
+
+    ! "ashdb compact smoke ok";
+    ^ 0;
+}

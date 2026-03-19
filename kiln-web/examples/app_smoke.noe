@@ -1,0 +1,31 @@
+& "../lib/server.noe";
+
+@main() -> i64 {
+    routes :: list<KilnRoute> := [
+        kiln_route("GET", "/", "home"),
+        kiln_route("GET", "/users/:id", "user-show")
+    ];
+    app := kiln_app(routes, 2048);
+    ? (count(app.routes) != 2) {
+        ! "route count mismatch";
+        ^ 1;
+    }
+    ? (app.read_limit != 2048) {
+        ! "read limit mismatch";
+        ^ 2;
+    }
+
+    request := kiln_http_parse_request("GET /users/42 HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    dispatch := kiln_dispatch(app.routes, request);
+    ? (not kiln_dispatch_is(dispatch, "user-show")) {
+        ! "dispatch mismatch";
+        ^ 3;
+    }
+    ? (kiln_dispatch_param(dispatch, "id") != "42") {
+        ! "dispatch param mismatch";
+        ^ 4;
+    }
+
+    ! "kiln app smoke ok";
+    ^ 0;
+}

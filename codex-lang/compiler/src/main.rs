@@ -176,6 +176,9 @@ enum TypeName {
     I64,
     Bool,
     Text,
+    Bytes,
+    File,
+    Listener,
     Socket,
     Void,
     Named(String),
@@ -247,6 +250,7 @@ enum IrInst {
 
 #[derive(Default)]
 struct IrFunctionBuilder {
+    function_name: String,
     slots: HashMap<String, usize>,
     slot_types: HashMap<String, TypeName>,
     next_slot: usize,
@@ -613,6 +617,9 @@ fn parse_type_inner(chars: &[char], index: &mut usize) -> Option<TypeName> {
         "i64" => TypeName::I64,
         "bool" => TypeName::Bool,
         "text" => TypeName::Text,
+        "bytes" => TypeName::Bytes,
+        "file" => TypeName::File,
+        "listener" => TypeName::Listener,
         "socket" => TypeName::Socket,
         "void" => TypeName::Void,
         _ => TypeName::Named(ident),
@@ -1382,7 +1389,7 @@ fn ensure_type_defined(
     shapes: &HashMap<String, ShapeDecl>,
 ) -> Result<(), String> {
     match ty {
-        TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::Socket | TypeName::Void => Ok(()),
+                TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::Bytes | TypeName::File | TypeName::Listener | TypeName::Socket | TypeName::Void => Ok(()),
         TypeName::Named(name) => {
             if shapes.contains_key(name) {
                 Ok(())
@@ -1631,9 +1638,11 @@ fn infer_expr_type(
                         TypeName::I64
                     } else if left_type == TypeName::Text && right_type == TypeName::Text {
                         TypeName::Text
+                    } else if left_type == TypeName::Bytes && right_type == TypeName::Bytes {
+                        TypeName::Bytes
                     } else {
                         return Err(format!(
-                            "'+' requires matching i64 or text operands, got '{}' and '{}'",
+                            "'+' requires matching i64, text, or bytes operands, got '{}' and '{}'",
                             left_type.display(),
                             right_type.display()
                         ));
@@ -1660,6 +1669,7 @@ fn infer_expr_type(
                     if left_type != TypeName::I64
                         && left_type != TypeName::Bool
                         && left_type != TypeName::Text
+                        && left_type != TypeName::Bytes
                     {
                         return Err(format!(
                             "comparison is not supported for type '{}'",
@@ -1850,9 +1860,9 @@ fn infer_call_type(
             }
             let arg_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
             match arg_type {
-                TypeName::Text | TypeName::List(_) => Ok(TypeName::I64),
+                TypeName::Text | TypeName::Bytes | TypeName::List(_) => Ok(TypeName::I64),
                 other => Err(format!(
-                    "count(...) only supports text and list values, got '{}'",
+                    "count(...) only supports text, bytes, and list values, got '{}'",
                     other.display()
                 )),
             }
@@ -1875,10 +1885,14 @@ fn infer_call_type(
             let text_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
             let start_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
             let len_type = infer_expr_type(&args[2], env, shapes, functions, None, list_types)?;
-            if text_type != TypeName::Text || start_type != TypeName::I64 || len_type != TypeName::I64 {
-                return Err("slice(...) expects (text, i64, i64)".to_string());
+            if start_type != TypeName::I64 || len_type != TypeName::I64 {
+                return Err("slice(...) expects (text|bytes, i64, i64)".to_string());
             }
-            Ok(TypeName::Text)
+            match text_type {
+                TypeName::Text => Ok(TypeName::Text),
+                TypeName::Bytes => Ok(TypeName::Bytes),
+                _ => Err("slice(...) expects (text|bytes, i64, i64)".to_string()),
+            }
         }
         "append" => {
             if args.len() != 2 {
@@ -1930,6 +1944,123 @@ fn infer_call_type(
             }
             Ok(TypeName::Bool)
         }
+        "file_open" => {
+            if args.len() != 1 {
+                return Err("file_open(...) expects exactly one argument".to_string());
+            }
+            let path_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if path_type != TypeName::Text {
+                return Err(format!(
+                    "file_open(...) expects a text path, got '{}'",
+                    path_type.display()
+                ));
+            }
+            Ok(TypeName::File)
+        }
+        "file_close" => {
+            if args.len() != 1 {
+                return Err("file_close(...) expects exactly one argument".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File {
+                return Err(format!(
+                    "file_close(...) expects file input, got '{}'",
+                    file_type.display()
+                ));
+            }
+            Ok(TypeName::Bool)
+        }
+        "file_size" => {
+            if args.len() != 1 {
+                return Err("file_size(...) expects exactly one argument".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File {
+                return Err(format!(
+                    "file_size(...) expects file input, got '{}'",
+                    file_type.display()
+                ));
+            }
+            Ok(TypeName::I64)
+        }
+        "file_read" => {
+            if args.len() != 3 {
+                return Err("file_read(...) expects exactly three arguments".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            let offset_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
+            let len_type = infer_expr_type(&args[2], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File || offset_type != TypeName::I64 || len_type != TypeName::I64 {
+                return Err("file_read(...) expects (file, i64, i64)".to_string());
+            }
+            Ok(TypeName::Text)
+        }
+        "file_read_bytes" => {
+            if args.len() != 3 {
+                return Err("file_read_bytes(...) expects exactly three arguments".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            let offset_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
+            let len_type = infer_expr_type(&args[2], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File || offset_type != TypeName::I64 || len_type != TypeName::I64 {
+                return Err("file_read_bytes(...) expects (file, i64, i64)".to_string());
+            }
+            Ok(TypeName::Bytes)
+        }
+        "file_write" => {
+            if args.len() != 3 {
+                return Err("file_write(...) expects exactly three arguments".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            let offset_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
+            let text_type = infer_expr_type(&args[2], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File
+                || offset_type != TypeName::I64
+                || (text_type != TypeName::Text && text_type != TypeName::Bytes)
+            {
+                return Err("file_write(...) expects (file, i64, text|bytes)".to_string());
+            }
+            Ok(TypeName::I64)
+        }
+        "file_sync" => {
+            if args.len() != 1 {
+                return Err("file_sync(...) expects exactly one argument".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File {
+                return Err(format!(
+                    "file_sync(...) expects file input, got '{}'",
+                    file_type.display()
+                ));
+            }
+            Ok(TypeName::Bool)
+        }
+        "file_try_lock" => {
+            if args.len() != 1 {
+                return Err("file_try_lock(...) expects exactly one argument".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File {
+                return Err(format!(
+                    "file_try_lock(...) expects file input, got '{}'",
+                    file_type.display()
+                ));
+            }
+            Ok(TypeName::Bool)
+        }
+        "file_unlock" => {
+            if args.len() != 1 {
+                return Err("file_unlock(...) expects exactly one argument".to_string());
+            }
+            let file_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if file_type != TypeName::File {
+                return Err(format!(
+                    "file_unlock(...) expects file input, got '{}'",
+                    file_type.display()
+                ));
+            }
+            Ok(TypeName::Bool)
+        }
         "host_cc" => {
             if args.len() != 2 {
                 return Err("host_cc(...) expects exactly two arguments".to_string());
@@ -1960,6 +2091,43 @@ fn infer_call_type(
             }
             Ok(TypeName::I64)
         }
+        "bytes_of_text" => {
+            if args.len() != 1 {
+                return Err("bytes_of_text(...) expects exactly one argument".to_string());
+            }
+            let value_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if value_type != TypeName::Text {
+                return Err(format!(
+                    "bytes_of_text(...) expects text input, got '{}'",
+                    value_type.display()
+                ));
+            }
+            Ok(TypeName::Bytes)
+        }
+        "text_of_bytes" => {
+            if args.len() != 1 {
+                return Err("text_of_bytes(...) expects exactly one argument".to_string());
+            }
+            let value_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if value_type != TypeName::Bytes {
+                return Err(format!(
+                    "text_of_bytes(...) expects bytes input, got '{}'",
+                    value_type.display()
+                ));
+            }
+            Ok(TypeName::Text)
+        }
+        "bytes_xor" => {
+            if args.len() != 2 {
+                return Err("bytes_xor(...) expects exactly two arguments".to_string());
+            }
+            let left_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            let right_type = infer_expr_type(&args[1], env, shapes, functions, None, list_types)?;
+            if left_type != TypeName::Bytes || right_type != TypeName::Bytes {
+                return Err("bytes_xor(...) expects (bytes, bytes)".to_string());
+            }
+            Ok(TypeName::Bytes)
+        }
         "text_of" => {
             if args.len() != 1 {
                 return Err("text_of(...) expects exactly one argument".to_string());
@@ -1988,6 +2156,41 @@ fn infer_call_type(
                 ));
             }
             Ok(TypeName::I64)
+        }
+        "listener_open" => {
+            if args.len() != 1 {
+                return Err("listener_open(...) expects exactly one argument".to_string());
+            }
+            let port_type = infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if port_type != TypeName::I64 {
+                return Err("listener_open(...) expects i64 port".to_string());
+            }
+            Ok(TypeName::Listener)
+        }
+        "listener_accept" => {
+            if args.len() != 1 {
+                return Err("listener_accept(...) expects exactly one argument".to_string());
+            }
+            let listener_type =
+                infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if listener_type != TypeName::Listener {
+                return Err("listener_accept(...) expects listener input".to_string());
+            }
+            Ok(TypeName::Socket)
+        }
+        "listener_close" => {
+            if args.len() != 1 {
+                return Err("listener_close(...) expects exactly one argument".to_string());
+            }
+            let listener_type =
+                infer_expr_type(&args[0], env, shapes, functions, None, list_types)?;
+            if listener_type != TypeName::Listener {
+                return Err(format!(
+                    "listener_close(...) expects listener input, got '{}'",
+                    listener_type.display()
+                ));
+            }
+            Ok(TypeName::Bool)
         }
         "socket_open" => {
             if args.len() != 2 {
@@ -2146,6 +2349,7 @@ fn lower_function_to_ir(function: &Function, semantic: &SemanticInfo) -> Result<
     }
 
     let mut builder = IrFunctionBuilder::default();
+    builder.function_name = function.name.clone();
     for param in &function.params {
         builder.alloc_slot(param.name.clone(), param.ty.clone());
     }
@@ -2347,6 +2551,19 @@ fn lower_ir_expr(
                     }
                 }
                 builder.pop_depth(1)?;
+            } else if left_type == TypeName::Bytes {
+                match op {
+                    BinaryOp::Add => out.push(IrInst::CallExtern("noema_native_bytes_concat".to_string(), 2)),
+                    BinaryOp::Eq => out.push(IrInst::CallExtern("noema_native_bytes_eq".to_string(), 2)),
+                    BinaryOp::Ne => {
+                        out.push(IrInst::CallExtern("noema_native_bytes_eq".to_string(), 2));
+                        out.push(IrInst::Not);
+                    }
+                    _ => {
+                        return Err("native backend currently supports only +/==/!= on bytes".to_string())
+                    }
+                }
+                builder.pop_depth(1)?;
             } else {
                 out.push(match op {
                     BinaryOp::Add => IrInst::Add,
@@ -2390,6 +2607,114 @@ fn lower_ir_expr(
                 builder.pop_depth(args.len())?;
                 builder.push_depth(1);
                 return Ok(());
+            }
+            if name == "bytes_of_text" {
+                for arg in args {
+                    lower_ir_expr(arg, semantic, builder, out)?;
+                }
+                out.push(IrInst::CallExtern("noema_native_bytes_from_text".to_string(), args.len()));
+                builder.pop_depth(args.len())?;
+                builder.push_depth(1);
+                return Ok(());
+            }
+            if name == "text_of_bytes" {
+                for arg in args {
+                    lower_ir_expr(arg, semantic, builder, out)?;
+                }
+                out.push(IrInst::CallExtern("noema_native_text_from_bytes".to_string(), args.len()));
+                builder.pop_depth(args.len())?;
+                builder.push_depth(1);
+                return Ok(());
+            }
+            if name == "bytes_xor" {
+                for arg in args {
+                    lower_ir_expr(arg, semantic, builder, out)?;
+                }
+                out.push(IrInst::CallExtern("noema_native_bytes_xor".to_string(), args.len()));
+                builder.pop_depth(args.len())?;
+                builder.push_depth(1);
+                return Ok(());
+            }
+            if name == "count" {
+                let arg_type = infer_expr_type(
+                    &args[0],
+                    &builder.type_env(),
+                    &semantic.shapes,
+                    &semantic.functions,
+                    None,
+                    &mut HashSet::new(),
+                )?;
+                for arg in args {
+                    lower_ir_expr(arg, semantic, builder, out)?;
+                }
+                let symbol = match arg_type {
+                    TypeName::Text => "noema_native_count_text",
+                    TypeName::Bytes => "noema_native_count_bytes",
+                    _ => "",
+                };
+                if !symbol.is_empty() {
+                    out.push(IrInst::CallExtern(symbol.to_string(), args.len()));
+                    builder.pop_depth(args.len())?;
+                    builder.push_depth(1);
+                    return Ok(());
+                }
+            }
+            if name == "slice" {
+                let arg_type = infer_expr_type(
+                    &args[0],
+                    &builder.type_env(),
+                    &semantic.shapes,
+                    &semantic.functions,
+                    None,
+                    &mut HashSet::new(),
+                )?;
+                for arg in args {
+                    lower_ir_expr(arg, semantic, builder, out)?;
+                }
+                let symbol = match arg_type {
+                    TypeName::Text => "noema_native_text_slice",
+                    TypeName::Bytes => "noema_native_bytes_slice",
+                    _ => "",
+                };
+                if !symbol.is_empty() {
+                    out.push(IrInst::CallExtern(symbol.to_string(), args.len()));
+                    builder.pop_depth(args.len())?;
+                    builder.push_depth(1);
+                    return Ok(());
+                }
+            }
+            if name == "file_read_bytes" {
+                for arg in args {
+                    lower_ir_expr(arg, semantic, builder, out)?;
+                }
+                out.push(IrInst::CallExtern("noema_native_file_read_bytes".to_string(), args.len()));
+                builder.pop_depth(args.len())?;
+                builder.push_depth(1);
+                return Ok(());
+            }
+            if name == "file_write" {
+                let arg_type = infer_expr_type(
+                    &args[2],
+                    &builder.type_env(),
+                    &semantic.shapes,
+                    &semantic.functions,
+                    None,
+                    &mut HashSet::new(),
+                )?;
+                for arg in args {
+                    lower_ir_expr(arg, semantic, builder, out)?;
+                }
+                let symbol = match arg_type {
+                    TypeName::Text => "noema_native_file_write",
+                    TypeName::Bytes => "noema_native_file_write_bytes",
+                    _ => "",
+                };
+                if !symbol.is_empty() {
+                    out.push(IrInst::CallExtern(symbol.to_string(), args.len()));
+                    builder.pop_depth(args.len())?;
+                    builder.push_depth(1);
+                    return Ok(());
+                }
             }
             if let Some((symbol, argc)) = native_builtin_symbol(name, args.len())? {
                 for arg in args {
@@ -2452,7 +2777,7 @@ fn ensure_native_expr(
     )?;
     if !is_native_value_type(&expr_type) {
         return Err(format!(
-            "native backend currently supports only scalar/text/socket expressions, got '{}'",
+            "native backend currently supports only scalar/text/bytes/socket expressions, got '{}'",
             expr_type.display()
         ));
     }
@@ -2460,7 +2785,7 @@ fn ensure_native_expr(
 }
 
 fn is_native_value_type(ty: &TypeName) -> bool {
-    matches!(ty, TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::Socket)
+    matches!(ty, TypeName::I64 | TypeName::Bool | TypeName::Text | TypeName::Bytes | TypeName::Listener | TypeName::Socket)
 }
 
 fn native_builtin_symbol(name: &str, argc: usize) -> Result<Option<(&'static str, usize)>, String> {
@@ -2469,11 +2794,14 @@ fn native_builtin_symbol(name: &str, argc: usize) -> Result<Option<(&'static str
         ("arg", 1) => ("noema_native_arg", 1),
         ("read_text", 1) => ("noema_native_read_text", 1),
         ("write_text", 2) => ("noema_native_write_text", 2),
+        ("file_try_lock", 1) => ("noema_native_file_try_lock", 1),
+        ("file_unlock", 1) => ("noema_native_file_unlock", 1),
         ("host_cc", 2) => ("noema_native_host_cc", 2),
-        ("count", 1) => ("noema_native_count_text", 1),
         ("find", 2) => ("noema_native_text_find", 2),
-        ("slice", 3) => ("noema_native_text_slice", 3),
         ("i64_of", 1) => ("noema_native_i64_of", 1),
+        ("listener_open", 1) => ("noema_native_listener_open", 1),
+        ("listener_accept", 1) => ("noema_native_listener_accept", 1),
+        ("listener_close", 1) => ("noema_native_listener_close", 1),
         ("socket_open", 2) => ("noema_native_socket_open", 2),
         ("socket_send", 2) => ("noema_native_socket_send", 2),
         ("socket_recv", 2) => ("noema_native_socket_recv", 2),
@@ -2510,7 +2838,7 @@ impl IrFunctionBuilder {
     }
 
     fn label(&mut self, prefix: &str) -> String {
-        let label = format!("{prefix}_{}", self.label_counter);
+        let label = format!("{}_{}_{}", self.function_name, prefix, self.label_counter);
         self.label_counter += 1;
         label
     }
@@ -2519,7 +2847,7 @@ impl IrFunctionBuilder {
         if let Some(label) = self.string_labels.get(value) {
             return label.clone();
         }
-        let label = format!("LCSTR_{}", self.string_counter);
+        let label = format!("LCSTR_{}_{}", self.function_name, self.string_counter);
         self.string_counter += 1;
         self.string_labels.insert(value.to_string(), label.clone());
         self.strings.push((label.clone(), value.to_string()));
@@ -2542,6 +2870,10 @@ fn lower_to_arm64_macos(program: &IrProgram) -> Result<String, String> {
     out.push_str(".extern _noema_native_text_literal\n");
     out.push_str(".extern _noema_native_text_concat\n");
     out.push_str(".extern _noema_native_text_eq\n");
+    out.push_str(".extern _noema_native_bytes_concat\n");
+    out.push_str(".extern _noema_native_bytes_eq\n");
+    out.push_str(".extern _noema_native_bytes_from_text\n");
+    out.push_str(".extern _noema_native_text_from_bytes\n");
     out.push_str(".extern _noema_native_text_from_i64\n");
     out.push_str(".extern _noema_native_text_from_bool\n");
     out.push_str(".extern _noema_native_text_identity\n");
@@ -2552,9 +2884,15 @@ fn lower_to_arm64_macos(program: &IrProgram) -> Result<String, String> {
     out.push_str(".extern _noema_native_write_text\n");
     out.push_str(".extern _noema_native_host_cc\n");
     out.push_str(".extern _noema_native_count_text\n");
+    out.push_str(".extern _noema_native_count_bytes\n");
     out.push_str(".extern _noema_native_text_find\n");
     out.push_str(".extern _noema_native_text_slice\n");
+    out.push_str(".extern _noema_native_bytes_slice\n");
+    out.push_str(".extern _noema_native_bytes_xor\n");
     out.push_str(".extern _noema_native_i64_of\n");
+    out.push_str(".extern _noema_native_listener_open\n");
+    out.push_str(".extern _noema_native_listener_accept\n");
+    out.push_str(".extern _noema_native_listener_close\n");
     out.push_str(".extern _noema_native_socket_open\n");
     out.push_str(".extern _noema_native_socket_send\n");
     out.push_str(".extern _noema_native_socket_recv\n");
@@ -2905,7 +3243,10 @@ fn lower_to_c_with_options(
     out.push_str("#include <stdlib.h>\n");
     out.push_str("#include <string.h>\n");
     out.push_str("#include <errno.h>\n");
+    out.push_str("#include <fcntl.h>\n");
     out.push_str("#include <netdb.h>\n");
+    out.push_str("#include <sys/file.h>\n");
+    out.push_str("#include <sys/stat.h>\n");
     out.push_str("#include <sys/socket.h>\n");
     out.push_str("#include <sys/types.h>\n");
     out.push_str("#include <unistd.h>\n\n");
@@ -2914,10 +3255,18 @@ fn lower_to_c_with_options(
     out.push_str("    int64_t len;\n");
     out.push_str("    const char *data;\n");
     out.push_str("} NoemaText;\n\n");
+    out.push_str("typedef NoemaText NoemaBytes;\n\n");
 
     out.push_str("typedef struct {\n");
     out.push_str("    int fd;\n");
+    out.push_str("} NoemaListener;\n\n");
+    out.push_str("typedef struct {\n");
+    out.push_str("    int fd;\n");
     out.push_str("} NoemaSocket;\n\n");
+
+    out.push_str("typedef struct {\n");
+    out.push_str("    int fd;\n");
+    out.push_str("} NoemaFile;\n\n");
 
     if external_linkage {
         out.push_str("int noema_argc = 0;\n");
@@ -2954,6 +3303,14 @@ fn lower_to_c_with_options(
     out.push_str("    return text.len;\n");
     out.push_str("}\n\n");
 
+    out.push_str("static NoemaBytes noema_bytes_literal(const char *data, int64_t len) {\n");
+    out.push_str("    return noema_text_literal(data, len);\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static int64_t noema_bytes_count(NoemaBytes bytes) {\n");
+    out.push_str("    return bytes.len;\n");
+    out.push_str("}\n\n");
+
     out.push_str("static int64_t noema_text_find(NoemaText haystack, NoemaText needle) {\n");
     out.push_str("    int64_t index = 0;\n");
     out.push_str("    if (needle.len == 0) {\n");
@@ -2979,7 +3336,22 @@ fn lower_to_c_with_options(
     out.push_str("    return noema_text_literal(text.data + start, len);\n");
     out.push_str("}\n\n");
 
+    out.push_str("static NoemaBytes noema_bytes_slice(NoemaBytes bytes, int64_t start, int64_t len) {\n");
+    out.push_str("    if (start < 0 || len < 0 || start > bytes.len || start + len > bytes.len) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: invalid bytes slice\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    return noema_bytes_literal(bytes.data + start, len);\n");
+    out.push_str("}\n\n");
+
     out.push_str("static bool noema_text_eq(NoemaText left, NoemaText right) {\n");
+    out.push_str("    if (left.len != right.len) {\n");
+    out.push_str("        return false;\n");
+    out.push_str("    }\n");
+    out.push_str("    return memcmp(left.data, right.data, (size_t)left.len) == 0;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static bool noema_bytes_eq(NoemaBytes left, NoemaBytes right) {\n");
     out.push_str("    if (left.len != right.len) {\n");
     out.push_str("        return false;\n");
     out.push_str("    }\n");
@@ -2992,6 +3364,37 @@ fn lower_to_c_with_options(
     out.push_str("    memcpy(buffer + left.len, right.data, (size_t)right.len);\n");
     out.push_str("    buffer[left.len + right.len] = '\\0';\n");
     out.push_str("    return noema_text_literal(buffer, left.len + right.len);\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaBytes noema_bytes_concat(NoemaBytes left, NoemaBytes right) {\n");
+    out.push_str("    char *buffer = (char *)noema_alloc((size_t)(left.len + right.len + 1));\n");
+    out.push_str("    memcpy(buffer, left.data, (size_t)left.len);\n");
+    out.push_str("    memcpy(buffer + left.len, right.data, (size_t)right.len);\n");
+    out.push_str("    buffer[left.len + right.len] = '\\0';\n");
+    out.push_str("    return noema_bytes_literal(buffer, left.len + right.len);\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaBytes noema_bytes_from_text(NoemaText text) {\n");
+    out.push_str("    return noema_bytes_literal(text.data, text.len);\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaText noema_text_from_bytes(NoemaBytes bytes) {\n");
+    out.push_str("    return noema_text_literal(bytes.data, bytes.len);\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaBytes noema_bytes_xor(NoemaBytes left, NoemaBytes right) {\n");
+    out.push_str("    int64_t index = 0;\n");
+    out.push_str("    char *buffer = NULL;\n");
+    out.push_str("    if (left.len != right.len) {\n");
+    out.push_str("        return noema_bytes_literal(NULL, 0);\n");
+    out.push_str("    }\n");
+    out.push_str("    buffer = (char *)noema_alloc((size_t)left.len + 1);\n");
+    out.push_str("    while (index < left.len) {\n");
+    out.push_str("        buffer[index] = (char)(((unsigned char)left.data[index]) ^ ((unsigned char)right.data[index]));\n");
+    out.push_str("        index += 1;\n");
+    out.push_str("    }\n");
+    out.push_str("    buffer[left.len] = '\\0';\n");
+    out.push_str("    return noema_bytes_literal(buffer, left.len);\n");
     out.push_str("}\n\n");
 
     out.push_str("static NoemaText noema_text_from_i64(int64_t value) {\n");
@@ -3081,6 +3484,84 @@ fn lower_to_c_with_options(
     out.push_str("    return written == (size_t)text.len;\n");
     out.push_str("}\n\n");
 
+    out.push_str("static NoemaFile noema_file_open(NoemaText path) {\n");
+    out.push_str("    char *path_c = noema_text_to_cstr(path);\n");
+    out.push_str("    int fd = open(path_c, O_RDWR | O_CREAT, 0644);\n");
+    out.push_str("    NoemaFile file_value;\n");
+    out.push_str("    if (fd < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to open file %s\\n\", path_c);\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    file_value.fd = fd;\n");
+    out.push_str("    return file_value;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static bool noema_file_close(NoemaFile file_value) {\n");
+    out.push_str("    return close(file_value.fd) == 0;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static int64_t noema_file_size(NoemaFile file_value) {\n");
+    out.push_str("    struct stat st;\n");
+    out.push_str("    if (fstat(file_value.fd, &st) != 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to stat file handle\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    return (int64_t)st.st_size;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaText noema_file_read(NoemaFile file_value, int64_t offset, int64_t len) {\n");
+    out.push_str("    if (offset < 0 || len < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: file_read offset and len must be non-negative\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    char *buffer = (char *)noema_alloc((size_t)len + 1);\n");
+    out.push_str("    ssize_t got = pread(file_value.fd, buffer, (size_t)len, (off_t)offset);\n");
+    out.push_str("    if (got < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: file_read failed\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    buffer[got] = '\\0';\n");
+    out.push_str("    return noema_text_literal(buffer, (int64_t)got);\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaBytes noema_file_read_bytes(NoemaFile file_value, int64_t offset, int64_t len) {\n");
+    out.push_str("    NoemaText text = noema_file_read(file_value, offset, len);\n");
+    out.push_str("    return noema_bytes_literal(text.data, text.len);\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static int64_t noema_file_write(NoemaFile file_value, int64_t offset, NoemaText text) {\n");
+    out.push_str("    int64_t total = 0;\n");
+    out.push_str("    if (offset < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: file_write offset must be non-negative\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    while (total < text.len) {\n");
+    out.push_str("        ssize_t wrote = pwrite(file_value.fd, text.data + total, (size_t)(text.len - total), (off_t)(offset + total));\n");
+    out.push_str("        if (wrote <= 0) {\n");
+    out.push_str("            fprintf(stderr, \"noema runtime: file_write failed\\n\");\n");
+    out.push_str("            exit(1);\n");
+    out.push_str("        }\n");
+    out.push_str("        total += (int64_t)wrote;\n");
+    out.push_str("    }\n");
+    out.push_str("    return total;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static int64_t noema_file_write_bytes(NoemaFile file_value, int64_t offset, NoemaBytes bytes) {\n");
+    out.push_str("    return noema_file_write(file_value, offset, noema_text_from_bytes(bytes));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static bool noema_file_sync(NoemaFile file_value) {\n");
+    out.push_str("    return fsync(file_value.fd) == 0;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static bool noema_file_try_lock(NoemaFile file_value) {\n");
+    out.push_str("    return flock(file_value.fd, LOCK_EX | LOCK_NB) == 0;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static bool noema_file_unlock(NoemaFile file_value) {\n");
+    out.push_str("    return flock(file_value.fd, LOCK_UN) == 0;\n");
+    out.push_str("}\n\n");
+
     out.push_str("static int64_t noema_host_cc(NoemaText source_path, NoemaText output_path) {\n");
     out.push_str("    char *source_c = noema_text_to_cstr(source_path);\n");
     out.push_str("    char *output_c = noema_text_to_cstr(output_path);\n");
@@ -3088,6 +3569,47 @@ fn lower_to_c_with_options(
     out.push_str("    char *command = (char *)noema_alloc(command_len);\n");
     out.push_str("    snprintf(command, command_len, \"cc -O3 %s -o %s\", source_c, output_c);\n");
     out.push_str("    return (int64_t)system(command);\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaListener noema_listener_open(int64_t port) {\n");
+    out.push_str("    int fd = socket(AF_INET, SOCK_STREAM, 0);\n");
+    out.push_str("    NoemaListener listener_value;\n");
+    out.push_str("    int reuse = 1;\n");
+    out.push_str("    struct sockaddr_in addr;\n");
+    out.push_str("    if (fd < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to create listener socket\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    memset(&addr, 0, sizeof(addr));\n");
+    out.push_str("    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));\n");
+    out.push_str("    addr.sin_family = AF_INET;\n");
+    out.push_str("    addr.sin_port = htons((uint16_t)port);\n");
+    out.push_str("    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);\n");
+    out.push_str("    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to bind listener on port %lld\\n\", (long long)port);\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    if (listen(fd, 16) != 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: failed to listen on port %lld\\n\", (long long)port);\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    listener_value.fd = fd;\n");
+    out.push_str("    return listener_value;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaSocket noema_listener_accept(NoemaListener listener_value) {\n");
+    out.push_str("    NoemaSocket socket_value;\n");
+    out.push_str("    int fd = accept(listener_value.fd, NULL, NULL);\n");
+    out.push_str("    if (fd < 0) {\n");
+    out.push_str("        fprintf(stderr, \"noema runtime: listener accept failed\\n\");\n");
+    out.push_str("        exit(1);\n");
+    out.push_str("    }\n");
+    out.push_str("    socket_value.fd = fd;\n");
+    out.push_str("    return socket_value;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static bool noema_listener_close(NoemaListener listener_value) {\n");
+    out.push_str("    return close(listener_value.fd) == 0;\n");
     out.push_str("}\n\n");
 
     out.push_str("static NoemaSocket noema_socket_open(NoemaText host, int64_t port) {\n");
@@ -3195,6 +3717,26 @@ fn lower_to_c_with_options(
     out.push_str("    return *(NoemaText *)(uintptr_t)handle;\n");
     out.push_str("}\n\n");
 
+    out.push_str("static uint64_t noema_native_box_bytes(NoemaBytes bytes) {\n");
+    out.push_str("    NoemaBytes *ptr = (NoemaBytes *)noema_alloc(sizeof(NoemaBytes));\n");
+    out.push_str("    *ptr = bytes;\n");
+    out.push_str("    return (uint64_t)(uintptr_t)ptr;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaBytes noema_native_unbox_bytes(uint64_t handle) {\n");
+    out.push_str("    return *(NoemaBytes *)(uintptr_t)handle;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static uint64_t noema_native_box_listener(NoemaListener listener_value) {\n");
+    out.push_str("    NoemaListener *ptr = (NoemaListener *)noema_alloc(sizeof(NoemaListener));\n");
+    out.push_str("    *ptr = listener_value;\n");
+    out.push_str("    return (uint64_t)(uintptr_t)ptr;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaListener noema_native_unbox_listener(uint64_t handle) {\n");
+    out.push_str("    return *(NoemaListener *)(uintptr_t)handle;\n");
+    out.push_str("}\n\n");
+
     out.push_str("static uint64_t noema_native_box_socket(NoemaSocket socket_value) {\n");
     out.push_str("    NoemaSocket *ptr = (NoemaSocket *)noema_alloc(sizeof(NoemaSocket));\n");
     out.push_str("    *ptr = socket_value;\n");
@@ -3203,6 +3745,16 @@ fn lower_to_c_with_options(
 
     out.push_str("static NoemaSocket noema_native_unbox_socket(uint64_t handle) {\n");
     out.push_str("    return *(NoemaSocket *)(uintptr_t)handle;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static uint64_t noema_native_box_file(NoemaFile file_value) {\n");
+    out.push_str("    NoemaFile *ptr = (NoemaFile *)noema_alloc(sizeof(NoemaFile));\n");
+    out.push_str("    *ptr = file_value;\n");
+    out.push_str("    return (uint64_t)(uintptr_t)ptr;\n");
+    out.push_str("}\n\n");
+
+    out.push_str("static NoemaFile noema_native_unbox_file(uint64_t handle) {\n");
+    out.push_str("    return *(NoemaFile *)(uintptr_t)handle;\n");
     out.push_str("}\n\n");
 
     out.push_str("uint64_t noema_native_text_literal(const char *data, int64_t len) {\n");
@@ -3229,6 +3781,34 @@ fn lower_to_c_with_options(
     out.push_str("    return value;\n");
     out.push_str("}\n\n");
 
+    out.push_str("uint64_t noema_native_bytes_concat(uint64_t left, uint64_t right) {\n");
+    out.push_str("    return noema_native_box_bytes(noema_bytes_concat(noema_native_unbox_bytes(left), noema_native_unbox_bytes(right)));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_bytes_eq(uint64_t left, uint64_t right) {\n");
+    out.push_str("    return noema_bytes_eq(noema_native_unbox_bytes(left), noema_native_unbox_bytes(right));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_bytes_from_text(uint64_t text) {\n");
+    out.push_str("    return noema_native_box_bytes(noema_bytes_from_text(noema_native_unbox_text(text)));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_text_from_bytes(uint64_t bytes) {\n");
+    out.push_str("    return noema_native_box_text(noema_text_from_bytes(noema_native_unbox_bytes(bytes)));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_count_bytes(uint64_t bytes) {\n");
+    out.push_str("    return noema_bytes_count(noema_native_unbox_bytes(bytes));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_bytes_slice(uint64_t bytes, int64_t start, int64_t len) {\n");
+    out.push_str("    return noema_native_box_bytes(noema_bytes_slice(noema_native_unbox_bytes(bytes), start, len));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_bytes_xor(uint64_t left, uint64_t right) {\n");
+    out.push_str("    return noema_native_box_bytes(noema_bytes_xor(noema_native_unbox_bytes(left), noema_native_unbox_bytes(right)));\n");
+    out.push_str("}\n\n");
+
     out.push_str("void noema_native_emit_text(uint64_t text) {\n");
     out.push_str("    noema_emit_text(noema_native_unbox_text(text));\n");
     out.push_str("}\n\n");
@@ -3249,6 +3829,46 @@ fn lower_to_c_with_options(
     out.push_str("    return noema_write_text(noema_native_unbox_text(path), noema_native_unbox_text(text));\n");
     out.push_str("}\n\n");
 
+    out.push_str("uint64_t noema_native_file_open(uint64_t path) {\n");
+    out.push_str("    return noema_native_box_file(noema_file_open(noema_native_unbox_text(path)));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_close(uint64_t file_value) {\n");
+    out.push_str("    return noema_file_close(noema_native_unbox_file(file_value));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_size(uint64_t file_value) {\n");
+    out.push_str("    return noema_file_size(noema_native_unbox_file(file_value));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_file_read(uint64_t file_value, int64_t offset, int64_t len) {\n");
+    out.push_str("    return noema_native_box_text(noema_file_read(noema_native_unbox_file(file_value), offset, len));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_file_read_bytes(uint64_t file_value, int64_t offset, int64_t len) {\n");
+    out.push_str("    return noema_native_box_bytes(noema_file_read_bytes(noema_native_unbox_file(file_value), offset, len));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_write(uint64_t file_value, int64_t offset, uint64_t text) {\n");
+    out.push_str("    return noema_file_write(noema_native_unbox_file(file_value), offset, noema_native_unbox_text(text));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_write_bytes(uint64_t file_value, int64_t offset, uint64_t bytes) {\n");
+    out.push_str("    return noema_file_write_bytes(noema_native_unbox_file(file_value), offset, noema_native_unbox_bytes(bytes));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_sync(uint64_t file_value) {\n");
+    out.push_str("    return noema_file_sync(noema_native_unbox_file(file_value));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_try_lock(uint64_t file_value) {\n");
+    out.push_str("    return noema_file_try_lock(noema_native_unbox_file(file_value));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_file_unlock(uint64_t file_value) {\n");
+    out.push_str("    return noema_file_unlock(noema_native_unbox_file(file_value));\n");
+    out.push_str("}\n\n");
+
     out.push_str("int64_t noema_native_host_cc(uint64_t source_path, uint64_t output_path) {\n");
     out.push_str("    return noema_host_cc(noema_native_unbox_text(source_path), noema_native_unbox_text(output_path));\n");
     out.push_str("}\n\n");
@@ -3267,6 +3887,18 @@ fn lower_to_c_with_options(
 
     out.push_str("int64_t noema_native_i64_of(uint64_t text) {\n");
     out.push_str("    return noema_i64_of(noema_native_unbox_text(text));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_listener_open(int64_t port) {\n");
+    out.push_str("    return noema_native_box_listener(noema_listener_open(port));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("uint64_t noema_native_listener_accept(uint64_t listener_value) {\n");
+    out.push_str("    return noema_native_box_socket(noema_listener_accept(noema_native_unbox_listener(listener_value)));\n");
+    out.push_str("}\n\n");
+
+    out.push_str("int64_t noema_native_listener_close(uint64_t listener_value) {\n");
+    out.push_str("    return noema_listener_close(noema_native_unbox_listener(listener_value));\n");
     out.push_str("}\n\n");
 
     out.push_str("uint64_t noema_native_socket_open(uint64_t host, int64_t port) {\n");
@@ -3730,6 +4362,15 @@ fn lower_expr(
                 BinaryOp::Ne if left_type == TypeName::Text => {
                     format!("(!noema_text_eq({}, {}))", left_expr, right_expr)
                 }
+                BinaryOp::Add if left_type == TypeName::Bytes => {
+                    format!("noema_bytes_concat({}, {})", left_expr, right_expr)
+                }
+                BinaryOp::Eq if left_type == TypeName::Bytes => {
+                    format!("noema_bytes_eq({}, {})", left_expr, right_expr)
+                }
+                BinaryOp::Ne if left_type == TypeName::Bytes => {
+                    format!("(!noema_bytes_eq({}, {}))", left_expr, right_expr)
+                }
                 BinaryOp::Add => format!("({} + {})", left_expr, right_expr),
                 BinaryOp::Sub => format!("({} - {})", left_expr, right_expr),
                 BinaryOp::Mul => format!("({} * {})", left_expr, right_expr),
@@ -3829,8 +4470,9 @@ fn lower_call(
             let arg_expr = lower_expr(&args[0], env, semantic, None)?;
             match arg_type {
                 TypeName::Text => Ok(format!("noema_text_count({})", arg_expr)),
+                TypeName::Bytes => Ok(format!("noema_bytes_count({})", arg_expr)),
                 TypeName::List(inner) => Ok(format!("{}({})", list_count_name(&inner), arg_expr)),
-                _ => Err("count lowering requires text or list".to_string()),
+                _ => Err("count lowering requires text, bytes, or list".to_string()),
             }
         }
         "find" => Ok(format!(
@@ -3838,12 +4480,24 @@ fn lower_call(
             lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?,
             lower_expr(&args[1], env, semantic, Some(&TypeName::Text))?
         )),
-        "slice" => Ok(format!(
-            "noema_text_slice({}, {}, {})",
-            lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?,
-            lower_expr(&args[1], env, semantic, Some(&TypeName::I64))?,
-            lower_expr(&args[2], env, semantic, Some(&TypeName::I64))?
-        )),
+        "slice" => {
+            let arg_type = infer_expr_type(
+                &args[0],
+                env,
+                &semantic.shapes,
+                &semantic.functions,
+                None,
+                &mut HashSet::new(),
+            )?;
+            let source = lower_expr(&args[0], env, semantic, None)?;
+            let start = lower_expr(&args[1], env, semantic, Some(&TypeName::I64))?;
+            let len = lower_expr(&args[2], env, semantic, Some(&TypeName::I64))?;
+            match arg_type {
+                TypeName::Text => Ok(format!("noema_text_slice({}, {}, {})", source, start, len)),
+                TypeName::Bytes => Ok(format!("noema_bytes_slice({}, {}, {})", source, start, len)),
+                _ => Err("slice lowering requires text or bytes".to_string()),
+            }
+        }
         "append" => {
             let list_type = infer_expr_type(
                 &args[0],
@@ -3872,6 +4526,67 @@ fn lower_call(
             lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?,
             lower_expr(&args[1], env, semantic, Some(&TypeName::Text))?
         )),
+        "file_open" => Ok(format!(
+            "noema_file_open({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?
+        )),
+        "file_close" => Ok(format!(
+            "noema_file_close({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?
+        )),
+        "file_size" => Ok(format!(
+            "noema_file_size({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?
+        )),
+        "file_read" => Ok(format!(
+            "noema_file_read({}, {}, {})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?,
+            lower_expr(&args[1], env, semantic, Some(&TypeName::I64))?,
+            lower_expr(&args[2], env, semantic, Some(&TypeName::I64))?
+        )),
+        "file_read_bytes" => Ok(format!(
+            "noema_file_read_bytes({}, {}, {})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?,
+            lower_expr(&args[1], env, semantic, Some(&TypeName::I64))?,
+            lower_expr(&args[2], env, semantic, Some(&TypeName::I64))?
+        )),
+        "file_write" => {
+            let value_type = infer_expr_type(
+                &args[2],
+                env,
+                &semantic.shapes,
+                &semantic.functions,
+                None,
+                &mut HashSet::new(),
+            )?;
+            match value_type {
+                TypeName::Text => Ok(format!(
+                    "noema_file_write({}, {}, {})",
+                    lower_expr(&args[0], env, semantic, Some(&TypeName::File))?,
+                    lower_expr(&args[1], env, semantic, Some(&TypeName::I64))?,
+                    lower_expr(&args[2], env, semantic, Some(&TypeName::Text))?
+                )),
+                TypeName::Bytes => Ok(format!(
+                    "noema_file_write_bytes({}, {}, {})",
+                    lower_expr(&args[0], env, semantic, Some(&TypeName::File))?,
+                    lower_expr(&args[1], env, semantic, Some(&TypeName::I64))?,
+                    lower_expr(&args[2], env, semantic, Some(&TypeName::Bytes))?
+                )),
+                _ => Err("file_write lowering requires text or bytes payload".to_string()),
+            }
+        }
+        "file_sync" => Ok(format!(
+            "noema_file_sync({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?
+        )),
+        "file_try_lock" => Ok(format!(
+            "noema_file_try_lock({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?
+        )),
+        "file_unlock" => Ok(format!(
+            "noema_file_unlock({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::File))?
+        )),
         "host_cc" => Ok(format!(
             "noema_host_cc({}, {})",
             lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?,
@@ -3882,6 +4597,19 @@ fn lower_call(
             lower_expr(&args[0], env, semantic, Some(&TypeName::I64))?
         )),
         "arg_count" => Ok("noema_arg_count()".to_string()),
+        "bytes_of_text" => Ok(format!(
+            "noema_bytes_from_text({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?
+        )),
+        "text_of_bytes" => Ok(format!(
+            "noema_text_from_bytes({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Bytes))?
+        )),
+        "bytes_xor" => Ok(format!(
+            "noema_bytes_xor({}, {})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Bytes))?,
+            lower_expr(&args[1], env, semantic, Some(&TypeName::Bytes))?
+        )),
         "text_of" => {
             let ty = infer_expr_type(
                 &args[0],
@@ -3902,6 +4630,18 @@ fn lower_call(
         "i64_of" => Ok(format!(
             "noema_i64_of({})",
             lower_expr(&args[0], env, semantic, Some(&TypeName::Text))?
+        )),
+        "listener_open" => Ok(format!(
+            "noema_listener_open({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::I64))?
+        )),
+        "listener_accept" => Ok(format!(
+            "noema_listener_accept({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Listener))?
+        )),
+        "listener_close" => Ok(format!(
+            "noema_listener_close({})",
+            lower_expr(&args[0], env, semantic, Some(&TypeName::Listener))?
         )),
         "socket_open" => Ok(format!(
             "noema_socket_open({}, {})",
@@ -3958,6 +4698,9 @@ fn c_type_name(ty: &TypeName) -> String {
         TypeName::I64 => "int64_t".to_string(),
         TypeName::Bool => "bool".to_string(),
         TypeName::Text => "NoemaText".to_string(),
+        TypeName::Bytes => "NoemaBytes".to_string(),
+        TypeName::File => "NoemaFile".to_string(),
+        TypeName::Listener => "NoemaListener".to_string(),
         TypeName::Socket => "NoemaSocket".to_string(),
         TypeName::Void => "void".to_string(),
         TypeName::Named(name) => name.clone(),
@@ -3995,6 +4738,9 @@ impl TypeName {
             TypeName::I64 => "i64".to_string(),
             TypeName::Bool => "bool".to_string(),
             TypeName::Text => "text".to_string(),
+            TypeName::Bytes => "bytes".to_string(),
+            TypeName::File => "file".to_string(),
+            TypeName::Listener => "listener".to_string(),
             TypeName::Socket => "socket".to_string(),
             TypeName::Void => "void".to_string(),
             TypeName::Named(name) => name.clone(),
@@ -4007,6 +4753,9 @@ impl TypeName {
             TypeName::I64 => "i64".to_string(),
             TypeName::Bool => "bool".to_string(),
             TypeName::Text => "text".to_string(),
+            TypeName::Bytes => "bytes".to_string(),
+            TypeName::File => "file".to_string(),
+            TypeName::Listener => "listener".to_string(),
             TypeName::Socket => "socket".to_string(),
             TypeName::Void => "void".to_string(),
             TypeName::Named(name) => name.to_lowercase(),

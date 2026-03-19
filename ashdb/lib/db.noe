@@ -1,0 +1,3119 @@
+& "table.noe";
+& "row.noe";
+
+%DB {
+    pager: Pager;
+    path: text;
+    lock_held: bool;
+}
+
+%DBCursor {
+    table_name: text;
+    key: i64;
+}
+
+@db_index_table_name(table_name: text, index_name: text) -> text {
+    ^ "idx." + table_name + "." + index_name;
+}
+
+@db_lock_error() -> i64 {
+    ^ -99;
+}
+
+@db_can_write(db: DB) -> bool {
+    ^ db.lock_held;
+}
+
+@db_journal_path(db: DB) -> text {
+    ^ db.path + ".journal";
+}
+
+@db_wal_path(db: DB) -> text {
+    ^ db.path + ".wal";
+}
+
+@db_journal_size_width() -> i64 {
+    ^ 8;
+}
+
+@db_journal_header_size() -> i64 {
+    ^ 1 + db_journal_size_width() + db_journal_size_width();
+}
+
+@db_journal_header(active: bool, original_page_count: i64, entry_count: i64) -> text {
+    flag := ".";
+    ? (active) {
+        flag = "J";
+    }
+    ^ flag + pad_left_i64(original_page_count, db_journal_size_width()) + pad_left_i64(entry_count, db_journal_size_width());
+}
+
+@db_journal_active(header: text) -> bool {
+    ? (count(header) < db_journal_header_size()) {
+        ^ false;
+    }
+    ^ slice(header, 0, 1) == "J";
+}
+
+@db_journal_original_page_count(header: text) -> i64 {
+    ? (count(header) < db_journal_header_size()) {
+        ^ 0;
+    }
+    ^ i64_of(slice(header, 1, db_journal_size_width()));
+}
+
+@db_journal_entry_count(header: text) -> i64 {
+    ? (count(header) < db_journal_header_size()) {
+        ^ 0;
+    }
+    ^ i64_of(slice(header, 1 + db_journal_size_width(), db_journal_size_width()));
+}
+
+@db_journal_entry_size(page_size: i64) -> i64 {
+    ^ db_journal_size_width() + page_size;
+}
+
+@db_journal_entry_offset(page_size: i64, entry_index: i64) -> i64 {
+    ^ db_journal_header_size() + (entry_index * db_journal_entry_size(page_size));
+}
+
+@db_journal_entry_text(page_id: i64, page_text: text) -> text {
+    ^ pad_left_i64(page_id, db_journal_size_width()) + page_text;
+}
+
+@db_journal_entry_page_id(entry_text: text) -> i64 {
+    ^ i64_of(slice(entry_text, 0, db_journal_size_width()));
+}
+
+@db_journal_entry_page_text(entry_text: text, page_size: i64) -> text {
+    ^ slice(entry_text, db_journal_size_width(), page_size);
+}
+
+@db_wal_header_size() -> i64 {
+    ^ 1 + db_journal_size_width();
+}
+
+@db_wal_header(committed: bool, entry_count: i64) -> text {
+    flag := ".";
+    ? (committed) {
+        flag = "C";
+    }
+    ^ flag + pad_left_i64(entry_count, db_journal_size_width());
+}
+
+@db_wal_committed(header: text) -> bool {
+    ? (count(header) < db_wal_header_size()) {
+        ^ false;
+    }
+    ^ slice(header, 0, 1) == "C";
+}
+
+@db_wal_entry_count(header: text) -> i64 {
+    ? (count(header) < db_wal_header_size()) {
+        ^ 0;
+    }
+    ^ i64_of(slice(header, 1, db_journal_size_width()));
+}
+
+@db_wal_entry_size(page_size: i64) -> i64 {
+    ^ db_journal_entry_size(page_size);
+}
+
+@db_wal_entry_offset(page_size: i64, entry_index: i64) -> i64 {
+    ^ db_wal_header_size() + (entry_index * db_wal_entry_size(page_size));
+}
+
+@db_wal_clear(db: DB) -> bool {
+    wal := file_open(db_wal_path(db));
+    wrote := file_write(wal, 0, db_wal_header(false, 0));
+    synced := file_sync(wal);
+    closed := file_close(wal);
+    ^ wrote == db_wal_header_size() and synced and closed;
+}
+
+@db_wal_is_committed(db: DB) -> bool {
+    wal := file_open(db_wal_path(db));
+    header := file_read(wal, 0, db_wal_header_size());
+    closed := file_close(wal);
+    ^ db_wal_committed(header);
+}
+
+@db_recovery_state_text(db: DB) -> text {
+    journal := file_open(db_journal_path(db));
+    journal_size := file_size(journal);
+    journal_header := "";
+    journal_active := false;
+    journal_entries := 0;
+    ? (journal_size >= db_journal_header_size()) {
+        journal_header = file_read(journal, 0, db_journal_header_size());
+        journal_active = db_journal_active(journal_header);
+        journal_entries = db_journal_entry_count(journal_header);
+    }
+    closed_journal := file_close(journal);
+
+    wal := file_open(db_wal_path(db));
+    wal_size := file_size(wal);
+    wal_header := "";
+    wal_committed := false;
+    wal_entries := 0;
+    ? (wal_size >= db_wal_header_size()) {
+        wal_header = file_read(wal, 0, db_wal_header_size());
+        wal_committed = db_wal_committed(wal_header);
+        wal_entries = db_wal_entry_count(wal_header);
+    }
+    closed_wal := file_close(wal);
+
+    out := "";
+    out = row_append(out, "journal_active", text_of(journal_active));
+    out = row_append(out, "journal_entries", text_of(journal_entries));
+    out = row_append(out, "wal_committed", text_of(wal_committed));
+    out = row_append(out, "wal_entries", text_of(wal_entries));
+    out = row_append(out, "page_count", text_of(pager_total_pages(db.pager)));
+    out = row_append(out, "free_head", text_of(pager_free_head(db.pager)));
+    out = row_append(out, "lock_held", text_of(db.lock_held));
+    ? (not closed_journal or not closed_wal) {
+        out = row_put(out, "ok", "false");
+        out = row_put(out, "error", "recovery-state-close-failed");
+        ^ out;
+    }
+    out = row_append(out, "ok", "true");
+    ^ out;
+}
+
+@db_apply_wal_pages(db: DB, wal: file, entry_count: i64) -> bool {
+    idx := 0;
+    ~ (idx < entry_count) {
+        entry_offset := db_wal_entry_offset(db.pager.page_size, idx);
+        entry_text := file_read(wal, entry_offset, db_wal_entry_size(db.pager.page_size));
+        page_id := db_journal_entry_page_id(entry_text);
+        page_text := db_journal_entry_page_text(entry_text, db.pager.page_size);
+        applied := pager_raw_write_page(db.pager, page_id, page_text);
+        ? (applied != db.pager.page_size) {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@db_write_wal_for_commit(db: DB) -> bool {
+    journal := file_open(db_journal_path(db));
+    header := file_read(journal, 0, db_journal_header_size());
+    ? (not db_journal_active(header)) {
+        closed_journal := file_close(journal);
+        ^ false;
+    }
+    entry_count := db_journal_entry_count(header);
+    wal := file_open(db_wal_path(db));
+    wrote_header0 := file_write(wal, 0, db_wal_header(false, entry_count));
+    idx := 0;
+    wrote_count := 0;
+    ~ (idx < entry_count) {
+        journal_offset := db_journal_entry_offset(db.pager.page_size, idx);
+        journal_entry := file_read(journal, journal_offset, db_journal_entry_size(db.pager.page_size));
+        page_id := db_journal_entry_page_id(journal_entry);
+        page_text := pager_raw_read_page(db.pager, page_id);
+        wal_offset := db_wal_entry_offset(db.pager.page_size, idx);
+        wrote_entry := file_write(wal, wal_offset, db_journal_entry_text(page_id, page_text));
+        ? (wrote_entry != db_wal_entry_size(db.pager.page_size)) {
+            closed_wal := file_close(wal);
+            closed_journal := file_close(journal);
+            ^ false;
+        }
+        wrote_count = wrote_count + 1;
+        idx = idx + 1;
+    }
+    synced_entries := file_sync(wal);
+    wrote_header1 := file_write(wal, 0, db_wal_header(true, entry_count));
+    synced_commit := file_sync(wal);
+    closed_wal := file_close(wal);
+    closed_journal := file_close(journal);
+    ^ wrote_header0 == db_wal_header_size() and wrote_count == entry_count and synced_entries and wrote_header1 == db_wal_header_size() and synced_commit and closed_wal and closed_journal;
+}
+
+@db_recover_wal_if_needed(db: DB) -> bool {
+    wal := file_open(db_wal_path(db));
+    wal_size := file_size(wal);
+    ? (wal_size < db_wal_header_size()) {
+        closed := file_close(wal);
+        ^ true;
+    }
+    header := file_read(wal, 0, db_wal_header_size());
+    ? (not db_wal_committed(header)) {
+        closed := file_close(wal);
+        cleared := db_wal_clear(db);
+        ^ closed and cleared;
+    }
+    entry_count := db_wal_entry_count(header);
+    applied := db_apply_wal_pages(db, wal, entry_count);
+    synced_db := file_sync(db.pager.handle);
+    closed := file_close(wal);
+    cleared_wal := db_wal_clear(db);
+    cleared_journal := db_journal_clear(db);
+    ^ applied and synced_db and closed and cleared_wal and cleared_journal;
+}
+
+@db_journal_clear(db: DB) -> bool {
+    journal := file_open(db_journal_path(db));
+    wrote := file_write(journal, 0, db_journal_header(false, 0, 0));
+    synced := file_sync(journal);
+    closed := file_close(journal);
+    ^ wrote == db_journal_header_size() and synced and closed;
+}
+
+@db_journal_is_active(db: DB) -> bool {
+    journal := file_open(db_journal_path(db));
+    header := file_read(journal, 0, db_journal_header_size());
+    closed := file_close(journal);
+    ^ db_journal_active(header);
+}
+
+@db_restore_journal_pages(db: DB, journal: file, entry_count: i64) -> bool {
+    idx := 0;
+    ~ (idx < entry_count) {
+        entry_offset := db_journal_entry_offset(db.pager.page_size, idx);
+        entry_text := file_read(journal, entry_offset, db_journal_entry_size(db.pager.page_size));
+        page_id := db_journal_entry_page_id(entry_text);
+        page_text := db_journal_entry_page_text(entry_text, db.pager.page_size);
+        restored := pager_raw_write_page(db.pager, page_id, page_text);
+        ? (restored != db.pager.page_size) {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@db_recover_if_needed(db: DB) -> bool {
+    wal_ok := db_recover_wal_if_needed(db);
+    ? (not wal_ok) {
+        ^ false;
+    }
+    journal := file_open(db_journal_path(db));
+    journal_size := file_size(journal);
+    ? (journal_size < db_journal_header_size()) {
+        closed := file_close(journal);
+        ^ true;
+    }
+    header := file_read(journal, 0, db_journal_header_size());
+    ? (not db_journal_active(header)) {
+        closed := file_close(journal);
+        ^ true;
+    }
+    entry_count := db_journal_entry_count(header);
+    restored := db_restore_journal_pages(db, journal, entry_count);
+    synced_db := file_sync(db.pager.handle);
+    cleared := file_write(journal, 0, db_journal_header(false, 0, 0));
+    synced_journal := file_sync(journal);
+    closed := file_close(journal);
+    ^ restored and synced_db and cleared == db_journal_header_size() and synced_journal and closed;
+}
+
+@db_journal_has_page(db: DB, page_id: i64) -> bool {
+    journal := file_open(db_journal_path(db));
+    header := file_read(journal, 0, db_journal_header_size());
+    ? (not db_journal_active(header)) {
+        closed := file_close(journal);
+        ^ false;
+    }
+    entry_count := db_journal_entry_count(header);
+    idx := 0;
+    ~ (idx < entry_count) {
+        entry_offset := db_journal_entry_offset(db.pager.page_size, idx);
+        entry_text := file_read(journal, entry_offset, db_journal_entry_size(db.pager.page_size));
+        ? (db_journal_entry_page_id(entry_text) == page_id) {
+            closed := file_close(journal);
+            ^ true;
+        }
+        idx = idx + 1;
+    }
+    closed := file_close(journal);
+    ^ false;
+}
+
+@db_journal_append_page(db: DB, page_id: i64, page_text: text) -> bool {
+    journal := file_open(db_journal_path(db));
+    header := file_read(journal, 0, db_journal_header_size());
+    ? (not db_journal_active(header)) {
+        closed := file_close(journal);
+        ^ false;
+    }
+    original_page_count := db_journal_original_page_count(header);
+    entry_count := db_journal_entry_count(header);
+    entry_offset := db_journal_entry_offset(db.pager.page_size, entry_count);
+    wrote_entry := file_write(journal, entry_offset, db_journal_entry_text(page_id, page_text));
+    wrote_header := file_write(journal, 0, db_journal_header(true, original_page_count, entry_count + 1));
+    synced := file_sync(journal);
+    closed := file_close(journal);
+    ^ wrote_entry == db_journal_entry_size(db.pager.page_size) and wrote_header == db_journal_header_size() and synced and closed;
+}
+
+@db_journal_capture_page_if_needed(db: DB, page_id: i64) -> bool {
+    journal := file_open(db_journal_path(db));
+    header := file_read(journal, 0, db_journal_header_size());
+    ? (not db_journal_active(header)) {
+        closed := file_close(journal);
+        ^ true;
+    }
+    original_page_count := db_journal_original_page_count(header);
+    closed := file_close(journal);
+    ? (page_id < 0 or page_id >= original_page_count) {
+        ^ true;
+    }
+    ? (db_journal_has_page(db, page_id)) {
+        ^ true;
+    }
+    page_text := pager_raw_read_page(db.pager, page_id);
+    ^ db_journal_append_page(db, page_id, page_text);
+}
+
+@db_capture_catalog_write(db: DB) -> bool {
+    header_ok := db_journal_capture_page_if_needed(db, 0);
+    catalog_ok := db_journal_capture_page_if_needed(db, db_catalog_page());
+    ^ header_ok and catalog_ok;
+}
+
+@db_capture_table_page_write(db: DB, table: Table, page_id: i64) -> bool {
+    captured := db_journal_capture_page_if_needed(db, page_id);
+    ? (not captured) {
+        ^ false;
+    }
+    page := pager_read_page(table.pager, page_id);
+    kind := slice(page, 1, 1);
+    ? (kind == "L") {
+        ^ true;
+    }
+    ? (kind != "I") {
+        ^ false;
+    }
+    left_ok := db_capture_table_page_write(db, table, table_internal_left_child(page));
+    ? (not left_ok) {
+        ^ false;
+    }
+    key_count := table_internal_key_count(page);
+    used_cells := table_internal_used_cells(page);
+    idx := 0;
+    ~ (idx < key_count) {
+        cell := table_internal_cell_at(used_cells, idx);
+        child_ok := db_capture_table_page_write(db, table, table_internal_cell_child(cell));
+        ? (not child_ok) {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@db_capture_bound_table_write(db: DB, table: Table) -> bool {
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ false;
+    }
+    header_ok := db_journal_capture_page_if_needed(db, 0);
+    ? (not header_ok) {
+        ^ false;
+    }
+    ^ db_capture_table_page_write(db, table, table.root_page);
+}
+
+@db_capture_table_write(db: DB, table_name: text) -> bool {
+    table := db_bind_table(db, table_name);
+    ^ db_capture_bound_table_write(db, table);
+}
+
+@db_catalog_page() -> i64 {
+    ^ 1;
+}
+
+@db_schema_table_name() -> text {
+    ^ "__schema";
+}
+
+@db_schema_slot_width() -> i64 {
+    ^ 96;
+}
+
+@db_catalog_count_width() -> i64 {
+    ^ 8;
+}
+
+@db_catalog_root_width() -> i64 {
+    ^ 8;
+}
+
+@db_catalog_slot_width_width() -> i64 {
+    ^ 8;
+}
+
+@db_catalog_name_width() -> i64 {
+    ^ 15;
+}
+
+@db_catalog_entry_size() -> i64 {
+    ^ 1 + db_catalog_root_width() + db_catalog_slot_width_width() + db_catalog_name_width();
+}
+
+@db_catalog_capacity(page_size: i64) -> i64 {
+    ^ (page_size - 1 - (1 + db_catalog_count_width())) / db_catalog_entry_size();
+}
+
+@db_catalog_normalize_name(name: text) -> text {
+    trimmed := name;
+    ? (count(trimmed) > db_catalog_name_width()) {
+        trimmed = slice(trimmed, 0, db_catalog_name_width());
+    }
+    ^ pad_right(trimmed, db_catalog_name_width(), ".");
+}
+
+@db_catalog_page_text(page_size: i64, count0: i64, entries: text) -> text {
+    body := "C" + pad_left_i64(count0, db_catalog_count_width()) + entries;
+    ^ pad_right(body, page_size - 1, ".");
+}
+
+@db_catalog_count(page: text) -> i64 {
+    ^ i64_of(slice(page, 2, db_catalog_count_width()));
+}
+
+@db_catalog_entries_region(page: text) -> text {
+    start := 1 + 1 + db_catalog_count_width();
+    ^ slice(page, start, count(page) - start);
+}
+
+@db_catalog_entry_text(root_page: i64, slot_width: i64, name: text) -> text {
+    ^ "1" + pad_left_i64(root_page, db_catalog_root_width()) + pad_left_i64(slot_width, db_catalog_slot_width_width()) + db_catalog_normalize_name(name);
+}
+
+@db_catalog_empty_entry() -> text {
+    ^ "0" + repeat_unit(".", db_catalog_entry_size() - 1);
+}
+
+@db_catalog_entry_at(entries: text, index: i64) -> text {
+    ^ slice(entries, index * db_catalog_entry_size(), db_catalog_entry_size());
+}
+
+@db_catalog_entry_is_used(entry: text) -> bool {
+    ^ slice(entry, 0, 1) == "1";
+}
+
+@db_catalog_entry_root(entry: text) -> i64 {
+    ^ i64_of(slice(entry, 1, db_catalog_root_width()));
+}
+
+@db_catalog_entry_slot_width(entry: text) -> i64 {
+    start := 1 + db_catalog_root_width();
+    ^ i64_of(slice(entry, start, db_catalog_slot_width_width()));
+}
+
+@db_catalog_entry_name(entry: text) -> text {
+    start := 1 + db_catalog_root_width() + db_catalog_slot_width_width();
+    ^ slice(entry, start, db_catalog_name_width());
+}
+
+@db_catalog_replace_entry(entries: text, index: i64, entry_text: text) -> text {
+    prefix := slice(entries, 0, index * db_catalog_entry_size());
+    suffix_start := (index + 1) * db_catalog_entry_size();
+    suffix := slice(entries, suffix_start, count(entries) - suffix_start);
+    ^ prefix + entry_text + suffix;
+}
+
+@db_catalog_build_entries(capacity: i64, used_entries: text, count0: i64) -> text {
+    ^ used_entries + repeat_unit(db_catalog_empty_entry(), capacity - count0);
+}
+
+@db_catalog_init(db: DB) -> i64 {
+    capacity := db_catalog_capacity(db.pager.page_size);
+    entries := repeat_unit(db_catalog_empty_entry(), capacity);
+    ^ pager_write_page(db.pager, db_catalog_page(), db_catalog_page_text(db.pager.page_size, 0, entries));
+}
+
+@db_open(path: text, page_size: i64) -> DB {
+    pager := pager_open(path, page_size);
+    lock_held := file_try_lock(pager.handle);
+    db := DB { pager: pager, path: path, lock_held: lock_held };
+    ? (not lock_held) {
+        ^ db;
+    }
+    total_pages := pager_total_pages(pager);
+    ? (total_pages == 1) {
+        catalog_page := pager_alloc_page(pager);
+        initialized := db_catalog_init(db);
+    }
+    recovered := db_recover_if_needed(db);
+    ^ db;
+}
+
+@db_catalog_lookup_index(db: DB, name: text) -> i64 {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    normalized := db_catalog_normalize_name(name);
+    index := 0;
+    ~ (index < count0) {
+        entry := db_catalog_entry_at(entries, index);
+        ? (db_catalog_entry_is_used(entry) and db_catalog_entry_name(entry) == normalized) {
+            ^ index;
+        }
+        index = index + 1;
+    }
+    ^ -1;
+}
+
+@db_catalog_update_root(db: DB, name: text, new_root_page: i64) -> bool {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    index := db_catalog_lookup_index(db, name);
+    ? (index < 0 or index >= count0) {
+        ^ false;
+    }
+    captured := db_capture_catalog_write(db);
+    ? (not captured) {
+        ^ false;
+    }
+    entry := db_catalog_entry_at(entries, index);
+    updated_entry := db_catalog_entry_text(new_root_page, db_catalog_entry_slot_width(entry), db_catalog_display_name(entry));
+    updated_entries := db_catalog_replace_entry(entries, index, updated_entry);
+    wrote := pager_write_page(db.pager, db_catalog_page(), db_catalog_page_text(db.pager.page_size, count0, updated_entries));
+    ^ wrote == db.pager.page_size;
+}
+
+@db_table_root(db: DB, name: text) -> i64 {
+    page := pager_read_page(db.pager, db_catalog_page());
+    entries := db_catalog_entries_region(page);
+    index := db_catalog_lookup_index(db, name);
+    ? (index < 0) {
+        ^ -1;
+    }
+    entry := db_catalog_entry_at(entries, index);
+    ^ db_catalog_entry_root(entry);
+}
+
+@db_table_slot_width(db: DB, name: text) -> i64 {
+    page := pager_read_page(db.pager, db_catalog_page());
+    entries := db_catalog_entries_region(page);
+    index := db_catalog_lookup_index(db, name);
+    ? (index < 0) {
+        ^ -1;
+    }
+    entry := db_catalog_entry_at(entries, index);
+    ^ db_catalog_entry_slot_width(entry);
+}
+
+@db_create_table(db: DB, name: text, slot_width: i64) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    capacity := db_catalog_capacity(db.pager.page_size);
+    ? (db_catalog_lookup_index(db, name) >= 0) {
+        ^ -2;
+    }
+    ? (count0 >= capacity) {
+        ^ -1;
+    }
+    captured := db_capture_catalog_write(db);
+    ? (not captured) {
+        ^ -3;
+    }
+    root_page := pager_alloc_page(db.pager);
+    initialized := leaf_init_page(db.pager, root_page, slot_width);
+    used_entries := slice(entries, 0, count0 * db_catalog_entry_size());
+    updated_used := used_entries + db_catalog_entry_text(root_page, slot_width, name);
+    updated_entries := db_catalog_build_entries(capacity, updated_used, count0 + 1);
+    wrote := pager_write_page(db.pager, db_catalog_page(), db_catalog_page_text(db.pager.page_size, count0 + 1, updated_entries));
+    ? (initialized == db.pager.page_size and wrote == db.pager.page_size) {
+        ^ root_page;
+    }
+    ^ -1;
+}
+
+@db_ensure_schema_table(db: DB) -> i64 {
+    existing := db_catalog_lookup_index(db, db_schema_table_name());
+    ? (existing >= 0) {
+        ^ db_table_root(db, db_schema_table_name());
+    }
+    ^ db_create_table(db, db_schema_table_name(), db_schema_slot_width());
+}
+
+@db_schema_payload(name: text, slot_width: i64, fields: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "slot_width", text_of(slot_width));
+    payload = row_append(payload, "fields", fields);
+    ^ payload;
+}
+
+@db_define_table(db: DB, name: text, slot_width: i64, fields: text) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
+    ? (not db_schema_fields_supported(fields)) {
+        ^ -5;
+    }
+    ? (name != db_schema_table_name()) {
+        schema_ready := db_ensure_schema_table(db);
+        ? (schema_ready < 0) {
+            ^ -3;
+        }
+    }
+    root_page := db_create_table(db, name, slot_width);
+    ? (root_page < 0) {
+        ^ root_page;
+    }
+    ? (name == db_schema_table_name()) {
+        ^ root_page;
+    }
+    schema_payload := db_schema_payload(name, slot_width, fields);
+    schema_written := db_insert(db, db_schema_table_name(), root_page, schema_payload);
+    ? (schema_written < 0) {
+        ^ -4;
+    }
+    unique_created := db_create_schema_unique_indexes(db, name, fields);
+    ? (unique_created < 0) {
+        ^ unique_created;
+    }
+    ^ root_page;
+}
+
+@db_create_index(db: DB, table_name: text, index_name: text) -> i64 {
+    index_table := db_index_table_name(table_name, index_name);
+    ^ db_create_table(db, index_table, 20);
+}
+
+@db_bind_table(db: DB, name: text) -> Table {
+    root_page := db_table_root(db, name);
+    slot_width := db_table_slot_width(db, name);
+    ^ table_bind(db.pager, root_page, slot_width);
+}
+
+@db_free_table_subtree(table: Table, page_id: i64) -> bool {
+    ? (page_id <= 0) {
+        ^ false;
+    }
+    page := pager_read_page(table.pager, page_id);
+    kind := slice(page, 1, 1);
+    ? (kind == "I") {
+        freed_left := db_free_table_subtree(table, table_internal_left_child(page));
+        key_count := table_internal_key_count(page);
+        used_cells := table_internal_used_cells(page);
+        idx := 0;
+        ~ (idx < key_count) {
+            cell := table_internal_cell_at(used_cells, idx);
+            freed_child := db_free_table_subtree(table, table_internal_cell_child(cell));
+            idx = idx + 1;
+        }
+    }
+    ^ pager_free_page(table.pager, page_id);
+}
+
+@db_compact_table(db: DB, table_name: text) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
+    old_table := db_bind_table(db, table_name);
+    ? (old_table.root_page < 0 or old_table.slot_width < 0) {
+        ^ -1;
+    }
+    captured := db_capture_bound_table_write(db, old_table);
+    ? (not captured) {
+        ^ -2;
+    }
+    new_root := pager_alloc_page(db.pager);
+    initialized := leaf_init_page(db.pager, new_root, old_table.slot_width);
+    ? (initialized != db.pager.page_size) {
+        ^ -3;
+    }
+    rebuilt := table_bind(db.pager, new_root, old_table.slot_width);
+    key := table_first_key_in_order(old_table);
+    copied := 0;
+    ~ (key >= 0) {
+        payload := table_get(old_table, key);
+        wrote := table_insert(rebuilt, key, payload);
+        ? (wrote < 0) {
+            ^ -4;
+        }
+        copied = copied + 1;
+        key = table_next_key_in_order(old_table, key);
+    }
+    updated_catalog := db_catalog_update_root(db, table_name, new_root);
+    ? (not updated_catalog) {
+        ^ -5;
+    }
+    freed := db_free_table_subtree(old_table, old_table.root_page);
+    ? (not freed) {
+        ^ -6;
+    }
+    ^ copied;
+}
+
+@db_compact_unique_indexes(db: DB, table_name: text) -> i64 {
+    fields_spec := db_table_fields(db, table_name);
+    count0 := db_schema_field_count(fields_spec);
+    compacted := 0;
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_is_unique(field_spec)) {
+            index_name := db_index_table_name(table_name, db_schema_unique_index_name(field_spec));
+            compacted0 := db_compact_table(db, index_name);
+            ? (compacted0 < 0) {
+                ^ compacted0;
+            }
+            compacted = compacted + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ compacted;
+}
+
+@db_compact_table_with_indexes(db: DB, table_name: text) -> i64 {
+    compacted_table := db_compact_table(db, table_name);
+    ? (compacted_table < 0) {
+        ^ compacted_table;
+    }
+    compacted_indexes := db_compact_unique_indexes(db, table_name);
+    ? (compacted_indexes < 0) {
+        ^ compacted_indexes;
+    }
+    ^ compacted_table;
+}
+
+@db_compact_database(db: DB) -> i64 {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    compacted := 0;
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (db_catalog_entry_is_used(entry)) {
+            table_name := db_catalog_display_name(entry);
+            ? (table_name != db_schema_table_name() and slice(table_name, 0, 4) != "idx.") {
+                compacted0 := db_compact_table_with_indexes(db, table_name);
+                ? (compacted0 < 0) {
+                    ^ compacted0;
+                }
+                compacted = compacted + 1;
+            }
+        }
+        idx = idx + 1;
+    }
+    schema_root := db_catalog_lookup_index(db, db_schema_table_name());
+    ? (schema_root >= 0) {
+        compacted_schema := db_compact_table(db, db_schema_table_name());
+        ? (compacted_schema < 0) {
+            ^ compacted_schema;
+        }
+    }
+    ^ compacted;
+}
+
+@db_put(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ -1;
+    }
+    captured := db_capture_bound_table_write(db, table);
+    ? (not captured) {
+        ^ -2;
+    }
+    ^ table_put(table, key, payload);
+}
+
+@db_insert(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ -1;
+    }
+    captured := db_capture_bound_table_write(db, table);
+    ? (not captured) {
+        ^ -2;
+    }
+    ^ table_insert(table, key, payload);
+}
+
+@db_update(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ -1;
+    }
+    captured := db_capture_bound_table_write(db, table);
+    ? (not captured) {
+        ^ -2;
+    }
+    ^ table_update(table, key, payload);
+}
+
+@db_get(db: DB, table_name: text, key: i64) -> text {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ "";
+    }
+    ^ table_get(table, key);
+}
+
+@db_result_ok(payload: text) -> text {
+    out := row_trim_padding(payload);
+    out = row_put(out, "ok", "true");
+    out = row_put(out, "found", "true");
+    ^ out;
+}
+
+@db_result_missing() -> text {
+    out := "";
+    out = row_append(out, "ok", "true");
+    out = row_append(out, "found", "false");
+    ^ out;
+}
+
+@db_result_error(message: text) -> text {
+    out := "";
+    out = row_append(out, "ok", "false");
+    out = row_append(out, "found", "false");
+    out = row_append(out, "error", message);
+    ^ out;
+}
+
+@db_get_result(db: DB, table_name: text, key: i64) -> text {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ db_result_error("table not found");
+    }
+    payload := table_get(table, key);
+    ? (count(payload) == 0) {
+        ^ db_result_missing();
+    }
+    out := db_result_ok(payload);
+    out = row_put(out, "__key", text_of(key));
+    ^ out;
+}
+
+@db_delete(db: DB, table_name: text, key: i64) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ -1;
+    }
+    captured := db_capture_bound_table_write(db, table);
+    ? (not captured) {
+        ^ -2;
+    }
+    ^ table_delete(table, key);
+}
+
+@db_scan_text(db: DB, table_name: text, separator: text) -> text {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ "";
+    }
+    ^ table_scan_text(table, separator);
+}
+
+@db_scan_key_range_text(db: DB, table_name: text, min_key: i64, max_key: i64, separator: text) -> text {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ "";
+    }
+    ^ table_scan_key_range_text(table, min_key, max_key, separator);
+}
+
+@db_first_key(db: DB, table_name: text) -> i64 {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ -1;
+    }
+    ^ table_first_key_in_order(table);
+}
+
+@db_next_key(db: DB, table_name: text, after_key: i64) -> i64 {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ -1;
+    }
+    ^ table_next_key_in_order(table, after_key);
+}
+
+@db_cursor_open(db: DB, table_name: text) -> DBCursor {
+    ^ DBCursor { table_name: table_name, key: db_first_key(db, table_name) };
+}
+
+@db_cursor_open_at_or_after(db: DB, table_name: text, min_key: i64) -> DBCursor {
+    key := db_first_key(db, table_name);
+    ~ (key >= 0 and key < min_key) {
+        key = db_next_key(db, table_name, key);
+    }
+    ^ DBCursor { table_name: table_name, key: key };
+}
+
+@db_cursor_valid(cursor: DBCursor) -> bool {
+    ^ cursor.key >= 0;
+}
+
+@db_cursor_key(cursor: DBCursor) -> i64 {
+    ^ cursor.key;
+}
+
+@db_cursor_row(db: DB, cursor: DBCursor) -> text {
+    ? (cursor.key < 0) {
+        ^ "";
+    }
+    ^ db_get(db, cursor.table_name, cursor.key);
+}
+
+@db_cursor_result_row(db: DB, cursor: DBCursor) -> text {
+    row0 := db_cursor_row(db, cursor);
+    ? (count(row0) == 0) {
+        ^ "";
+    }
+    ^ db_result_row(cursor.key, row0);
+}
+
+@db_cursor_result(db: DB, cursor: DBCursor) -> text {
+    ? (not db_cursor_valid(cursor)) {
+        ^ db_result_missing();
+    }
+    row0 := db_cursor_row(db, cursor);
+    ? (count(row0) == 0) {
+        ^ db_result_error("cursor points to missing row");
+    }
+    out := db_result_ok(row0);
+    out = row_put(out, "__key", text_of(cursor.key));
+    ^ out;
+}
+
+@db_cursor_next(db: DB, cursor: DBCursor) -> DBCursor {
+    ? (cursor.key < 0) {
+        ^ cursor;
+    }
+    ^ DBCursor { table_name: cursor.table_name, key: db_next_key(db, cursor.table_name, cursor.key) };
+}
+
+@db_cursor_seek_key(db: DB, cursor: DBCursor, min_key: i64) -> DBCursor {
+    key := min_key - 1;
+    ? (min_key <= 0) {
+        key = -1;
+    }
+    ? (key < 0) {
+        key = db_first_key(db, cursor.table_name);
+    }
+    ~ (key >= 0 and key < min_key) {
+        key = db_next_key(db, cursor.table_name, key);
+    }
+    ^ DBCursor { table_name: cursor.table_name, key: key };
+}
+
+@db_index_put(db: DB, table_name: text, index_name: text, secondary_key: i64, primary_key: i64) -> i64 {
+    index_table := db_index_table_name(table_name, index_name);
+    ^ db_put(db, index_table, secondary_key, text_of(primary_key));
+}
+
+@db_index_insert_unique(db: DB, table_name: text, index_name: text, secondary_key: i64, primary_key: i64) -> i64 {
+    existing := db_index_get(db, table_name, index_name, secondary_key);
+    ? (existing >= 0 and existing != primary_key) {
+        ^ -2;
+    }
+    index_table := db_index_table_name(table_name, index_name);
+    ^ db_insert(db, index_table, secondary_key, text_of(primary_key));
+}
+
+@db_index_get(db: DB, table_name: text, index_name: text, secondary_key: i64) -> i64 {
+    index_table := db_index_table_name(table_name, index_name);
+    value := db_get(db, index_table, secondary_key);
+    ? (count(value) == 0) {
+        ^ -1;
+    }
+    ^ i64_of(value);
+}
+
+@db_get_by_index(db: DB, table_name: text, index_name: text, secondary_key: i64) -> text {
+    primary_key := db_index_get(db, table_name, index_name, secondary_key);
+    ? (primary_key < 0) {
+        ^ "";
+    }
+    ^ db_get(db, table_name, primary_key);
+}
+
+@db_get_by_index_result(db: DB, table_name: text, index_name: text, secondary_key: i64) -> text {
+    index_table := db_index_table_name(table_name, index_name);
+    ? (db_table_root(db, table_name) < 0) {
+        ^ db_result_error("table not found");
+    }
+    ? (db_table_root(db, index_table) < 0) {
+        ^ db_result_error("index not found");
+    }
+    primary_key := db_index_get(db, table_name, index_name, secondary_key);
+    ? (primary_key < 0) {
+        ^ db_result_missing();
+    }
+    payload := db_get(db, table_name, primary_key);
+    ? (count(payload) == 0) {
+        ^ db_result_error("index points to missing row");
+    }
+    out := db_result_ok(payload);
+    out = row_put(out, "__key", text_of(primary_key));
+    out = row_put(out, "__index_key", text_of(secondary_key));
+    ^ out;
+}
+
+@db_scan_by_index_key_range_text(db: DB, table_name: text, index_name: text, min_secondary_key: i64, max_secondary_key: i64, separator: text) -> text {
+    ? (min_secondary_key > max_secondary_key) {
+        ^ "";
+    }
+    index_table := db_index_table_name(table_name, index_name);
+    secondary_key := db_first_key(db, index_table);
+    out := "";
+    ~ (secondary_key >= 0) {
+        ? (secondary_key >= min_secondary_key and secondary_key <= max_secondary_key) {
+            row0 := db_get_by_index(db, table_name, index_name, secondary_key);
+            normalized := row_trim_padding(row0);
+            ? (count(normalized) > 0) {
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + normalized;
+            }
+        }
+        ? (secondary_key > max_secondary_key) {
+            ^ out;
+        }
+        secondary_key = db_next_key(db, index_table, secondary_key);
+    }
+    ^ out;
+}
+
+@db_result_row(key: i64, payload: text) -> text {
+    normalized := row_trim_padding(payload);
+    ^ row_put(normalized, "__key", text_of(key));
+}
+
+@db_scan_key_range_rows_text(db: DB, table_name: text, min_key: i64, max_key: i64, separator: text) -> text {
+    ? (min_key > max_key) {
+        ^ "";
+    }
+    key := db_first_key(db, table_name);
+    out := "";
+    ~ (key >= 0) {
+        ? (key >= min_key and key <= max_key) {
+            row0 := db_get(db, table_name, key);
+            ? (count(row0) > 0) {
+                result_row := db_result_row(key, row0);
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + result_row;
+            }
+        }
+        ? (key > max_key) {
+            ^ out;
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ out;
+}
+
+@db_scan_where_field_equals_rows_text(db: DB, table_name: text, field_name: text, expected_value: text, separator: text) -> text {
+    fields_spec := db_table_fields(db, table_name);
+    field_spec := db_schema_field_spec(fields_spec, field_name);
+    ? (count(field_spec) > 0 and db_schema_field_is_unique(field_spec) and db_schema_field_type(field_spec) == "i64" and db_text_is_i64(expected_value)) {
+        primary_key := db_index_get(db, table_name, db_schema_unique_index_name(field_spec), i64_of(expected_value));
+        ? (primary_key < 0) {
+            ^ "";
+        }
+        row0 := db_get(db, table_name, primary_key);
+        ? (count(row0) == 0) {
+            ^ "";
+        }
+        ^ db_result_row(primary_key, row0);
+    }
+    key := db_first_key(db, table_name);
+    out := "";
+    ~ (key >= 0) {
+        row0 := db_get(db, table_name, key);
+        ? (count(row0) > 0 and row_get(row0, field_name) == expected_value) {
+            result_row := db_result_row(key, row0);
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + result_row;
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ out;
+}
+
+@db_scan_where_field_i64_range_text(db: DB, table_name: text, field_name: text, min_value: i64, max_value: i64, separator: text) -> text {
+    ? (min_value > max_value) {
+        ^ "";
+    }
+    fields_spec := db_table_fields(db, table_name);
+    field_spec := db_schema_field_spec(fields_spec, field_name);
+    ? (count(field_spec) > 0 and db_schema_field_type(field_spec) != "i64") {
+        ^ "";
+    }
+    key := db_first_key(db, table_name);
+    out := "";
+    ~ (key >= 0) {
+        row0 := db_get(db, table_name, key);
+        value_text := row_get(row0, field_name);
+        ? (count(row0) > 0 and db_text_is_i64(value_text)) {
+            value0 := i64_of(value_text);
+            ? (value0 >= min_value and value0 <= max_value) {
+                normalized := row_trim_padding(row0);
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + normalized;
+            }
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ out;
+}
+
+@db_scan_where_field_i64_range_rows_text(db: DB, table_name: text, field_name: text, min_value: i64, max_value: i64, separator: text) -> text {
+    ? (min_value > max_value) {
+        ^ "";
+    }
+    fields_spec := db_table_fields(db, table_name);
+    field_spec := db_schema_field_spec(fields_spec, field_name);
+    ? (count(field_spec) > 0 and db_schema_field_type(field_spec) != "i64") {
+        ^ "";
+    }
+    key := db_first_key(db, table_name);
+    out := "";
+    ~ (key >= 0) {
+        row0 := db_get(db, table_name, key);
+        value_text := row_get(row0, field_name);
+        ? (count(row0) > 0 and db_text_is_i64(value_text)) {
+            value0 := i64_of(value_text);
+            ? (value0 >= min_value and value0 <= max_value) {
+                result_row := db_result_row(key, row0);
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + result_row;
+            }
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ out;
+}
+
+@db_predicate_count(predicates: text) -> i64 {
+    ? (count(predicates) == 0) {
+        ^ 0;
+    }
+    count0 := 1;
+    idx := 0;
+    ~ (idx < count(predicates)) {
+        ? (slice(predicates, idx, 1) == ",") {
+            count0 = count0 + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ count0;
+}
+
+@db_predicate_at(predicates: text, predicate_index: i64) -> text {
+    remaining := predicates;
+    idx := 0;
+    ~ (idx < predicate_index) {
+        split_at := find(remaining, ",");
+        ? (split_at < 0) {
+            ^ "";
+        }
+        remaining = slice(remaining, split_at + 1, count(remaining) - (split_at + 1));
+        idx = idx + 1;
+    }
+    split_at := find(remaining, ",");
+    ? (split_at < 0) {
+        ^ remaining;
+    }
+    ^ slice(remaining, 0, split_at);
+}
+
+@db_predicate_field(predicate: text) -> text {
+    eq := find(predicate, "=");
+    ? (eq < 0) {
+        ^ "";
+    }
+    ^ slice(predicate, 0, eq);
+}
+
+@db_predicate_expected_value(predicate: text) -> text {
+    eq := find(predicate, "=");
+    ? (eq < 0) {
+        ^ "";
+    }
+    ^ slice(predicate, eq + 1, count(predicate) - (eq + 1));
+}
+
+@db_predicates_match_row(payload: text, predicates: text) -> bool {
+    predicate_count := db_predicate_count(predicates);
+    idx := 0;
+    ~ (idx < predicate_count) {
+        predicate := db_predicate_at(predicates, idx);
+        field_name := db_predicate_field(predicate);
+        expected_value := db_predicate_expected_value(predicate);
+        ? (count(field_name) == 0 or row_get(payload, field_name) != expected_value) {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@db_scan_where_all_equals_text(db: DB, table_name: text, predicates: text, separator: text) -> text {
+    ? (count(predicates) == 0) {
+        ^ db_scan_text(db, table_name, separator);
+    }
+    key := db_first_key(db, table_name);
+    out := "";
+    ~ (key >= 0) {
+        row0 := db_get(db, table_name, key);
+        ? (count(row0) > 0 and db_predicates_match_row(row0, predicates)) {
+            normalized := row_trim_padding(row0);
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + normalized;
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ out;
+}
+
+@db_scan_where_all_equals_rows_text(db: DB, table_name: text, predicates: text, separator: text) -> text {
+    key := db_first_key(db, table_name);
+    out := "";
+    ~ (key >= 0) {
+        row0 := db_get(db, table_name, key);
+        ? (count(row0) > 0 and (count(predicates) == 0 or db_predicates_match_row(row0, predicates))) {
+            result_row := db_result_row(key, row0);
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + result_row;
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ out;
+}
+
+@db_text_starts_with(value: text, prefix: text) -> bool {
+    ? (count(prefix) > count(value)) {
+        ^ false;
+    }
+    ^ slice(value, 0, count(prefix)) == prefix;
+}
+
+@db_scan_where_field_text_prefix_text(db: DB, table_name: text, field_name: text, prefix: text, separator: text) -> text {
+    fields_spec := db_table_fields(db, table_name);
+    field_spec := db_schema_field_spec(fields_spec, field_name);
+    ? (count(field_spec) > 0 and db_schema_field_type(field_spec) != "text") {
+        ^ "";
+    }
+    key := db_first_key(db, table_name);
+    out := "";
+    ~ (key >= 0) {
+        row0 := db_get(db, table_name, key);
+        value_text := row_get(row0, field_name);
+        ? (count(row0) > 0 and db_text_starts_with(value_text, prefix)) {
+            normalized := row_trim_padding(row0);
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + normalized;
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ out;
+}
+
+@db_scan_where_field_text_prefix_rows_text(db: DB, table_name: text, field_name: text, prefix: text, separator: text) -> text {
+    fields_spec := db_table_fields(db, table_name);
+    field_spec := db_schema_field_spec(fields_spec, field_name);
+    ? (count(field_spec) > 0 and db_schema_field_type(field_spec) != "text") {
+        ^ "";
+    }
+    key := db_first_key(db, table_name);
+    out := "";
+    ~ (key >= 0) {
+        row0 := db_get(db, table_name, key);
+        value_text := row_get(row0, field_name);
+        ? (count(row0) > 0 and db_text_starts_with(value_text, prefix)) {
+            result_row := db_result_row(key, row0);
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + result_row;
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ out;
+}
+
+@db_scan_by_index_key_range_rows_text(db: DB, table_name: text, index_name: text, min_secondary_key: i64, max_secondary_key: i64, separator: text) -> text {
+    ? (min_secondary_key > max_secondary_key) {
+        ^ "";
+    }
+    index_table := db_index_table_name(table_name, index_name);
+    secondary_key := db_first_key(db, index_table);
+    out := "";
+    ~ (secondary_key >= 0) {
+        ? (secondary_key >= min_secondary_key and secondary_key <= max_secondary_key) {
+            primary_key := db_index_get(db, table_name, index_name, secondary_key);
+            row0 := db_get(db, table_name, primary_key);
+            ? (count(row0) > 0) {
+                result_row := db_result_row(primary_key, row0);
+                result_row = row_put(result_row, "__index_key", text_of(secondary_key));
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + result_row;
+            }
+        }
+        ? (secondary_key > max_secondary_key) {
+            ^ out;
+        }
+        secondary_key = db_next_key(db, index_table, secondary_key);
+    }
+    ^ out;
+}
+
+@db_index_delete(db: DB, table_name: text, index_name: text, secondary_key: i64) -> i64 {
+    index_table := db_index_table_name(table_name, index_name);
+    ^ db_delete(db, index_table, secondary_key);
+}
+
+@db_insert_with_index(db: DB, table_name: text, index_name: text, primary_key: i64, payload: text, secondary_key: i64) -> i64 {
+    inserted := db_insert(db, table_name, primary_key, payload);
+    ? (inserted < 0) {
+        ^ inserted;
+    }
+    indexed := db_index_insert_unique(db, table_name, index_name, secondary_key, primary_key);
+    ? (indexed < 0) {
+        rollback := db_delete(db, table_name, primary_key);
+        ^ indexed;
+    }
+    ^ 0;
+}
+
+@db_update_with_index(db: DB, table_name: text, index_name: text, primary_key: i64, payload: text, old_secondary_key: i64, new_secondary_key: i64) -> i64 {
+    old_index_primary := db_index_get(db, table_name, index_name, old_secondary_key);
+    ? (old_index_primary != primary_key) {
+        ^ -3;
+    }
+    existing_new := db_index_get(db, table_name, index_name, new_secondary_key);
+    ? (existing_new >= 0 and existing_new != primary_key) {
+        ^ -2;
+    }
+    updated := db_update(db, table_name, primary_key, payload);
+    ? (updated < 0) {
+        ^ updated;
+    }
+    ? (old_secondary_key != new_secondary_key) {
+        deleted := db_index_delete(db, table_name, index_name, old_secondary_key);
+        inserted := db_index_insert_unique(db, table_name, index_name, new_secondary_key, primary_key);
+        ? (deleted < 0 or inserted < 0) {
+            ^ -4;
+        }
+    }
+    ^ 0;
+}
+
+@db_delete_with_index(db: DB, table_name: text, index_name: text, primary_key: i64, secondary_key: i64) -> i64 {
+    indexed_primary := db_index_get(db, table_name, index_name, secondary_key);
+    ? (indexed_primary != primary_key) {
+        ^ -3;
+    }
+    deleted_table := db_delete(db, table_name, primary_key);
+    ? (deleted_table < 0) {
+        ^ deleted_table;
+    }
+    deleted_index := db_index_delete(db, table_name, index_name, secondary_key);
+    ? (deleted_index < 0) {
+        ^ -4;
+    }
+    ^ 0;
+}
+
+@db_row_get(db: DB, table_name: text, key: i64, field_name: text) -> text {
+    payload := db_get(db, table_name, key);
+    ? (count(payload) == 0) {
+        ^ "";
+    }
+    ^ row_get(payload, field_name);
+}
+
+@db_row_put(db: DB, table_name: text, key: i64, field_name: text, field_value: text) -> i64 {
+    payload := db_get(db, table_name, key);
+    ? (count(payload) == 0) {
+        ^ -1;
+    }
+    updated := row_put(payload, field_name, field_value);
+    ^ db_update(db, table_name, key, updated);
+}
+
+@db_patch_row(db: DB, table_name: text, key: i64, patch_payload: text) -> i64 {
+    payload := db_get(db, table_name, key);
+    ? (count(payload) == 0) {
+        ^ -1;
+    }
+    merged := row_merge(payload, patch_payload);
+    ^ db_update_row(db, table_name, key, merged);
+}
+
+@db_patch_by_unique_i64(db: DB, table_name: text, field_name: text, field_value: i64, patch_payload: text) -> i64 {
+    fields_spec := db_table_fields(db, table_name);
+    field_spec := db_schema_field_spec(fields_spec, field_name);
+    ? (count(field_spec) == 0) {
+        ^ -2;
+    }
+    ? (not db_schema_field_is_unique(field_spec) or db_schema_field_type(field_spec) != "i64") {
+        ^ -3;
+    }
+    primary_key := db_index_get(db, table_name, db_schema_unique_index_name(field_spec), field_value);
+    ? (primary_key < 0) {
+        ^ -1;
+    }
+    ^ db_patch_row(db, table_name, primary_key, patch_payload);
+}
+
+@db_table_schema(db: DB, table_name: text) -> text {
+    ? (table_name == db_schema_table_name()) {
+        ^ db_schema_payload(db_schema_table_name(), db_schema_slot_width(), "name:text,slot_width:i64,fields:text");
+    }
+    schema_index := db_catalog_lookup_index(db, db_schema_table_name());
+    ? (schema_index < 0) {
+        ^ "";
+    }
+    root_page := db_table_root(db, table_name);
+    ? (root_page < 0) {
+        ^ "";
+    }
+    ^ db_get(db, db_schema_table_name(), root_page);
+}
+
+@db_table_fields(db: DB, table_name: text) -> text {
+    schema0 := db_table_schema(db, table_name);
+    ? (count(schema0) == 0) {
+        ^ "";
+    }
+    ^ row_get(schema0, "fields");
+}
+
+@db_catalog_display_name(entry: text) -> text {
+    ^ row_trim_padding(db_catalog_entry_name(entry));
+}
+
+@db_catalog_text(db: DB, separator: text) -> text {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    out := "";
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (db_catalog_entry_is_used(entry)) {
+            table_name := db_catalog_display_name(entry);
+            item := "";
+            item = row_append(item, "name", table_name);
+            item = row_append(item, "root", text_of(db_catalog_entry_root(entry)));
+            item = row_append(item, "slot_width", text_of(db_catalog_entry_slot_width(entry)));
+            item = row_append(item, "fields", db_table_fields(db, table_name));
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + item;
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@db_page_map_text(db: DB, separator: text) -> text {
+    total_pages := pager_total_pages(db.pager);
+    out := "";
+    page_id := 0;
+    ~ (page_id < total_pages) {
+        kind := "";
+        ? (page_id == 0) {
+            kind = pager_page_kind(pager_load_header(db.pager));
+        }
+        ? (page_id > 0) {
+            page := pager_read_page(db.pager, page_id);
+            kind = slice(page, 1, 1);
+        }
+        item := text_of(page_id) + ":" + kind;
+        ? (count(out) > 0) {
+            out = out + separator;
+        }
+        out = out + item;
+        page_id = page_id + 1;
+    }
+    ^ out;
+}
+
+@db_page_text(db: DB, page_id: i64) -> text {
+    total_pages := pager_total_pages(db.pager);
+    ? (page_id < 0 or page_id >= total_pages) {
+        ^ "";
+    }
+    ? (page_id == 0) {
+        ^ pager_load_header(db.pager);
+    }
+    ^ pager_read_page(db.pager, page_id);
+}
+
+@db_page_payload_kind(db: DB, page_id: i64) -> text {
+    total_pages := pager_total_pages(db.pager);
+    ? (page_id < 0 or page_id >= total_pages) {
+        ^ "";
+    }
+    ? (page_id == 0) {
+        ^ pager_page_kind(pager_load_header(db.pager));
+    }
+    raw := pager_read_page(db.pager, page_id);
+    raw_kind := pager_page_kind(raw);
+    ? (raw_kind == "D") {
+        ^ slice(raw, 1, 1);
+    }
+    ^ raw_kind;
+}
+
+@db_table_layout_text(db: DB, table_name: text, separator: text) -> text {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ "";
+    }
+    ^ table_layout_text(table, separator);
+}
+
+@db_page_set_item(page_id: i64) -> text {
+    ^ "," + text_of(page_id) + ",";
+}
+
+@db_page_set_has(pages: text, page_id: i64) -> bool {
+    ^ find(pages, db_page_set_item(page_id)) >= 0;
+}
+
+@db_page_set_add(pages: text, page_id: i64) -> text {
+    ? (db_page_set_has(pages, page_id)) {
+        ^ pages;
+    }
+    ? (count(pages) == 0) {
+        ^ db_page_set_item(page_id);
+    }
+    ^ pages + text_of(page_id) + ",";
+}
+
+@db_collect_table_pages(table: Table, page_id: i64, pages: text) -> text {
+    ? (page_id <= 0) {
+        ^ pages;
+    }
+    ? (db_page_set_has(pages, page_id)) {
+        ^ pages;
+    }
+    updated := db_page_set_add(pages, page_id);
+    kind := table_page_kind(table, page_id);
+    ? (kind != "I") {
+        ^ updated;
+    }
+    page := pager_read_page(table.pager, page_id);
+    out := db_collect_table_pages(table, table_internal_left_child(page), updated);
+    key_count := table_internal_key_count(page);
+    used_cells := table_internal_used_cells(page);
+    idx := 0;
+    ~ (idx < key_count) {
+        cell := table_internal_cell_at(used_cells, idx);
+        out = db_collect_table_pages(table, table_internal_cell_child(cell), out);
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@db_reachable_pages(db: DB) -> text {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    pages := db_page_set_add("", 0);
+    pages = db_page_set_add(pages, db_catalog_page());
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (db_catalog_entry_is_used(entry)) {
+            root_page := db_catalog_entry_root(entry);
+            slot_width := db_catalog_entry_slot_width(entry);
+            table := table_bind(db.pager, root_page, slot_width);
+            pages = db_collect_table_pages(table, root_page, pages);
+        }
+        idx = idx + 1;
+    }
+    ^ pages;
+}
+
+@db_unreachable_pages_text(db: DB, separator: text) -> text {
+    reachable := db_reachable_pages(db);
+    total_pages := pager_total_pages(db.pager);
+    out := "";
+    page_id := 2;
+    ~ (page_id < total_pages) {
+        kind := db_page_payload_kind(db, page_id);
+        ? (kind != "F" and not db_page_set_has(reachable, page_id)) {
+            ? (count(out) > 0) {
+                out = out + separator;
+            }
+            out = out + text_of(page_id);
+        }
+        page_id = page_id + 1;
+    }
+    ^ out;
+}
+
+@db_reclaim_unreachable_pages(db: DB) -> i64 {
+    ? (not db_can_write(db)) {
+        ^ db_lock_error();
+    }
+    reachable := db_reachable_pages(db);
+    total_pages := pager_total_pages(db.pager);
+    captured_header := db_journal_capture_page_if_needed(db, 0);
+    ? (not captured_header) {
+        ^ -1;
+    }
+    reclaimed := 0;
+    page_id := 2;
+    ~ (page_id < total_pages) {
+        kind := db_page_payload_kind(db, page_id);
+        ? (kind != "F" and not db_page_set_has(reachable, page_id)) {
+            captured := db_journal_capture_page_if_needed(db, page_id);
+            ? (not captured) {
+                ^ -2;
+            }
+            freed := pager_free_page(db.pager, page_id);
+            ? (not freed) {
+                ^ -3;
+            }
+            reclaimed = reclaimed + 1;
+        }
+        page_id = page_id + 1;
+    }
+    ^ reclaimed;
+}
+
+@db_validate_free_list_report(db: DB) -> text {
+    total_pages := pager_total_pages(db.pager);
+    reachable := db_reachable_pages(db);
+    seen := "";
+    page_id := pager_free_head(db.pager);
+    ~ (page_id > 0) {
+        ? (page_id >= total_pages) {
+            ^ "freelist page " + text_of(page_id) + " is out of range";
+        }
+        ? (db_page_set_has(seen, page_id)) {
+            ^ "freelist cycle detected at page " + text_of(page_id);
+        }
+        ? (db_page_set_has(reachable, page_id)) {
+            ^ "freelist page " + text_of(page_id) + " is still reachable from catalog";
+        }
+        raw := pager_read_page(db.pager, page_id);
+        ? (pager_page_kind(raw) != "F") {
+            ^ "freelist page " + text_of(page_id) + " is not marked free";
+        }
+        seen = db_page_set_add(seen, page_id);
+        page_id = pager_free_page_next(raw);
+    }
+    scan_page_id := 2;
+    ~ (scan_page_id < total_pages) {
+        raw := pager_read_page(db.pager, scan_page_id);
+        ? (pager_page_kind(raw) == "F" and not db_page_set_has(seen, scan_page_id)) {
+            ^ "free page " + text_of(scan_page_id) + " is not linked from freelist head";
+        }
+        scan_page_id = scan_page_id + 1;
+    }
+    ^ "ok";
+}
+
+@db_schema_field_count(fields_spec: text) -> i64 {
+    ? (count(fields_spec) == 0) {
+        ^ 0;
+    }
+    total := 1;
+    idx := 0;
+    ~ (idx < count(fields_spec)) {
+        ? (slice(fields_spec, idx, 1) == ",") {
+            total = total + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ total;
+}
+
+@db_schema_field_at(fields_spec: text, field_index: i64) -> text {
+    start := 0;
+    idx := 0;
+    current := 0;
+    ~ (idx < count(fields_spec)) {
+        ? (slice(fields_spec, idx, 1) == ",") {
+            ? (current == field_index) {
+                ^ slice(fields_spec, start, idx - start);
+            }
+            current = current + 1;
+            start = idx + 1;
+        }
+        idx = idx + 1;
+    }
+    ? (current == field_index) {
+        ^ slice(fields_spec, start, count(fields_spec) - start);
+    }
+    ^ "";
+}
+
+@db_schema_field_spec(fields_spec: text, field_name: text) -> text {
+    count0 := db_schema_field_count(fields_spec);
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_name(field_spec) == field_name) {
+            ^ field_spec;
+        }
+        idx = idx + 1;
+    }
+    ^ "";
+}
+
+@db_schema_field_name(field_spec: text) -> text {
+    colon := find(field_spec, ":");
+    ? (colon < 0) {
+        ^ "";
+    }
+    ^ slice(field_spec, 0, colon);
+}
+
+@db_schema_field_type(field_spec: text) -> text {
+    colon := find(field_spec, ":");
+    ? (colon < 0) {
+        ^ "";
+    }
+    tail := slice(field_spec, colon + 1, count(field_spec) - (colon + 1));
+    qmark := find(tail, "?");
+    bang := find(tail, "!");
+    at := find(tail, "@");
+    eq := find(tail, "=");
+    end0 := count(tail);
+    ? (qmark >= 0 and qmark < end0) {
+        end0 = qmark;
+    }
+    ? (bang >= 0 and bang < end0) {
+        end0 = bang;
+    }
+    ? (at >= 0 and at < end0) {
+        end0 = at;
+    }
+    ? (eq >= 0 and eq < end0) {
+        end0 = eq;
+    }
+    ^ slice(tail, 0, end0);
+}
+
+@db_schema_field_is_nullable(field_spec: text) -> bool {
+    colon := find(field_spec, ":");
+    ? (colon < 0) {
+        ^ false;
+    }
+    tail := slice(field_spec, colon + 1, count(field_spec) - (colon + 1));
+    qmark := find(tail, "?");
+    eq := find(tail, "=");
+    ? (qmark < 0) {
+        ^ false;
+    }
+    ? (eq < 0) {
+        ^ true;
+    }
+    ^ qmark < eq;
+}
+
+@db_schema_field_default(field_spec: text) -> text {
+    eq := find(field_spec, "=");
+    ? (eq < 0) {
+        ^ "";
+    }
+    ^ slice(field_spec, eq + 1, count(field_spec) - (eq + 1));
+}
+
+@db_schema_field_ref_table(field_spec: text) -> text {
+    colon := find(field_spec, ":");
+    ? (colon < 0) {
+        ^ "";
+    }
+    tail := slice(field_spec, colon + 1, count(field_spec) - (colon + 1));
+    at := find(tail, "@");
+    ? (at < 0) {
+        ^ "";
+    }
+    after := slice(tail, at + 1, count(tail) - (at + 1));
+    qmark := find(after, "?");
+    bang := find(after, "!");
+    eq := find(after, "=");
+    end0 := count(after);
+    ? (qmark >= 0 and qmark < end0) {
+        end0 = qmark;
+    }
+    ? (bang >= 0 and bang < end0) {
+        end0 = bang;
+    }
+    ? (eq >= 0 and eq < end0) {
+        end0 = eq;
+    }
+    ^ slice(after, 0, end0);
+}
+
+@db_schema_field_is_unique(field_spec: text) -> bool {
+    colon := find(field_spec, ":");
+    ? (colon < 0) {
+        ^ false;
+    }
+    tail := slice(field_spec, colon + 1, count(field_spec) - (colon + 1));
+    bang := find(tail, "!");
+    ? (bang < 0) {
+        ^ false;
+    }
+    eq := find(tail, "=");
+    ? (eq < 0) {
+        ^ true;
+    }
+    ^ bang < eq;
+}
+
+@db_schema_unique_index_name(field_spec: text) -> text {
+    ^ db_schema_field_name(field_spec);
+}
+
+@db_schema_fields_supported(fields_spec: text) -> bool {
+    count0 := db_schema_field_count(fields_spec);
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        type_name := db_schema_field_type(field_spec);
+        ? (count(field_name) == 0 or count(type_name) == 0) {
+            ^ false;
+        }
+        ? (db_schema_field_is_unique(field_spec) and type_name != "i64") {
+            ^ false;
+        }
+        ref_table := db_schema_field_ref_table(field_spec);
+        ? (count(ref_table) > 0 and type_name != "i64") {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@db_schema_has_field(fields_spec: text, field_name: text) -> bool {
+    count0 := db_schema_field_count(fields_spec);
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_name(field_spec) == field_name) {
+            ^ true;
+        }
+        idx = idx + 1;
+    }
+    ^ false;
+}
+
+@db_schema_append_field(fields_spec: text, field_spec: text) -> text {
+    ? (count(fields_spec) == 0) {
+        ^ field_spec;
+    }
+    ^ fields_spec + "," + field_spec;
+}
+
+@db_schema_replace_field(fields_spec: text, old_field_name: text, new_field_spec: text) -> text {
+    count0 := db_schema_field_count(fields_spec);
+    out := "";
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        item := field_spec;
+        ? (field_name == old_field_name) {
+            item = new_field_spec;
+        }
+        ? (count(out) > 0) {
+            out = out + ",";
+        }
+        out = out + item;
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@db_schema_remove_field(fields_spec: text, target_field_name: text) -> text {
+    count0 := db_schema_field_count(fields_spec);
+    out := "";
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        ? (field_name != target_field_name) {
+            ? (count(out) > 0) {
+                out = out + ",";
+            }
+            out = out + field_spec;
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@db_schema_rename_field_spec(field_spec: text, new_field_name: text) -> text {
+    colon := find(field_spec, ":");
+    ? (colon < 0) {
+        ^ "";
+    }
+    tail := slice(field_spec, colon, count(field_spec) - colon);
+    ^ new_field_name + tail;
+}
+
+@db_create_schema_unique_indexes(db: DB, table_name: text, fields_spec: text) -> i64 {
+    count0 := db_schema_field_count(fields_spec);
+    created := 0;
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_is_unique(field_spec)) {
+            built := db_create_index(db, table_name, db_schema_unique_index_name(field_spec));
+            ? (built < 0) {
+                ^ built;
+            }
+            created = created + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ created;
+}
+
+@db_text_is_i64(value: text) -> bool {
+    ? (count(value) == 0) {
+        ^ false;
+    }
+    idx := 0;
+    ? (slice(value, 0, 1) == "-") {
+        ? (count(value) == 1) {
+            ^ false;
+        }
+        idx = 1;
+    }
+    ~ (idx < count(value)) {
+        ch := slice(value, idx, 1);
+        ? (find("0123456789", ch) < 0) {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@db_text_is_bool(value: text) -> bool {
+    ^ value == "true" or value == "false";
+}
+
+@db_trim_spaces(value: text) -> text {
+    start := 0;
+    end0 := count(value);
+    ~ (start < end0 and slice(value, start, 1) == " ") {
+        start = start + 1;
+    }
+    ~ (end0 > start and slice(value, end0 - 1, 1) == " ") {
+        end0 = end0 - 1;
+    }
+    ^ slice(value, start, end0 - start);
+}
+
+@db_coerce_i64_text(value: text) -> text {
+    trimmed := db_trim_spaces(value);
+    normalized := trimmed;
+    ? (slice(normalized, 0, 1) == "+") {
+        normalized = slice(normalized, 1, count(normalized) - 1);
+    }
+    ? (not db_text_is_i64(normalized)) {
+        ^ "";
+    }
+    ^ text_of(i64_of(normalized));
+}
+
+@db_coerce_bool_text(value: text) -> text {
+    trimmed := db_trim_spaces(value);
+    ? (trimmed == "true" or trimmed == "TRUE" or trimmed == "True" or trimmed == "1") {
+        ^ "true";
+    }
+    ? (trimmed == "false" or trimmed == "FALSE" or trimmed == "False" or trimmed == "0") {
+        ^ "false";
+    }
+    ^ "";
+}
+
+@db_coerce_value_for_type(value: text, type_name: text) -> text {
+    ? (type_name == "text") {
+        ^ value;
+    }
+    ? (type_name == "i64") {
+        ^ db_coerce_i64_text(value);
+    }
+    ? (type_name == "bool") {
+        ^ db_coerce_bool_text(value);
+    }
+    ^ "";
+}
+
+@db_value_matches_type(value: text, type_name: text) -> bool {
+    ? (type_name == "text") {
+        ^ true;
+    }
+    ? (type_name == "i64") {
+        ^ db_text_is_i64(value);
+    }
+    ? (type_name == "bool") {
+        ^ db_text_is_bool(value);
+    }
+    ^ false;
+}
+
+@db_coerce_value_for_field_spec(value: text, field_spec: text) -> text {
+    type_name := db_schema_field_type(field_spec);
+    nullable := db_schema_field_is_nullable(field_spec);
+    trimmed := db_trim_spaces(value);
+    ? (nullable and (trimmed == "null" or count(trimmed) == 0)) {
+        ^ "null";
+    }
+    coerced := db_coerce_value_for_type(value, type_name);
+    ^ coerced;
+}
+
+@db_value_matches_field_spec(value: text, field_spec: text) -> bool {
+    type_name := db_schema_field_type(field_spec);
+    nullable := db_schema_field_is_nullable(field_spec);
+    ? (nullable and value == "null") {
+        ^ true;
+    }
+    ^ db_value_matches_type(value, type_name);
+}
+
+@db_row_matches_schema(payload: text, fields_spec: text) -> bool {
+    expected_count := db_schema_field_count(fields_spec);
+    ? (expected_count == 0) {
+        ^ true;
+    }
+    ? (row_field_count(payload) != expected_count) {
+        ^ false;
+    }
+    idx := 0;
+    ~ (idx < expected_count) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        value := row_get(payload, field_name);
+        ? (count(field_name) == 0 or count(value) == 0) {
+            ^ false;
+        }
+        coerced := db_coerce_value_for_field_spec(value, field_spec);
+        ? (count(coerced) == 0 or not db_value_matches_field_spec(coerced, field_spec)) {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@db_materialize_row_to_schema(payload: text, fields_spec: text, fill_missing: bool) -> text {
+    expected_count := db_schema_field_count(fields_spec);
+    ? (expected_count == 0) {
+        ^ payload;
+    }
+    ? (fill_missing and row_field_count(payload) > expected_count) {
+        ^ "";
+    }
+    ? (not fill_missing and row_field_count(payload) != expected_count) {
+        ^ "";
+    }
+    out := "";
+    idx := 0;
+    ~ (idx < expected_count) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        value := row_get(payload, field_name);
+        ? (count(field_name) == 0) {
+            ^ "";
+        }
+        ? (count(value) == 0 and fill_missing) {
+            default0 := db_schema_field_default(field_spec);
+            ? (count(default0) > 0) {
+                value = default0;
+            }
+            ? (count(default0) == 0 and db_schema_field_is_nullable(field_spec)) {
+                value = "null";
+            }
+        }
+        coerced := db_coerce_value_for_field_spec(value, field_spec);
+        ? (count(coerced) == 0 or not db_value_matches_field_spec(coerced, field_spec)) {
+            ^ "";
+        }
+        out = row_append(out, field_name, coerced);
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@db_materialize_insert_row(payload: text, fields_spec: text) -> text {
+    ^ db_materialize_row_to_schema(payload, fields_spec, true);
+}
+
+@db_backfill_add_field_payload(payload: text, field_spec: text) -> text {
+    field_name := db_schema_field_name(field_spec);
+    value := row_get(payload, field_name);
+    ? (count(value) > 0) {
+        ^ payload;
+    }
+    default0 := db_schema_field_default(field_spec);
+    ? (count(default0) > 0) {
+        coerced := db_coerce_value_for_field_spec(default0, field_spec);
+        ? (count(coerced) == 0) {
+            ^ "";
+        }
+        ^ row_put(payload, field_name, coerced);
+    }
+    ? (db_schema_field_is_nullable(field_spec)) {
+        ^ row_put(payload, field_name, "null");
+    }
+    ^ "";
+}
+
+@db_rename_field_in_payload(payload: text, old_fields_spec: text, old_field_name: text, new_field_name: text) -> text {
+    count0 := db_schema_field_count(old_fields_spec);
+    out := "";
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(old_fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        value := row_get(payload, field_name);
+        ? (field_name == old_field_name) {
+            field_name = new_field_name;
+        }
+        out = row_append(out, field_name, value);
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@db_drop_field_from_payload(payload: text, old_fields_spec: text, dropped_field_name: text) -> text {
+    count0 := db_schema_field_count(old_fields_spec);
+    out := "";
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(old_fields_spec, idx);
+        field_name := db_schema_field_name(field_spec);
+        ? (field_name != dropped_field_name) {
+            out = row_append(out, field_name, row_get(payload, field_name));
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@db_create_indexes_for_new_field(db: DB, table_name: text, field_spec: text) -> i64 {
+    ? (db_schema_field_is_unique(field_spec)) {
+        ^ db_create_index(db, table_name, db_schema_unique_index_name(field_spec));
+    }
+    ^ 0;
+}
+
+@db_rebuild_indexes_for_new_field(db: DB, table_name: text, field_spec: text) -> i64 {
+    ? (db_schema_field_is_unique(field_spec)) {
+        ^ db_rebuild_index_from_field(db, table_name, db_schema_unique_index_name(field_spec), db_schema_field_name(field_spec));
+    }
+    ^ 0;
+}
+
+@db_unique_fields_precheck(db: DB, table_name: text, primary_key: i64, payload: text, fields_spec: text) -> i64 {
+    count0 := db_schema_field_count(fields_spec);
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_is_unique(field_spec)) {
+            field_name := db_schema_field_name(field_spec);
+            value_text := row_get(payload, field_name);
+            ? (value_text != "null") {
+                ? (not db_text_is_i64(value_text)) {
+                    ^ -3;
+                }
+                existing := db_index_get(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text));
+                ? (existing >= 0 and existing != primary_key) {
+                    ^ -4;
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ 0;
+}
+
+@db_foreign_keys_precheck(db: DB, payload: text, fields_spec: text) -> i64 {
+    count0 := db_schema_field_count(fields_spec);
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ref_table := db_schema_field_ref_table(field_spec);
+        ? (count(ref_table) > 0) {
+            field_name := db_schema_field_name(field_spec);
+            value_text := row_get(payload, field_name);
+            ? (value_text != "null") {
+                ? (not db_text_is_i64(value_text)) {
+                    ^ -6;
+                }
+                referenced := db_get(db, ref_table, i64_of(value_text));
+                ? (count(referenced) == 0) {
+                    ^ -7;
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ 0;
+}
+
+@db_unique_fields_insert_indexes(db: DB, table_name: text, primary_key: i64, payload: text, fields_spec: text) -> i64 {
+    count0 := db_schema_field_count(fields_spec);
+    inserted := 0;
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_is_unique(field_spec)) {
+            field_name := db_schema_field_name(field_spec);
+            value_text := row_get(payload, field_name);
+            ? (value_text != "null") {
+                wrote := db_index_insert_unique(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text), primary_key);
+                ? (wrote < 0) {
+                    ^ wrote;
+                }
+                inserted = inserted + 1;
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ inserted;
+}
+
+@db_unique_fields_update_indexes(db: DB, table_name: text, primary_key: i64, old_payload: text, new_payload: text, fields_spec: text) -> i64 {
+    count0 := db_schema_field_count(fields_spec);
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_is_unique(field_spec)) {
+            field_name := db_schema_field_name(field_spec);
+            old_value := row_get(old_payload, field_name);
+            new_value := row_get(new_payload, field_name);
+            ? (old_value != new_value) {
+                deleted := 0;
+                ? (db_text_is_i64(old_value)) {
+                    deleted = db_index_delete(db, table_name, db_schema_unique_index_name(field_spec), i64_of(old_value));
+                }
+                inserted := 0;
+                ? (db_text_is_i64(new_value)) {
+                    inserted = db_index_insert_unique(db, table_name, db_schema_unique_index_name(field_spec), i64_of(new_value), primary_key);
+                }
+                ? (deleted < 0 or inserted < 0) {
+                    ^ -5;
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ 0;
+}
+
+@db_unique_fields_delete_indexes(db: DB, table_name: text, payload: text, fields_spec: text) -> i64 {
+    count0 := db_schema_field_count(fields_spec);
+    deleted := 0;
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ? (db_schema_field_is_unique(field_spec)) {
+            field_name := db_schema_field_name(field_spec);
+            value_text := row_get(payload, field_name);
+            ? (db_text_is_i64(value_text)) {
+                removed := db_index_delete(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text));
+                ? (removed >= 0) {
+                    deleted = deleted + 1;
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ deleted;
+}
+
+@db_insert_row(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    fields_spec := db_table_fields(db, table_name);
+    materialized := payload;
+    ? (count(fields_spec) > 0) {
+        materialized = db_materialize_insert_row(payload, fields_spec);
+        ? (count(materialized) == 0) {
+            ^ -2;
+        }
+        unique_ok := db_unique_fields_precheck(db, table_name, key, materialized, fields_spec);
+        ? (unique_ok < 0) {
+            ^ unique_ok;
+        }
+        refs_ok := db_foreign_keys_precheck(db, materialized, fields_spec);
+        ? (refs_ok < 0) {
+            ^ refs_ok;
+        }
+    }
+    inserted := db_insert(db, table_name, key, materialized);
+    ? (inserted < 0) {
+        ^ inserted;
+    }
+    ? (count(fields_spec) > 0) {
+        indexed := db_unique_fields_insert_indexes(db, table_name, key, materialized, fields_spec);
+        ? (indexed < 0) {
+            rollback := db_delete(db, table_name, key);
+            ^ indexed;
+        }
+    }
+    ^ inserted;
+}
+
+@db_update_row(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    fields_spec := db_table_fields(db, table_name);
+    materialized := payload;
+    ? (count(fields_spec) > 0) {
+        materialized = db_materialize_row_to_schema(payload, fields_spec, false);
+        ? (count(materialized) == 0) {
+            ^ -2;
+        }
+    }
+    old_payload := db_get(db, table_name, key);
+    ? (count(old_payload) == 0) {
+        ^ -1;
+    }
+    ? (count(fields_spec) > 0) {
+        unique_ok := db_unique_fields_precheck(db, table_name, key, materialized, fields_spec);
+        ? (unique_ok < 0) {
+            ^ unique_ok;
+        }
+        refs_ok := db_foreign_keys_precheck(db, materialized, fields_spec);
+        ? (refs_ok < 0) {
+            ^ refs_ok;
+        }
+    }
+    updated := db_update(db, table_name, key, materialized);
+    ? (updated < 0) {
+        ^ updated;
+    }
+    ? (count(fields_spec) > 0) {
+        synced := db_unique_fields_update_indexes(db, table_name, key, old_payload, materialized, fields_spec);
+        ? (synced < 0) {
+            ^ synced;
+        }
+    }
+    ^ updated;
+}
+
+@db_put_row(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    fields_spec := db_table_fields(db, table_name);
+    materialized := payload;
+    old_payload := db_get(db, table_name, key);
+    ? (count(fields_spec) > 0) {
+        ? (count(old_payload) == 0) {
+            materialized = db_materialize_insert_row(payload, fields_spec);
+            ? (count(materialized) == 0) {
+                ^ -2;
+            }
+        }
+        ? (count(old_payload) > 0) {
+            materialized = db_materialize_row_to_schema(payload, fields_spec, false);
+            ? (count(materialized) == 0) {
+                ^ -2;
+            }
+        }
+        unique_ok := db_unique_fields_precheck(db, table_name, key, materialized, fields_spec);
+        ? (unique_ok < 0) {
+            ^ unique_ok;
+        }
+        refs_ok := db_foreign_keys_precheck(db, materialized, fields_spec);
+        ? (refs_ok < 0) {
+            ^ refs_ok;
+        }
+    }
+    wrote := db_put(db, table_name, key, materialized);
+    ? (wrote < 0) {
+        ^ wrote;
+    }
+    ? (count(fields_spec) > 0 and count(old_payload) == 0) {
+        indexed := db_unique_fields_insert_indexes(db, table_name, key, materialized, fields_spec);
+        ? (indexed < 0) {
+            rollback := db_delete(db, table_name, key);
+            ^ indexed;
+        }
+    }
+    ? (count(fields_spec) > 0 and count(old_payload) > 0) {
+        synced := db_unique_fields_update_indexes(db, table_name, key, old_payload, materialized, fields_spec);
+        ? (synced < 0) {
+            ^ synced;
+        }
+    }
+    ^ wrote;
+}
+
+@db_has_reference_to_key(db: DB, target_table_name: text, key: i64) -> bool {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    key_text := text_of(key);
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (db_catalog_entry_is_used(entry)) {
+            table_name := db_catalog_display_name(entry);
+            fields_spec := db_table_fields(db, table_name);
+            field_count := db_schema_field_count(fields_spec);
+            field_index := 0;
+            ~ (field_index < field_count) {
+                field_spec := db_schema_field_at(fields_spec, field_index);
+                ? (db_schema_field_ref_table(field_spec) == target_table_name) {
+                    field_name := db_schema_field_name(field_spec);
+                    matches := db_scan_where_field_equals(db, table_name, field_name, key_text, "|");
+                    ? (count(matches) > 0) {
+                        ^ true;
+                    }
+                }
+                field_index = field_index + 1;
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ false;
+}
+
+@db_delete_row(db: DB, table_name: text, key: i64) -> i64 {
+    fields_spec := db_table_fields(db, table_name);
+    payload := db_get(db, table_name, key);
+    ? (count(payload) == 0) {
+        ^ -1;
+    }
+    ? (db_has_reference_to_key(db, table_name, key)) {
+        ^ -8;
+    }
+    deleted := db_delete(db, table_name, key);
+    ? (deleted < 0) {
+        ^ deleted;
+    }
+    ? (count(fields_spec) > 0) {
+        cleaned := db_unique_fields_delete_indexes(db, table_name, payload, fields_spec);
+    }
+    ^ deleted;
+}
+
+@db_alter_table_add_field(db: DB, table_name: text, field_spec: text) -> i64 {
+    schema_payload := db_table_schema(db, table_name);
+    ? (count(schema_payload) == 0) {
+        ^ -1;
+    }
+    field_name := db_schema_field_name(field_spec);
+    ? (count(field_name) == 0 or not db_schema_fields_supported(field_spec)) {
+        ^ -2;
+    }
+    old_fields := row_get(schema_payload, "fields");
+    ? (db_schema_has_field(old_fields, field_name)) {
+        ^ -3;
+    }
+    backfill_probe := db_backfill_add_field_payload("", field_spec);
+    ? (count(backfill_probe) == 0) {
+        ^ -4;
+    }
+    new_fields := db_schema_append_field(old_fields, field_spec);
+    updated_schema := row_put(schema_payload, "fields", new_fields);
+    schema_key := db_table_root(db, table_name);
+    schema_updated := db_update(db, db_schema_table_name(), schema_key, updated_schema);
+    ? (schema_updated < 0) {
+        ^ -5;
+    }
+    index_created := db_create_indexes_for_new_field(db, table_name, field_spec);
+    ? (index_created < 0 and index_created != -2) {
+        ^ -6;
+    }
+    key := db_first_key(db, table_name);
+    updated_count := 0;
+    ~ (key >= 0) {
+        payload := db_get(db, table_name, key);
+        updated_payload := db_backfill_add_field_payload(payload, field_spec);
+        ? (count(updated_payload) == 0) {
+            ^ -7;
+        }
+        wrote := db_update_row(db, table_name, key, updated_payload);
+        ? (wrote < 0) {
+            ^ wrote;
+        }
+        updated_count = updated_count + 1;
+        key = db_next_key(db, table_name, key);
+    }
+    rebuilt := db_rebuild_indexes_for_new_field(db, table_name, field_spec);
+    ? (rebuilt < 0) {
+        ^ rebuilt;
+    }
+    ^ updated_count;
+}
+
+@db_alter_table_rename_field(db: DB, table_name: text, old_field_name: text, new_field_name: text) -> i64 {
+    schema_payload := db_table_schema(db, table_name);
+    ? (count(schema_payload) == 0) {
+        ^ -1;
+    }
+    ? (count(old_field_name) == 0 or count(new_field_name) == 0) {
+        ^ -2;
+    }
+    old_fields := row_get(schema_payload, "fields");
+    old_field_spec := db_schema_field_spec(old_fields, old_field_name);
+    ? (count(old_field_spec) == 0) {
+        ^ -3;
+    }
+    ? (db_schema_has_field(old_fields, new_field_name)) {
+        ^ -4;
+    }
+    ? (db_schema_field_is_unique(old_field_spec) or count(db_schema_field_ref_table(old_field_spec)) > 0) {
+        ^ -5;
+    }
+    new_field_spec := db_schema_rename_field_spec(old_field_spec, new_field_name);
+    ? (count(new_field_spec) == 0) {
+        ^ -6;
+    }
+    new_fields := db_schema_replace_field(old_fields, old_field_name, new_field_spec);
+    updated_schema := row_put(schema_payload, "fields", new_fields);
+    schema_key := db_table_root(db, table_name);
+    schema_updated := db_update(db, db_schema_table_name(), schema_key, updated_schema);
+    ? (schema_updated < 0) {
+        ^ -7;
+    }
+    key := db_first_key(db, table_name);
+    updated_count := 0;
+    ~ (key >= 0) {
+        payload := db_get(db, table_name, key);
+        renamed_payload := db_rename_field_in_payload(payload, old_fields, old_field_name, new_field_name);
+        wrote := db_update_row(db, table_name, key, renamed_payload);
+        ? (wrote < 0) {
+            ^ wrote;
+        }
+        updated_count = updated_count + 1;
+        key = db_next_key(db, table_name, key);
+    }
+    ^ updated_count;
+}
+
+@db_alter_table_drop_field(db: DB, table_name: text, field_name: text) -> i64 {
+    schema_payload := db_table_schema(db, table_name);
+    ? (count(schema_payload) == 0) {
+        ^ -1;
+    }
+    ? (count(field_name) == 0) {
+        ^ -2;
+    }
+    old_fields := row_get(schema_payload, "fields");
+    old_field_spec := db_schema_field_spec(old_fields, field_name);
+    ? (count(old_field_spec) == 0) {
+        ^ -3;
+    }
+    ? (db_schema_field_is_unique(old_field_spec) or count(db_schema_field_ref_table(old_field_spec)) > 0) {
+        ^ -5;
+    }
+    new_fields := db_schema_remove_field(old_fields, field_name);
+    updated_schema := row_put(schema_payload, "fields", new_fields);
+    schema_key := db_table_root(db, table_name);
+    schema_updated := db_update(db, db_schema_table_name(), schema_key, updated_schema);
+    ? (schema_updated < 0) {
+        ^ -6;
+    }
+    key := db_first_key(db, table_name);
+    updated_count := 0;
+    ~ (key >= 0) {
+        payload := db_get(db, table_name, key);
+        trimmed_payload := db_drop_field_from_payload(payload, old_fields, field_name);
+        wrote := db_update_row(db, table_name, key, trimmed_payload);
+        ? (wrote < 0) {
+            ^ wrote;
+        }
+        updated_count = updated_count + 1;
+        key = db_next_key(db, table_name, key);
+    }
+    ^ updated_count;
+}
+
+@db_scan_keys_text(db: DB, table_name: text, separator: text) -> text {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ "";
+    }
+    ^ table_scan_keys_text(table, separator);
+}
+
+@db_delete_keys_text(db: DB, table_name: text, keys_text: text, separator: text) -> i64 {
+    remaining := keys_text;
+    deleted := 0;
+    ~ (count(remaining) > 0) {
+        split_at := find(remaining, separator);
+        item := remaining;
+        next_remaining := "";
+        ? (split_at >= 0) {
+            item = slice(remaining, 0, split_at);
+            next_remaining = slice(remaining, split_at + count(separator), count(remaining) - (split_at + count(separator)));
+        }
+        ? (count(item) > 0) {
+            key := i64_of(item);
+            removed := db_delete(db, table_name, key);
+            ? (removed >= 0) {
+                deleted = deleted + 1;
+            }
+        }
+        remaining = next_remaining;
+    }
+    ^ deleted;
+}
+
+@db_rebuild_index_from_field_page(db: DB, table: Table, table_name: text, index_name: text, field_name: text, page_id: i64) -> i64 {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        page := leaf_read_page(table.pager, page_id);
+        slot_count := leaf_slot_count(page);
+        slot_width := leaf_slot_width(page);
+        entries := leaf_entries_region(page);
+        built := 0;
+        slot_index := 0;
+        ~ (slot_index < slot_count) {
+            slot := leaf_slot_text_at(entries, slot_width, slot_index);
+            primary_key := leaf_slot_key(slot);
+            payload := leaf_slot_payload(slot);
+            secondary_text := row_get(payload, field_name);
+            ? (count(secondary_text) == 0) {
+                ^ -3;
+            }
+            ? (secondary_text != "null") {
+                ? (not db_text_is_i64(secondary_text)) {
+                    ^ -3;
+                }
+                inserted := db_index_insert_unique(db, table_name, index_name, i64_of(secondary_text), primary_key);
+                ? (inserted < 0) {
+                    ^ inserted;
+                }
+                built = built + 1;
+            }
+            slot_index = slot_index + 1;
+        }
+        ^ built;
+    }
+    ? (page_kind == "I") {
+        page := pager_read_page(table.pager, page_id);
+        key_count := table_internal_key_count(page);
+        used_cells := table_internal_used_cells(page);
+        total := db_rebuild_index_from_field_page(db, table, table_name, index_name, field_name, table_internal_left_child(page));
+        ? (total < 0) {
+            ^ total;
+        }
+        cell_index := 0;
+        ~ (cell_index < key_count) {
+            cell := table_internal_cell_at(used_cells, cell_index);
+            built := db_rebuild_index_from_field_page(db, table, table_name, index_name, field_name, table_internal_cell_child(cell));
+            ? (built < 0) {
+                ^ built;
+            }
+            total = total + built;
+            cell_index = cell_index + 1;
+        }
+        ^ total;
+    }
+    ^ -5;
+}
+
+@db_rebuild_index_from_field(db: DB, table_name: text, index_name: text, field_name: text) -> i64 {
+    base_table := db_bind_table(db, table_name);
+    index_table_name := db_index_table_name(table_name, index_name);
+    index_table := db_bind_table(db, index_table_name);
+    ? (base_table.root_page < 0 or index_table.root_page < 0) {
+        ^ -1;
+    }
+    existing_keys := db_scan_keys_text(db, index_table_name, ",");
+    cleared := db_delete_keys_text(db, index_table_name, existing_keys, ",");
+    rebuilt := db_rebuild_index_from_field_page(db, base_table, table_name, index_name, field_name, base_table.root_page);
+    ^ rebuilt;
+}
+
+@db_repair_unique_indexes(db: DB) -> i64 {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    repaired := 0;
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (db_catalog_entry_is_used(entry)) {
+            table_name := db_catalog_display_name(entry);
+            ? (slice(table_name, 0, 4) != "idx.") {
+                fields_spec := db_table_fields(db, table_name);
+                field_count := db_schema_field_count(fields_spec);
+                field_index := 0;
+                ~ (field_index < field_count) {
+                    field_spec := db_schema_field_at(fields_spec, field_index);
+                    ? (db_schema_field_is_unique(field_spec)) {
+                        rebuilt := db_rebuild_index_from_field(db, table_name, db_schema_unique_index_name(field_spec), db_schema_field_name(field_spec));
+                        ? (rebuilt < 0) {
+                            ^ rebuilt;
+                        }
+                        repaired = repaired + 1;
+                    }
+                    field_index = field_index + 1;
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ repaired;
+}
+
+@db_repair_database_report(db: DB) -> text {
+    ? (not db_can_write(db)) {
+        ^ db_result_error("lock not held");
+    }
+    unique_repaired := db_repair_unique_indexes(db);
+    ? (unique_repaired < 0) {
+        ^ db_result_error("unique repair failed");
+    }
+    reclaimed := db_reclaim_unreachable_pages(db);
+    ? (reclaimed < 0) {
+        ^ db_result_error("unreachable reclaim failed");
+    }
+    compacted := db_compact_database(db);
+    ? (compacted < 0) {
+        ^ db_result_error("compaction failed");
+    }
+    validation := db_validate_report(db);
+    ? (validation != "ok") {
+        ^ db_result_error(validation);
+    }
+    out := "";
+    out = row_append(out, "ok", "true");
+    out = row_append(out, "found", "true");
+    out = row_append(out, "unique_indexes_repaired", text_of(unique_repaired));
+    out = row_append(out, "reclaimed_pages", text_of(reclaimed));
+    out = row_append(out, "tables_compacted", text_of(compacted));
+    out = row_append(out, "validation", validation);
+    ^ out;
+}
+
+@db_repair_database(db: DB) -> bool {
+    report := db_repair_database_report(db);
+    ^ row_get(report, "ok") == "true";
+}
+
+@db_scan_where_page(db: DB, table: Table, page_id: i64, field_name: text, expected_value: text, separator: text) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        page := leaf_read_page(table.pager, page_id);
+        slot_count := leaf_slot_count(page);
+        out := "";
+        slot_index := 0;
+        ~ (slot_index < slot_count) {
+            value := leaf_read_slot(table.pager, page_id, slot_index);
+            ? (count(value) > 0 and row_get(value, field_name) == expected_value) {
+                normalized := row_trim_padding(value);
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + normalized;
+            }
+            slot_index = slot_index + 1;
+        }
+        ^ out;
+    }
+    ? (page_kind == "I") {
+        page := pager_read_page(table.pager, page_id);
+        key_count := table_internal_key_count(page);
+        used_cells := table_internal_used_cells(page);
+        out := db_scan_where_page(db, table, table_internal_left_child(page), field_name, expected_value, separator);
+        cell_index := 0;
+        ~ (cell_index < key_count) {
+            cell := table_internal_cell_at(used_cells, cell_index);
+            child_text := db_scan_where_page(db, table, table_internal_cell_child(cell), field_name, expected_value, separator);
+            ? (count(child_text) > 0) {
+                ? (count(out) > 0) {
+                    out = out + separator;
+                }
+                out = out + child_text;
+            }
+            cell_index = cell_index + 1;
+        }
+        ^ out;
+    }
+    ^ "";
+}
+
+@db_scan_where_field_equals(db: DB, table_name: text, field_name: text, expected_value: text, separator: text) -> text {
+    fields_spec := db_table_fields(db, table_name);
+    field_spec := db_schema_field_spec(fields_spec, field_name);
+    ? (count(field_spec) > 0 and db_schema_field_is_unique(field_spec) and db_schema_field_type(field_spec) == "i64" and db_text_is_i64(expected_value)) {
+        row0 := db_get_by_index(db, table_name, db_schema_unique_index_name(field_spec), i64_of(expected_value));
+        ? (count(row0) == 0) {
+            ^ "";
+        }
+        ^ row_trim_padding(row0);
+    }
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ "";
+    }
+    ^ db_scan_where_page(db, table, table.root_page, field_name, expected_value, separator);
+}
+
+@db_validate_schema_constraints_report_for_table(db: DB, table_name: text) -> text {
+    fields_spec := db_table_fields(db, table_name);
+    ? (count(fields_spec) == 0) {
+        ^ "ok";
+    }
+    key := db_first_key(db, table_name);
+    ~ (key >= 0) {
+        payload := db_get(db, table_name, key);
+        field_count := db_schema_field_count(fields_spec);
+        field_index := 0;
+        ~ (field_index < field_count) {
+            field_spec := db_schema_field_at(fields_spec, field_index);
+            field_name := db_schema_field_name(field_spec);
+            value_text := row_get(payload, field_name);
+            ? (db_schema_field_is_unique(field_spec) and value_text != "null") {
+                indexed_key := db_index_get(db, table_name, db_schema_unique_index_name(field_spec), i64_of(value_text));
+                ? (indexed_key != key) {
+                    ^ "table " + table_name + " unique index " + field_name + " is inconsistent at key " + text_of(key);
+                }
+            }
+            ref_table := db_schema_field_ref_table(field_spec);
+            ? (count(ref_table) > 0 and value_text != "null") {
+                referenced := db_get(db, ref_table, i64_of(value_text));
+                ? (count(referenced) == 0) {
+                    ^ "table " + table_name + " foreign key " + field_name + " points to missing row";
+                }
+            }
+            field_index = field_index + 1;
+        }
+        key = db_next_key(db, table_name, key);
+    }
+    ^ "ok";
+}
+
+@db_validate(db: DB) -> bool {
+    page := pager_read_page(db.pager, db_catalog_page());
+    ? (slice(page, 1, 1) != "C") {
+        ^ false;
+    }
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    total_pages := pager_total_pages(db.pager);
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (not db_catalog_entry_is_used(entry)) {
+            ^ false;
+        }
+        root_page := db_catalog_entry_root(entry);
+        slot_width := db_catalog_entry_slot_width(entry);
+        table_name := db_catalog_display_name(entry);
+        ? (root_page <= 0 or root_page >= total_pages or slot_width <= 0) {
+            ^ false;
+        }
+        table := table_bind(db.pager, root_page, slot_width);
+        ? (not table_validate(table)) {
+            ^ false;
+        }
+        ? (slice(table_name, 0, 4) != "idx.") {
+            constraint_report := db_validate_schema_constraints_report_for_table(db, table_name);
+            ? (constraint_report != "ok") {
+                ^ false;
+            }
+        }
+        idx = idx + 1;
+    }
+    free_report := db_validate_free_list_report(db);
+    ? (free_report != "ok") {
+        ^ false;
+    }
+    ? (count(db_unreachable_pages_text(db, ",")) > 0) {
+        ^ false;
+    }
+    ^ true;
+}
+
+@db_validate_report(db: DB) -> text {
+    page := pager_read_page(db.pager, db_catalog_page());
+    ? (slice(page, 1, 1) != "C") {
+        ^ "catalog page marker is invalid";
+    }
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    total_pages := pager_total_pages(db.pager);
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (not db_catalog_entry_is_used(entry)) {
+            ^ "catalog entry " + text_of(idx) + " is not marked used";
+        }
+        root_page := db_catalog_entry_root(entry);
+        slot_width := db_catalog_entry_slot_width(entry);
+        table_name := db_catalog_display_name(entry);
+        ? (root_page <= 0 or root_page >= total_pages) {
+            ^ "catalog table " + table_name + " has invalid root page";
+        }
+        ? (slot_width <= 0) {
+            ^ "catalog table " + table_name + " has invalid slot width";
+        }
+        table := table_bind(db.pager, root_page, slot_width);
+        report := table_validate_report(table);
+        ? (report != "ok") {
+            ^ "table " + table_name + " invalid: " + report;
+        }
+        ? (slice(table_name, 0, 4) != "idx.") {
+            constraint_report := db_validate_schema_constraints_report_for_table(db, table_name);
+            ? (constraint_report != "ok") {
+                ^ constraint_report;
+            }
+        }
+        idx = idx + 1;
+    }
+    free_report := db_validate_free_list_report(db);
+    ? (free_report != "ok") {
+        ^ free_report;
+    }
+    unreachable := db_unreachable_pages_text(db, ",");
+    ? (count(unreachable) > 0) {
+        ^ "unreachable pages: " + unreachable;
+    }
+    ^ "ok";
+}
+
+@db_sync(db: DB) -> bool {
+    ^ pager_sync(db.pager);
+}
+
+@db_begin(db: DB) -> bool {
+    ? (not db_can_write(db)) {
+        ^ false;
+    }
+    journal := file_open(db_journal_path(db));
+    header := file_read(journal, 0, db_journal_header_size());
+    ? (db_journal_active(header)) {
+        closed := file_close(journal);
+        ^ false;
+    }
+    cleared_wal := db_wal_clear(db);
+    ? (not cleared_wal) {
+        closed := file_close(journal);
+        ^ false;
+    }
+    total_pages := pager_total_pages(db.pager);
+    wrote_header := file_write(journal, 0, db_journal_header(true, total_pages, 0));
+    synced := file_sync(journal);
+    closed := file_close(journal);
+    ^ wrote_header == db_journal_header_size() and synced and closed;
+}
+
+@db_commit(db: DB) -> bool {
+    ? (not db_can_write(db)) {
+        ^ false;
+    }
+    wrote_wal := db_write_wal_for_commit(db);
+    ? (not wrote_wal) {
+        ^ false;
+    }
+    synced := db_sync(db);
+    ? (not synced) {
+        ^ false;
+    }
+    cleared_journal := db_journal_clear(db);
+    ? (not cleared_journal) {
+        ^ false;
+    }
+    ^ db_wal_clear(db);
+}
+
+@db_rollback(db: DB) -> bool {
+    ? (not db_can_write(db)) {
+        ^ false;
+    }
+    journal := file_open(db_journal_path(db));
+    journal_size := file_size(journal);
+    ? (journal_size < db_journal_header_size()) {
+        closed := file_close(journal);
+        ^ false;
+    }
+    header := file_read(journal, 0, db_journal_header_size());
+    ? (not db_journal_active(header)) {
+        closed := file_close(journal);
+        ^ false;
+    }
+    entry_count := db_journal_entry_count(header);
+    restored := db_restore_journal_pages(db, journal, entry_count);
+    synced_db := file_sync(db.pager.handle);
+    cleared := file_write(journal, 0, db_journal_header(false, 0, 0));
+    synced_journal := file_sync(journal);
+    closed := file_close(journal);
+    ^ restored and synced_db and cleared == db_journal_header_size() and synced_journal and closed;
+}
+
+@db_close(db: DB) -> bool {
+    unlocked := true;
+    ? (db.lock_held) {
+        unlocked = file_unlock(db.pager.handle);
+    }
+    closed := pager_close(db.pager);
+    ^ unlocked and closed;
+}
+
+@db_backup(db: DB, backup_path: text) -> bool {
+    ? (db_journal_is_active(db)) {
+        ^ false;
+    }
+    synced := db_sync(db);
+    ? (not synced) {
+        ^ false;
+    }
+    size0 := pager_file_size(db.pager);
+    snapshot := file_read_bytes(db.pager.handle, 0, size0);
+    backup := file_open(backup_path);
+    wrote := file_write(backup, 0, snapshot);
+    synced_backup := file_sync(backup);
+    closed := file_close(backup);
+    ^ wrote == size0 and synced_backup and closed;
+}
+
+@db_restore_copy(backup_path: text, restore_path: text) -> bool {
+    backup := file_open(backup_path);
+    size0 := file_size(backup);
+    snapshot := file_read_bytes(backup, 0, size0);
+    closed_backup := file_close(backup);
+    ? (not closed_backup) {
+        ^ false;
+    }
+    restored := file_open(restore_path);
+    wrote := file_write(restored, 0, snapshot);
+    synced_restored := file_sync(restored);
+    closed_restored := file_close(restored);
+    ^ wrote == size0 and synced_restored and closed_restored;
+}

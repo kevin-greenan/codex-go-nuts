@@ -1,0 +1,64 @@
+& "../lib/app.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: chores_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := hearthlight_open(arg(1));
+
+    page_request := kiln_http_parse_request("GET /chores HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    page_dispatch := kiln_dispatch(hearthlight_routes(), page_request);
+    page_reply := hearthlight_route_reply(db, page_dispatch, page_request);
+    page_response := kiln_reply_response(page_reply);
+
+    add_request := kiln_http_parse_request("POST /chores HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=Take+out+compost&owner=Avery&due_label=Tonight&recurrence=weekly&owner_cycle=Avery%2CJordan");
+    add_dispatch := kiln_dispatch(hearthlight_routes(), add_request);
+    add_reply := hearthlight_route_reply(db, add_dispatch, add_request);
+    add_response := kiln_reply_response(add_reply);
+
+    complete_request := kiln_http_parse_request("POST /chores/1/complete HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n");
+    complete_dispatch := kiln_dispatch(hearthlight_routes(), complete_request);
+    complete_reply := hearthlight_route_reply(db, complete_dispatch, complete_request);
+    complete_response := kiln_reply_response(complete_reply);
+
+    added_chores := db_scan_where_field_equals_rows_text(db, hearthlight_chores_table(), "name", "Take out compost", "|");
+    counters := db_get(db, hearthlight_chores_table(), 1);
+    history_rows := db_scan_where_field_equals_rows_text(db, hearthlight_chore_history_table(), "name", "Counters", "|");
+
+    validate := db_validate_report(db);
+    closed := db_close(db);
+
+    ? (find(page_response, "HTTP/1.1 200 OK") < 0 or find(page_response, "Recent Completions") < 0 or find(page_response, "Add A Chore") < 0) {
+        ! "page mismatch";
+        ^ 2;
+    }
+    ? (find(add_response, "Added Take out compost to the household rhythm.") < 0) {
+        ! "add response mismatch";
+        ^ 3;
+    }
+    ? (find(complete_response, "Chore completed and advanced.") < 0 or find(complete_response, "Location: /chores") < 0) {
+        ! "complete response mismatch";
+        ^ 4;
+    }
+    ? (find(added_chores, "recurrence=weekly;") < 0 or find(added_chores, "owner=Avery;") < 0) {
+        ! "added chore mismatch=" + added_chores;
+        ^ 5;
+    }
+    ? (row_get(counters, "status") != "todo" or row_get(counters, "due_label") != "Tomorrow" or row_get(counters, "owner") != "Avery" or row_get(counters, "completed_count") != "1") {
+        ! "counter state mismatch=" + counters;
+        ^ 6;
+    }
+    ? (find(history_rows, "owner=Jordan;") < 0 or find(history_rows, "completed_label=Today;") < 0 or find(history_rows, "next_due_label=Tomorrow;") < 0) {
+        ! "history mismatch=" + history_rows;
+        ^ 7;
+    }
+    ? (validate != "ok" or not closed) {
+        ! "validate=" + validate;
+        ^ 8;
+    }
+
+    ! "hearthlight chores smoke ok";
+    ^ 0;
+}

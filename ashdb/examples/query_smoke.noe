@@ -1,0 +1,79 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: query_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    users_root := db_define_table(db, "users", 96, "name:text,email:text,role:text");
+    email_index := db_create_index(db, "users", "email");
+
+    alice := "";
+    alice = row_append(alice, "name", "alice");
+    alice = row_append(alice, "email", "alice@home");
+    alice = row_append(alice, "role", "cook");
+
+    bob := "";
+    bob = row_append(bob, "name", "bob");
+    bob = row_append(bob, "email", "bob@home");
+    bob = row_append(bob, "role", "shop");
+
+    cara := "";
+    cara = row_append(cara, "name", "cara");
+    cara = row_append(cara, "email", "cara@home");
+    cara = row_append(cara, "role", "cook");
+
+    put0 := db_insert_with_index(db, "users", "email", 10, alice, 1001);
+    put1 := db_insert_with_index(db, "users", "email", 20, bob, 1002);
+    put2 := db_insert_with_index(db, "users", "email", 30, cara, 1003);
+    by_index0 := db_get_by_index(db, "users", "email", 1002);
+    cooks0 := db_scan_where_field_equals(db, "users", "role", "cook", "|");
+    synced0 := db_sync(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    users_root1 := db_table_root(reopened, "users");
+    email_index1 := db_table_root(reopened, "idx.users.email");
+    by_index1 := db_get_by_index(reopened, "users", "email", 1003);
+    cooks1 := db_scan_where_field_equals(reopened, "users", "role", "cook", "|");
+    missing1 := db_get_by_index(reopened, "users", "email", 9999);
+    synced1 := db_sync(reopened);
+    closed1 := db_close(reopened);
+
+    ? (users_root < 0 or email_index < 0) {
+        ! "roots=" + text_of(users_root) + ":" + text_of(email_index);
+        ^ 2;
+    }
+    ? (put0 < 0 or put1 < 0 or put2 < 0) {
+        ! "puts=" + text_of(put0) + ":" + text_of(put1) + ":" + text_of(put2);
+        ^ 3;
+    }
+    ? (row_get(by_index0, "name") != "bob" or row_get(by_index0, "role") != "shop") {
+        ! "by_index0=" + by_index0;
+        ^ 4;
+    }
+    ? (cooks0 != "name=alice;email=alice@home;role=cook;|name=cara;email=cara@home;role=cook;") {
+        ! "cooks0=" + cooks0;
+        ^ 5;
+    }
+    ? (users_root1 != users_root or email_index1 != email_index) {
+        ! "roots1=" + text_of(users_root1) + ":" + text_of(email_index1);
+        ^ 6;
+    }
+    ? (row_get(by_index1, "name") != "cara" or row_get(by_index1, "email") != "cara@home") {
+        ! "by_index1=" + by_index1;
+        ^ 7;
+    }
+    ? (cooks1 != "name=alice;email=alice@home;role=cook;|name=cara;email=cara@home;role=cook;" or missing1 != "") {
+        ! "query1=" + cooks1 + ":" + missing1;
+        ^ 8;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 9;
+    }
+
+    ! "ashdb query smoke ok";
+    ^ 0;
+}

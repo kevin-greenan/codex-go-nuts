@@ -1,0 +1,76 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: foreign_key_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    users_root := db_define_table(db, "users", 96, "name:text");
+    tasks_root := db_define_table(db, "tasks", 96, "title:text,owner_id:i64?@users,note:text?");
+
+    user10 := "";
+    user10 = row_append(user10, "name", "alice");
+
+    task_ok := "";
+    task_ok = row_append(task_ok, "title", "laundry");
+    task_ok = row_append(task_ok, "owner_id", "10");
+
+    task_bad := "";
+    task_bad = row_append(task_bad, "title", "dishes");
+    task_bad = row_append(task_bad, "owner_id", "99");
+
+    task_null := "";
+    task_null = row_append(task_null, "title", "vacuum");
+    task_null = row_append(task_null, "owner_id", "null");
+    task_null = row_append(task_null, "note", "later");
+
+    ins_user := db_insert_row(db, "users", 10, user10);
+    ins_task0 := db_insert_row(db, "tasks", 100, task_ok);
+    ins_task1 := db_insert_row(db, "tasks", 101, task_bad);
+    upd_bad := "";
+    upd_bad = row_append(upd_bad, "title", "laundry");
+    upd_bad = row_append(upd_bad, "owner_id", "77");
+    upd_bad = row_append(upd_bad, "note", "later");
+    upd0 := db_update_row(db, "tasks", 100, upd_bad);
+    put0 := db_put_row(db, "tasks", 102, task_null);
+    del_blocked := db_delete_row(db, "users", 10);
+    del_task := db_delete_row(db, "tasks", 100);
+    del_user := db_delete_row(db, "users", 10);
+    synced0 := db_sync(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    task_again := db_get(reopened, "tasks", 102);
+    user_again := db_get(reopened, "users", 10);
+    synced1 := db_sync(reopened);
+    closed1 := db_close(reopened);
+
+    ? (users_root < 0 or tasks_root < 0) {
+        ! "roots=" + text_of(users_root) + ":" + text_of(tasks_root);
+        ^ 2;
+    }
+    ? (ins_user < 0 or ins_task0 < 0 or ins_task1 != -7) {
+        ! "ins=" + text_of(ins_user) + ":" + text_of(ins_task0) + ":" + text_of(ins_task1);
+        ^ 3;
+    }
+    ? (upd0 != -7 or put0 < 0) {
+        ! "upd=" + text_of(upd0) + ":" + text_of(put0);
+        ^ 4;
+    }
+    ? (del_blocked != -8 or del_task < 0 or del_user < 0) {
+        ! "del=" + text_of(del_blocked) + ":" + text_of(del_task) + ":" + text_of(del_user);
+        ^ 5;
+    }
+    ? (row_get(task_again, "owner_id") != "null" or row_get(task_again, "note") != "later" or user_again != "") {
+        ! "again=" + task_again + ":" + user_again;
+        ^ 6;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 7;
+    }
+
+    ! "ashdb foreign key smoke ok";
+    ^ 0;
+}

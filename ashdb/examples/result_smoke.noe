@@ -1,0 +1,70 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: result_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 256);
+    defined := db_define_table(db, "users", 96, "name:text,email_key:i64!");
+
+    alice := "";
+    alice = row_append(alice, "name", "alice");
+    alice = row_append(alice, "email_key", "1001");
+
+    inserted := db_insert_row(db, "users", 10, alice);
+
+    get0 := db_get_result(db, "users", 10);
+    get1 := db_get_result(db, "users", 20);
+    get2 := db_get_result(db, "missing", 10);
+    idx0 := db_get_by_index_result(db, "users", "email_key", 1001);
+    idx1 := db_get_by_index_result(db, "users", "email_key", 9999);
+    idx2 := db_get_by_index_result(db, "users", "missing", 1001);
+
+    cursor0 := db_cursor_open(db, "users");
+    cursor_result0 := db_cursor_result(db, cursor0);
+    cursor1 := db_cursor_next(db, cursor0);
+    cursor_result1 := db_cursor_result(db, cursor1);
+    closed0 := db_close(db);
+
+    ? (defined <= 0 or inserted < 0) {
+        ! "setup=" + text_of(defined) + ":" + text_of(inserted);
+        ^ 2;
+    }
+    ? (row_get(get0, "ok") != "true" or row_get(get0, "found") != "true" or row_get(get0, "__key") != "10" or row_get(get0, "name") != "alice") {
+        ! "get0=" + get0;
+        ^ 3;
+    }
+    ? (row_get(get1, "ok") != "true" or row_get(get1, "found") != "false") {
+        ! "get1=" + get1;
+        ^ 4;
+    }
+    ? (row_get(get2, "ok") != "false" or row_get(get2, "error") != "table not found") {
+        ! "get2=" + get2;
+        ^ 5;
+    }
+    ? (row_get(idx0, "ok") != "true" or row_get(idx0, "__index_key") != "1001" or row_get(idx0, "name") != "alice") {
+        ! "idx0=" + idx0;
+        ^ 6;
+    }
+    ? (row_get(idx1, "ok") != "true" or row_get(idx1, "found") != "false") {
+        ! "idx1=" + idx1;
+        ^ 7;
+    }
+    ? (row_get(idx2, "ok") != "false" or row_get(idx2, "error") != "index not found") {
+        ! "idx2=" + idx2;
+        ^ 8;
+    }
+    ? (row_get(cursor_result0, "ok") != "true" or row_get(cursor_result0, "__key") != "10" or row_get(cursor_result0, "name") != "alice") {
+        ! "cursor0=" + cursor_result0;
+        ^ 9;
+    }
+    ? (row_get(cursor_result1, "ok") != "true" or row_get(cursor_result1, "found") != "false" or not closed0) {
+        ! "cursor1=" + cursor_result1;
+        ^ 10;
+    }
+
+    ! "ashdb result smoke ok";
+    ^ 0;
+}

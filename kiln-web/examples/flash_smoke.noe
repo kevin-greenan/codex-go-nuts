@@ -1,0 +1,34 @@
+& "../lib/router.noe";
+
+@main() -> i64 {
+    request := kiln_http_parse_request("GET / HTTP/1.1\r\nHost: localhost\r\nCookie: kiln_flash=notice|saved\r\n\r\n");
+    ? (kiln_flash_value(request) != "notice|saved") {
+        ! "flash value mismatch";
+        ^ 1;
+    }
+    ? (kiln_flash_level(request) != "notice") {
+        ! "flash level mismatch";
+        ^ 2;
+    }
+    ? (kiln_flash_message(request) != "saved") {
+        ! "flash message mismatch";
+        ^ 3;
+    }
+
+    redirect := kiln_reply_with_flash(kiln_reply_redirect("/done"), "success", "created");
+    response := kiln_reply_response(redirect);
+    ? (find(response, "Set-Cookie: kiln_flash=success|created; Path=/") < 0) {
+        ! "flash set mismatch";
+        ^ 4;
+    }
+
+    cleared := kiln_reply_clear_flash(kiln_reply_html(200, "<p>done</p>"));
+    cleared_response := kiln_reply_response(cleared);
+    ? (find(cleared_response, "Set-Cookie: kiln_flash=; Path=/") < 0) {
+        ! "flash clear mismatch";
+        ^ 5;
+    }
+
+    ! "kiln flash smoke ok";
+    ^ 0;
+}

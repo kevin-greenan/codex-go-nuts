@@ -1,0 +1,58 @@
+& "../lib/table_leaf.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: leaf_split_smoke <db-path>";
+        ^ 1;
+    }
+
+    pager := pager_open(arg(1), 64);
+    page_id := pager_alloc_page(pager);
+    initialized := leaf_init_page(pager, page_id, 20);
+    inserted0 := leaf_insert_key(pager, page_id, 10, "alpha");
+    inserted1 := leaf_insert_key(pager, page_id, 30, "charlie");
+    right_page_id := leaf_split_insert_key(pager, page_id, 20, "bravo");
+    separator_key := leaf_first_key(pager, right_page_id);
+    left_page := leaf_read_page(pager, page_id);
+    right_page := leaf_read_page(pager, right_page_id);
+    left_count := leaf_slot_count(left_page);
+    right_count := leaf_slot_count(right_page);
+    left_first := leaf_read_slot(pager, page_id, 0);
+    right_first := leaf_read_slot(pager, right_page_id, 0);
+    right_second := leaf_read_slot(pager, right_page_id, 1);
+    synced := pager_sync(pager);
+    closed := pager_close(pager);
+
+    ? (initialized != 64 or inserted0 != 0 or inserted1 != 1) {
+        ^ 2;
+    }
+    ? (right_page_id < 0) {
+        ^ 3;
+    }
+    ? (page_id != 1 or right_page_id != 2 or separator_key != 20) {
+        ! "split=" + text_of(page_id) + ":" + text_of(right_page_id) + ":" + text_of(separator_key);
+        ^ 4;
+    }
+    ? (left_count != 1 or right_count != 2) {
+        ! "counts=" + text_of(left_count) + ":" + text_of(right_count);
+        ^ 5;
+    }
+    ? (slice(left_first, 0, 5) != "alpha") {
+        ! "left=" + left_first;
+        ^ 6;
+    }
+    ? (slice(right_first, 0, 5) != "bravo") {
+        ! "right0=" + right_first;
+        ^ 7;
+    }
+    ? (slice(right_second, 0, 7) != "charlie") {
+        ! "right1=" + right_second;
+        ^ 8;
+    }
+    ? (not synced or not closed) {
+        ^ 9;
+    }
+
+    ! "ashdb leaf split smoke ok";
+    ^ 0;
+}

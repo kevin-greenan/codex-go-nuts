@@ -1,0 +1,92 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: repair_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    users_root := db_define_table(db, "users", 96, "name:text,email_key:i64,role:text");
+    email_index := db_create_index(db, "users", "email_key");
+
+    row10 := "";
+    row10 = row_append(row10, "name", "alice");
+    row10 = row_append(row10, "email_key", "1001");
+    row10 = row_append(row10, "role", "cook");
+
+    row20 := "";
+    row20 = row_append(row20, "name", "bob");
+    row20 = row_append(row20, "email_key", "1002");
+    row20 = row_append(row20, "role", "shop");
+
+    row30 := "";
+    row30 = row_append(row30, "name", "cara");
+    row30 = row_append(row30, "email_key", "1003");
+    row30 = row_append(row30, "role", "clean");
+
+    ins0 := db_insert_with_index(db, "users", "email_key", 10, row10, 1001);
+    ins1 := db_insert_with_index(db, "users", "email_key", 20, row20, 1002);
+    ins2 := db_insert_with_index(db, "users", "email_key", 30, row30, 1003);
+
+    catalog0 := db_catalog_text(db, "|");
+    pages0 := db_page_map_text(db, "|");
+
+    broke0 := db_index_delete(db, "users", "email_key", 1002);
+    broke1 := db_index_put(db, "users", "email_key", 1003, 99);
+    before_missing := db_index_get(db, "users", "email_key", 1002);
+    before_wrong := db_index_get(db, "users", "email_key", 1003);
+
+    rebuilt := db_rebuild_index_from_field(db, "users", "email_key", "email_key");
+    after0 := db_index_get(db, "users", "email_key", 1001);
+    after1 := db_index_get(db, "users", "email_key", 1002);
+    after2 := db_index_get(db, "users", "email_key", 1003);
+    synced0 := db_sync(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    catalog1 := db_catalog_text(reopened, "|");
+    pages1 := db_page_map_text(reopened, "|");
+    after3 := db_index_get(reopened, "users", "email_key", 1003);
+    synced1 := db_sync(reopened);
+    closed1 := db_close(reopened);
+
+    ? (users_root < 0 or email_index < 0) {
+        ! "roots=" + text_of(users_root) + ":" + text_of(email_index);
+        ^ 2;
+    }
+    ? (ins0 < 0 or ins1 < 0 or ins2 < 0) {
+        ! "ins=" + text_of(ins0) + ":" + text_of(ins1) + ":" + text_of(ins2);
+        ^ 3;
+    }
+    ? (find(catalog0, "name=users;") < 0 or find(catalog0, "name=idx.users.email") < 0) {
+        ! "catalog0=" + catalog0;
+        ^ 4;
+    }
+    ? (find(pages0, "0:H") < 0 or find(pages0, "1:C") < 0) {
+        ! "pages0=" + pages0;
+        ^ 5;
+    }
+    ? (broke0 < 0 or broke1 < 0 or before_missing != -1 or before_wrong != 99) {
+        ! "broken=" + text_of(broke0) + ":" + text_of(broke1) + ":" + text_of(before_missing) + ":" + text_of(before_wrong);
+        ^ 6;
+    }
+    ? (rebuilt != 3) {
+        ! "rebuilt=" + text_of(rebuilt);
+        ^ 7;
+    }
+    ? (after0 != 10 or after1 != 20 or after2 != 30 or after3 != 30) {
+        ! "after=" + text_of(after0) + ":" + text_of(after1) + ":" + text_of(after2) + ":" + text_of(after3);
+        ^ 8;
+    }
+    ? (catalog0 != catalog1 or pages0 != pages1) {
+        ! "inspect=" + catalog0 + ":" + catalog1 + ":" + pages0 + ":" + pages1;
+        ^ 9;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 10;
+    }
+
+    ! "ashdb repair smoke ok";
+    ^ 0;
+}

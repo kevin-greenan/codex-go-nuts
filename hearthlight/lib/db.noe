@@ -1,0 +1,686 @@
+& "../../ashdb/lib/db.noe";
+
+@hearthlight_db_page_size() -> i64 {
+    ^ 512;
+}
+
+@hearthlight_today_key() -> i64 {
+    ^ 20260319;
+}
+
+@hearthlight_week_start_key() -> i64 {
+    ^ 20260316;
+}
+
+@hearthlight_day_key(offset: i64) -> i64 {
+    ^ hearthlight_week_start_key() + offset;
+}
+
+@hearthlight_day_label(offset: i64) -> text {
+    ? (offset == 0) {
+        ^ "Monday";
+    }
+    ? (offset == 1) {
+        ^ "Tuesday";
+    }
+    ? (offset == 2) {
+        ^ "Wednesday";
+    }
+    ? (offset == 3) {
+        ^ "Thursday";
+    }
+    ? (offset == 4) {
+        ^ "Friday";
+    }
+    ? (offset == 5) {
+        ^ "Saturday";
+    }
+    ^ "Sunday";
+}
+
+@hearthlight_households_table() -> text {
+    ^ "households";
+}
+
+@hearthlight_members_table() -> text {
+    ^ "members";
+}
+
+@hearthlight_meals_table() -> text {
+    ^ "meals";
+}
+
+@hearthlight_recipes_table() -> text {
+    ^ "recipes";
+}
+
+@hearthlight_groceries_table() -> text {
+    ^ "groceries";
+}
+
+@hearthlight_pantry_table() -> text {
+    ^ "pantry";
+}
+
+@hearthlight_chores_table() -> text {
+    ^ "chores";
+}
+
+@hearthlight_chore_history_table() -> text {
+    ^ "chore_history";
+}
+
+@hearthlight_household_row(name: text, shopping_day: text, planning_day: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "shopping_day", shopping_day);
+    payload = row_append(payload, "planning_day", planning_day);
+    ^ payload;
+}
+
+@hearthlight_member_row(name: text, role: text, color: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "role", role);
+    payload = row_append(payload, "color", color);
+    ^ payload;
+}
+
+@hearthlight_meal_row(title: text, notes: text, day_label: text) -> text {
+    ^ hearthlight_meal_row_with_ingredients(title, notes, day_label, "");
+}
+
+@hearthlight_meal_row_with_ingredients(title: text, notes: text, day_label: text, ingredients: text) -> text {
+    payload := "";
+    payload = row_append(payload, "title", title);
+    payload = row_append(payload, "notes", notes);
+    payload = row_append(payload, "day_label", day_label);
+    payload = row_append(payload, "ingredients", ingredients);
+    ^ payload;
+}
+
+@hearthlight_grocery_row(name: text, section: text, purchased: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "section", section);
+    payload = row_append(payload, "purchased", purchased);
+    ^ payload;
+}
+
+@hearthlight_recipe_row(name: text, notes: text, ingredients: text, tempo: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "notes", notes);
+    payload = row_append(payload, "ingredients", ingredients);
+    payload = row_append(payload, "tempo", tempo);
+    ^ payload;
+}
+
+@hearthlight_pantry_row(name: text, section: text, quantity: text, threshold: text, unit: text, staple: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "section", section);
+    payload = row_append(payload, "quantity", quantity);
+    payload = row_append(payload, "threshold", threshold);
+    payload = row_append(payload, "unit", unit);
+    payload = row_append(payload, "staple", staple);
+    ^ payload;
+}
+
+@hearthlight_chore_row(name: text, owner: text, due_label: text, status: text) -> text {
+    ^ hearthlight_chore_row_with_schedule(name, owner, due_label, status, "weekly", owner, "", "0");
+}
+
+@hearthlight_chore_row_with_schedule(name: text, owner: text, due_label: text, status: text, recurrence: text, owner_cycle: text, last_done: text, completed_count: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "owner", owner);
+    payload = row_append(payload, "due_label", due_label);
+    payload = row_append(payload, "status", status);
+    payload = row_append(payload, "recurrence", recurrence);
+    payload = row_append(payload, "owner_cycle", owner_cycle);
+    payload = row_append(payload, "last_done", last_done);
+    payload = row_append(payload, "completed_count", completed_count);
+    ^ payload;
+}
+
+@hearthlight_chore_history_row(name: text, owner: text, completed_label: text, next_due_label: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "owner", owner);
+    payload = row_append(payload, "completed_label", completed_label);
+    payload = row_append(payload, "next_due_label", next_due_label);
+    ^ payload;
+}
+
+@hearthlight_insert_if_missing(db: DB, table_name: text, key: i64, payload: text) -> bool {
+    ? (count(db_get(db, table_name, key)) > 0) {
+        ^ true;
+    }
+    ^ db_insert_row(db, table_name, key, payload) >= 0;
+}
+
+@hearthlight_ensure_schema(db: DB) -> bool {
+    households_root := db_table_root(db, hearthlight_households_table());
+    ? (households_root < 0 and db_define_table(db, hearthlight_households_table(), 96, "name:text,shopping_day:text,planning_day:text") < 0) {
+        ^ false;
+    }
+
+    members_root := db_table_root(db, hearthlight_members_table());
+    ? (members_root < 0 and db_define_table(db, hearthlight_members_table(), 96, "name:text,role:text,color:text") < 0) {
+        ^ false;
+    }
+
+    meals_root := db_table_root(db, hearthlight_meals_table());
+    ? (meals_root < 0 and db_define_table(db, hearthlight_meals_table(), 128, "title:text,notes:text?,day_label:text") < 0) {
+        ^ false;
+    }
+    meal_fields := db_table_fields(db, hearthlight_meals_table());
+    ? (count(meal_fields) > 0 and db_schema_field_spec(meal_fields, "ingredients") == "") {
+        migrated := db_alter_table_add_field(db, hearthlight_meals_table(), "ingredients:text?");
+        ? (migrated < 0 and migrated != -3) {
+            ^ false;
+        }
+    }
+
+    recipes_root := db_table_root(db, hearthlight_recipes_table());
+    ? (recipes_root < 0 and db_define_table(db, hearthlight_recipes_table(), 224, "name:text,notes:text?,ingredients:text,tempo:text=steady") < 0) {
+        ^ false;
+    }
+
+    groceries_root := db_table_root(db, hearthlight_groceries_table());
+    ? (groceries_root < 0 and db_define_table(db, hearthlight_groceries_table(), 128, "name:text,section:text,purchased:bool=false") < 0) {
+        ^ false;
+    }
+
+    pantry_root := db_table_root(db, hearthlight_pantry_table());
+    ? (pantry_root < 0 and db_define_table(db, hearthlight_pantry_table(), 144, "name:text,section:text,quantity:i64,threshold:i64=1,unit:text=items,staple:bool=true") < 0) {
+        ^ false;
+    }
+
+    chores_root := db_table_root(db, hearthlight_chores_table());
+    ? (chores_root < 0 and db_define_table(db, hearthlight_chores_table(), 224, "name:text,owner:text,due_label:text,status:text=todo") < 0) {
+        ^ false;
+    }
+    chore_fields := db_table_fields(db, hearthlight_chores_table());
+    ? (count(chore_fields) > 0 and db_schema_field_spec(chore_fields, "recurrence") == "") {
+        migrated_recurrence := db_alter_table_add_field(db, hearthlight_chores_table(), "recurrence:text=weekly");
+        ? (migrated_recurrence < 0 and migrated_recurrence != -3) {
+            ^ false;
+        }
+    }
+    chore_fields = db_table_fields(db, hearthlight_chores_table());
+    ? (count(chore_fields) > 0 and db_schema_field_spec(chore_fields, "owner_cycle") == "") {
+        migrated_owner_cycle := db_alter_table_add_field(db, hearthlight_chores_table(), "owner_cycle:text?");
+        ? (migrated_owner_cycle < 0 and migrated_owner_cycle != -3) {
+            ^ false;
+        }
+    }
+    chore_fields = db_table_fields(db, hearthlight_chores_table());
+    ? (count(chore_fields) > 0 and db_schema_field_spec(chore_fields, "last_done") == "") {
+        migrated_last_done := db_alter_table_add_field(db, hearthlight_chores_table(), "last_done:text?");
+        ? (migrated_last_done < 0 and migrated_last_done != -3) {
+            ^ false;
+        }
+    }
+    chore_fields = db_table_fields(db, hearthlight_chores_table());
+    ? (count(chore_fields) > 0 and db_schema_field_spec(chore_fields, "completed_count") == "") {
+        migrated_completed_count := db_alter_table_add_field(db, hearthlight_chores_table(), "completed_count:i64=0");
+        ? (migrated_completed_count < 0 and migrated_completed_count != -3) {
+            ^ false;
+        }
+    }
+
+    chore_history_root := db_table_root(db, hearthlight_chore_history_table());
+    ? (chore_history_root < 0 and db_define_table(db, hearthlight_chore_history_table(), 160, "name:text,owner:text,completed_label:text,next_due_label:text") < 0) {
+        ^ false;
+    }
+
+    ^ true;
+}
+
+@hearthlight_seed_demo(db: DB) -> bool {
+    household_ok := hearthlight_insert_if_missing(db, hearthlight_households_table(), 1, hearthlight_household_row("Maple House", "Saturday", "Sunday"));
+    member0_ok := hearthlight_insert_if_missing(db, hearthlight_members_table(), 1, hearthlight_member_row("Avery", "Meal planner", "terracotta"));
+    member1_ok := hearthlight_insert_if_missing(db, hearthlight_members_table(), 2, hearthlight_member_row("Jordan", "Grocery runner", "sage"));
+    meal0_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(0), hearthlight_meal_row_with_ingredients("Chickpea Bowls", "Use the last of the tahini and cucumbers.", hearthlight_day_label(0), "Chickpeas,Cucumbers,Tahini"));
+    meal1_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(1), hearthlight_meal_row_with_ingredients("Soup Night", "Double batch for leftovers.", hearthlight_day_label(1), "Stock,Carrots,Bread"));
+    meal2_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(2), hearthlight_meal_row_with_ingredients("Breakfast Tacos", "Easy pantry dinner for the midweek crunch.", hearthlight_day_label(2), "Eggs,Tortillas,Hot Sauce"));
+    meal3_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(3), hearthlight_meal_row_with_ingredients("Lemon Pasta", "Fast enough for a busy Thursday.", "Tonight", "Lemons,Parmesan,Pasta"));
+    meal4_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(4), hearthlight_meal_row_with_ingredients("Leftover Night", "Clear the fridge before shopping day.", hearthlight_day_label(4), ""));
+    meal5_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(5), hearthlight_meal_row_with_ingredients("Market Salad", "Shopping day dinner with crusty bread.", hearthlight_day_label(5), "Greens,Radishes,Bread"));
+    meal6_ok := hearthlight_insert_if_missing(db, hearthlight_meals_table(), hearthlight_day_key(6), hearthlight_meal_row_with_ingredients("Roast Chicken", "Anchor meal for the next week.", hearthlight_day_label(6), "Chicken,Potatoes,Rosemary"));
+    recipe0_ok := hearthlight_insert_if_missing(db, hearthlight_recipes_table(), 1, hearthlight_recipe_row("Chickpea Bowls", "Use the last of the tahini and cucumbers.", "Chickpeas,Cucumbers,Tahini", "quick"));
+    recipe1_ok := hearthlight_insert_if_missing(db, hearthlight_recipes_table(), 2, hearthlight_recipe_row("Lemon Pasta", "Fast enough for a busy Thursday.", "Lemons,Parmesan,Pasta", "quick"));
+    recipe2_ok := hearthlight_insert_if_missing(db, hearthlight_recipes_table(), 3, hearthlight_recipe_row("Roast Chicken", "Anchor meal for the next week.", "Chicken,Potatoes,Rosemary", "slow"));
+    recipe3_ok := hearthlight_insert_if_missing(db, hearthlight_recipes_table(), 4, hearthlight_recipe_row("Herb Omelet", "Great when the pantry is thin but eggs are around.", "Eggs,Parsley,Milk", "quick"));
+    grocery0_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 1, hearthlight_grocery_row("Milk", "Dairy", "false"));
+    grocery1_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 2, hearthlight_grocery_row("Parsley", "Produce", "false"));
+    grocery2_ok := hearthlight_insert_if_missing(db, hearthlight_groceries_table(), 3, hearthlight_grocery_row("Olive Oil", "Pantry", "false"));
+    pantry0_ok := hearthlight_insert_if_missing(db, hearthlight_pantry_table(), 1, hearthlight_pantry_row("Milk", "Dairy", "1", "2", "cartons", "true"));
+    pantry1_ok := hearthlight_insert_if_missing(db, hearthlight_pantry_table(), 2, hearthlight_pantry_row("Oats", "Pantry", "3", "1", "jars", "true"));
+    pantry2_ok := hearthlight_insert_if_missing(db, hearthlight_pantry_table(), 3, hearthlight_pantry_row("Olive Oil", "Pantry", "1", "1", "bottles", "true"));
+    pantry3_ok := hearthlight_insert_if_missing(db, hearthlight_pantry_table(), 4, hearthlight_pantry_row("Parsley", "Produce", "0", "1", "bunches", "false"));
+    chore0_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 1, hearthlight_chore_row_with_schedule("Counters", "Jordan", "Today", "todo", "daily", "Jordan,Avery", "", "0"));
+    chore1_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 2, hearthlight_chore_row_with_schedule("Laundry", "Avery", "This Weekend", "todo", "weekly", "Avery,Jordan", "", "0"));
+    chore2_ok := hearthlight_insert_if_missing(db, hearthlight_chores_table(), 3, hearthlight_chore_row_with_schedule("Water herbs", "Jordan", "Tonight", "todo", "daily", "Jordan,Avery", "", "0"));
+    ^ household_ok and member0_ok and member1_ok and meal0_ok and meal1_ok and meal2_ok and meal3_ok and meal4_ok and meal5_ok and meal6_ok and recipe0_ok and recipe1_ok and recipe2_ok and recipe3_ok and grocery0_ok and grocery1_ok and grocery2_ok and pantry0_ok and pantry1_ok and pantry2_ok and pantry3_ok and chore0_ok and chore1_ok and chore2_ok;
+}
+
+@hearthlight_bootstrap(db: DB) -> bool {
+    began := db_begin(db);
+    ? (not began) {
+        ^ false;
+    }
+
+    schema_ok := hearthlight_ensure_schema(db);
+    ? (not schema_ok) {
+        rolled := db_rollback(db);
+        ^ false;
+    }
+
+    seed_ok := hearthlight_seed_demo(db);
+    ? (not seed_ok) {
+        rolled := db_rollback(db);
+        ^ false;
+    }
+
+    ^ db_commit(db);
+}
+
+@hearthlight_open(path: text) -> DB {
+    db := db_open(path, hearthlight_db_page_size());
+    bootstrapped := hearthlight_bootstrap(db);
+    ^ db;
+}
+
+@hearthlight_next_key(db: DB, table_name: text) -> i64 {
+    key := db_first_key(db, table_name);
+    max_key := 0;
+    ~ (key >= 0) {
+        max_key = key;
+        key = db_next_key(db, table_name, key);
+    }
+    ^ max_key + 1;
+}
+
+@hearthlight_add_recipe(db: DB, name: text, notes: text, ingredients: text, tempo: text) -> i64 {
+    ? (hearthlight_find_recipe_key_by_name(db, name) >= 0) {
+        ^ -2;
+    }
+    payload := hearthlight_recipe_row(name, notes, ingredients, tempo);
+    ^ db_insert_row(db, hearthlight_recipes_table(), hearthlight_next_key(db, hearthlight_recipes_table()), payload);
+}
+
+@hearthlight_add_member(db: DB, name: text, role: text, color: text) -> i64 {
+    payload := hearthlight_member_row(name, role, color);
+    ^ db_insert_row(db, hearthlight_members_table(), hearthlight_next_key(db, hearthlight_members_table()), payload);
+}
+
+@hearthlight_update_household(db: DB, name: text, shopping_day: text, planning_day: text) -> i64 {
+    patch := "";
+    ? (count(name) > 0) {
+        patch = row_append(patch, "name", name);
+    }
+    ? (count(shopping_day) > 0) {
+        patch = row_append(patch, "shopping_day", shopping_day);
+    }
+    ? (count(planning_day) > 0) {
+        patch = row_append(patch, "planning_day", planning_day);
+    }
+    ^ db_patch_row(db, hearthlight_households_table(), 1, patch);
+}
+
+@hearthlight_add_grocery(db: DB, name: text, section: text) -> i64 {
+    payload := hearthlight_grocery_row(name, section, "false");
+    ^ db_insert_row(db, hearthlight_groceries_table(), hearthlight_next_key(db, hearthlight_groceries_table()), payload);
+}
+
+@hearthlight_put_meal(db: DB, key: i64, title: text, notes: text, day_label: text) -> i64 {
+    payload := hearthlight_meal_row_with_ingredients(title, notes, day_label, "");
+    ^ db_put_row(db, hearthlight_meals_table(), key, payload);
+}
+
+@hearthlight_put_meal_with_ingredients(db: DB, key: i64, title: text, notes: text, day_label: text, ingredients: text) -> i64 {
+    payload := hearthlight_meal_row_with_ingredients(title, notes, day_label, ingredients);
+    ^ db_put_row(db, hearthlight_meals_table(), key, payload);
+}
+
+@hearthlight_apply_recipe_to_day(db: DB, recipe_key: i64, day_key: i64) -> i64 {
+    recipe := db_get(db, hearthlight_recipes_table(), recipe_key);
+    ? (count(recipe) == 0) {
+        ^ -1;
+    }
+    ^ hearthlight_put_meal_with_ingredients(db, day_key, row_get(recipe, "name"), row_get(recipe, "notes"), hearthlight_meal_label_for_key(day_key), row_get(recipe, "ingredients"));
+}
+
+@hearthlight_find_pantry_key_by_name(db: DB, name: text) -> i64 {
+    key := db_first_key(db, hearthlight_pantry_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_pantry_table(), key);
+        ? (row_get(row0, "name") == name) {
+            ^ key;
+        }
+        key = db_next_key(db, hearthlight_pantry_table(), key);
+    }
+    ^ -1;
+}
+
+@hearthlight_find_open_grocery_key_by_name(db: DB, name: text) -> i64 {
+    key := db_first_key(db, hearthlight_groceries_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_groceries_table(), key);
+        ? (row_get(row0, "name") == name and row_get(row0, "purchased") != "true") {
+            ^ key;
+        }
+        key = db_next_key(db, hearthlight_groceries_table(), key);
+    }
+    ^ -1;
+}
+
+@hearthlight_find_recipe_key_by_name(db: DB, name: text) -> i64 {
+    key := db_first_key(db, hearthlight_recipes_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_recipes_table(), key);
+        ? (row_get(row0, "name") == name) {
+            ^ key;
+        }
+        key = db_next_key(db, hearthlight_recipes_table(), key);
+    }
+    ^ -1;
+}
+
+@hearthlight_item_at(items: text, index: i64, separator: text) -> text {
+    remaining := items;
+    idx := 0;
+    ~ (idx < index) {
+        cut := find(remaining, separator);
+        ? (cut < 0) {
+            ^ "";
+        }
+        next_start := cut + count(separator);
+        remaining = slice(remaining, next_start, count(remaining) - next_start);
+        idx = idx + 1;
+    }
+    cut := find(remaining, separator);
+    ? (cut < 0) {
+        ^ remaining;
+    }
+    ^ slice(remaining, 0, cut);
+}
+
+@hearthlight_trim_space(value: text) -> text {
+    start := 0;
+    end0 := count(value);
+    ~ (start < end0 and slice(value, start, 1) == " ") {
+        start = start + 1;
+    }
+    ~ (end0 > start and slice(value, end0 - 1, 1) == " ") {
+        end0 = end0 - 1;
+    }
+    ^ slice(value, start, end0 - start);
+}
+
+@hearthlight_guess_section(name: text) -> text {
+    lowerish := name;
+    ? (find(lowerish, "Milk") >= 0 or find(lowerish, "Parmesan") >= 0 or find(lowerish, "Egg") >= 0 or find(lowerish, "Mozzarella") >= 0) {
+        ^ "Dairy";
+    }
+    ? (find(lowerish, "Lemon") >= 0 or find(lowerish, "Cucumber") >= 0 or find(lowerish, "Greens") >= 0 or find(lowerish, "Radish") >= 0 or find(lowerish, "Rosemary") >= 0 or find(lowerish, "Carrot") >= 0 or find(lowerish, "Basil") >= 0 or find(lowerish, "Tomato") >= 0) {
+        ^ "Produce";
+    }
+    ? (find(lowerish, "Chicken") >= 0) {
+        ^ "Butcher";
+    }
+    ^ "Pantry";
+}
+
+@hearthlight_clean_optional(value: text) -> text {
+    ? (value == "null") {
+        ^ "";
+    }
+    ^ value;
+}
+
+@hearthlight_due_from_recurrence(recurrence: text) -> text {
+    ? (recurrence == "daily") {
+        ^ "Tomorrow";
+    }
+    ? (recurrence == "weekly") {
+        ^ "Next Week";
+    }
+    ? (recurrence == "weekend") {
+        ^ "This Weekend";
+    }
+    ? (recurrence == "once") {
+        ^ "Done";
+    }
+    ^ "Soon";
+}
+
+@hearthlight_meal_label_for_key(day_key: i64) -> text {
+    offset := day_key - hearthlight_week_start_key();
+    ? (offset >= 0 and offset < 7) {
+        ^ hearthlight_day_label(offset);
+    }
+    ^ "Planned";
+}
+
+@hearthlight_count_named_ingredients(items: text) -> i64 {
+    total := 0;
+    idx := 0;
+    ~ (idx <= count(items)) {
+        item := hearthlight_trim_space(hearthlight_item_at(items, idx, ","));
+        ? (count(item) == 0) {
+            ^ total;
+        }
+        total = total + 1;
+        idx = idx + 1;
+    }
+    ^ total;
+}
+
+@hearthlight_pantry_has_item(db: DB, name: text) -> bool {
+    pantry_key := hearthlight_find_pantry_key_by_name(db, name);
+    ? (pantry_key < 0) {
+        ^ false;
+    }
+    pantry := db_get(db, hearthlight_pantry_table(), pantry_key);
+    ^ i64_of(row_get(pantry, "quantity")) > 0;
+}
+
+@hearthlight_recipe_match_count(db: DB, ingredients: text) -> i64 {
+    matched := 0;
+    idx := 0;
+    ~ (idx <= count(ingredients)) {
+        item := hearthlight_trim_space(hearthlight_item_at(ingredients, idx, ","));
+        ? (count(item) == 0) {
+            ^ matched;
+        }
+        ? (hearthlight_pantry_has_item(db, item)) {
+            matched = matched + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ matched;
+}
+
+@hearthlight_cycle_next(cycle: text, current: text) -> text {
+    cleaned := hearthlight_clean_optional(cycle);
+    ? (count(cleaned) == 0) {
+        ^ current;
+    }
+
+    idx := 0;
+    first_item := hearthlight_trim_space(hearthlight_item_at(cleaned, 0, ","));
+    ~ (idx <= count(cleaned)) {
+        item := hearthlight_trim_space(hearthlight_item_at(cleaned, idx, ","));
+        ? (count(item) == 0) {
+            ^ first_item;
+        }
+        ? (item == current) {
+            next_item := hearthlight_trim_space(hearthlight_item_at(cleaned, idx + 1, ","));
+            ? (count(next_item) == 0) {
+                ^ first_item;
+            }
+            ^ next_item;
+        }
+        idx = idx + 1;
+    }
+    ^ first_item;
+}
+
+@hearthlight_pantry_low_stock_count(db: DB) -> i64 {
+    total := 0;
+    key := db_first_key(db, hearthlight_pantry_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_pantry_table(), key);
+        ? (row_get(row0, "staple") == "true" and i64_of(row_get(row0, "quantity")) <= i64_of(row_get(row0, "threshold"))) {
+            total = total + 1;
+        }
+        key = db_next_key(db, hearthlight_pantry_table(), key);
+    }
+    ^ total;
+}
+
+@hearthlight_add_low_stock_staples_to_groceries(db: DB) -> i64 {
+    added := 0;
+    key := db_first_key(db, hearthlight_pantry_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_pantry_table(), key);
+        ? (row_get(row0, "staple") == "true" and i64_of(row_get(row0, "quantity")) <= i64_of(row_get(row0, "threshold"))) {
+            name := row_get(row0, "name");
+            ? (hearthlight_find_open_grocery_key_by_name(db, name) < 0) {
+                inserted := hearthlight_add_grocery(db, name, row_get(row0, "section"));
+                ? (inserted < 0) {
+                    ^ inserted;
+                }
+                added = added + 1;
+            }
+        }
+        key = db_next_key(db, hearthlight_pantry_table(), key);
+    }
+    ^ added;
+}
+
+@hearthlight_open_chore_count(db: DB) -> i64 {
+    total := 0;
+    key := db_first_key(db, hearthlight_chores_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_chores_table(), key);
+        ? (row_get(row0, "status") != "done") {
+            total = total + 1;
+        }
+        key = db_next_key(db, hearthlight_chores_table(), key);
+    }
+    ^ total;
+}
+
+@hearthlight_due_today_count(db: DB) -> i64 {
+    total := 0;
+    key := db_first_key(db, hearthlight_chores_table());
+    ~ (key >= 0) {
+        row0 := db_get(db, hearthlight_chores_table(), key);
+        due_label := row_get(row0, "due_label");
+        ? (row_get(row0, "status") != "done" and (due_label == "Today" or due_label == "Tonight")) {
+            total = total + 1;
+        }
+        key = db_next_key(db, hearthlight_chores_table(), key);
+    }
+    ^ total;
+}
+
+@hearthlight_mark_grocery_purchased(db: DB, grocery_key: i64) -> i64 {
+    grocery := db_get(db, hearthlight_groceries_table(), grocery_key);
+    ? (count(grocery) == 0) {
+        ^ -1;
+    }
+
+    purchased_patch := "";
+    purchased_patch = row_append(purchased_patch, "purchased", "true");
+    grocery_ok := db_patch_row(db, hearthlight_groceries_table(), grocery_key, purchased_patch);
+    ? (grocery_ok < 0) {
+        ^ grocery_ok;
+    }
+
+    pantry_key := hearthlight_find_pantry_key_by_name(db, row_get(grocery, "name"));
+    ? (pantry_key >= 0) {
+        pantry := db_get(db, hearthlight_pantry_table(), pantry_key);
+        quantity := i64_of(row_get(pantry, "quantity")) + 1;
+        patch := "";
+        patch = row_append(patch, "quantity", text_of(quantity));
+        ^ db_patch_row(db, hearthlight_pantry_table(), pantry_key, patch);
+    }
+
+    pantry_payload := hearthlight_pantry_row(row_get(grocery, "name"), row_get(grocery, "section"), "1", "1", "items", "false");
+    ^ db_insert_row(db, hearthlight_pantry_table(), hearthlight_next_key(db, hearthlight_pantry_table()), pantry_payload);
+}
+
+@hearthlight_add_meal_ingredients_to_groceries(db: DB, meal_key: i64) -> i64 {
+    meal := db_get(db, hearthlight_meals_table(), meal_key);
+    ? (count(meal) == 0) {
+        ^ -1;
+    }
+    ingredients := row_get(meal, "ingredients");
+    ? (count(ingredients) == 0) {
+        ^ 0;
+    }
+
+    added := 0;
+    idx := 0;
+    ~ (idx <= count(ingredients)) {
+        item := hearthlight_trim_space(hearthlight_item_at(ingredients, idx, ","));
+        ? (count(item) == 0) {
+            ^ added;
+        }
+        ? (hearthlight_find_open_grocery_key_by_name(db, item) < 0) {
+            inserted := hearthlight_add_grocery(db, item, hearthlight_guess_section(item));
+            ? (inserted < 0) {
+                ^ inserted;
+            }
+            added = added + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ added;
+}
+
+@hearthlight_add_chore(db: DB, name: text, owner: text, due_label: text, recurrence: text, owner_cycle: text) -> i64 {
+    payload := hearthlight_chore_row_with_schedule(name, owner, due_label, "todo", recurrence, owner_cycle, "", "0");
+    ^ db_insert_row(db, hearthlight_chores_table(), hearthlight_next_key(db, hearthlight_chores_table()), payload);
+}
+
+@hearthlight_complete_chore(db: DB, key: i64) -> i64 {
+    chore := db_get(db, hearthlight_chores_table(), key);
+    ? (count(chore) == 0) {
+        ^ -1;
+    }
+
+    recurrence := hearthlight_clean_optional(row_get(chore, "recurrence"));
+    ? (count(recurrence) == 0) {
+        recurrence = "weekly";
+    }
+    owner := row_get(chore, "owner");
+    next_due := hearthlight_due_from_recurrence(recurrence);
+    next_owner := hearthlight_cycle_next(row_get(chore, "owner_cycle"), owner);
+    completed_count := i64_of(hearthlight_clean_optional(row_get(chore, "completed_count"))) + 1;
+    next_status := "todo";
+    ? (recurrence == "once") {
+        next_status = "done";
+    }
+
+    history_payload := hearthlight_chore_history_row(row_get(chore, "name"), owner, "Today", next_due);
+    history_key := hearthlight_next_key(db, hearthlight_chore_history_table());
+    history_ok := db_insert_row(db, hearthlight_chore_history_table(), history_key, history_payload);
+    ? (history_ok < 0) {
+        ^ history_ok;
+    }
+
+    patch := "";
+    patch = row_append(patch, "status", next_status);
+    patch = row_append(patch, "last_done", "Today");
+    patch = row_append(patch, "completed_count", text_of(completed_count));
+    patch = row_append(patch, "due_label", next_due);
+    patch = row_append(patch, "owner", next_owner);
+    ^ db_patch_row(db, hearthlight_chores_table(), key, patch);
+}

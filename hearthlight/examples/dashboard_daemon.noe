@@ -1,0 +1,31 @@
+& "../lib/app.noe";
+
+@hearthlight_request_reply(db_path: text, raw: text) -> text {
+    db := hearthlight_open(db_path);
+    request := kiln_http_parse_request(raw);
+    dispatch := kiln_dispatch(hearthlight_routes(), request);
+    reply := hearthlight_route_reply(db, dispatch, request);
+    closed := db_close(db);
+    ^ kiln_reply_response(reply);
+}
+
+@main() -> i64 {
+    ? (arg_count() < 3) {
+        ! "usage: dashboard_daemon <db-path> <port>";
+        ^ 1;
+    }
+
+    db_path := arg(1);
+    port := i64_of(arg(2));
+    listener := listener_open(port);
+
+    ~ (true) {
+        conn := listener_accept(listener);
+        raw := socket_recv(conn, 8192);
+        response := hearthlight_request_reply(db_path, raw);
+        wrote := socket_send(conn, response);
+        closed_conn := socket_close(conn);
+    }
+
+    ^ 0;
+}

@@ -1,0 +1,96 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: migrate_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    users_root := db_define_table(db, "users", 96, "name:text");
+
+    row10 := "";
+    row10 = row_append(row10, "name", "alice");
+
+    row20 := "";
+    row20 = row_append(row20, "name", "bob");
+
+    ins0 := db_insert_row(db, "users", 10, row10);
+    ins1 := db_insert_row(db, "users", 20, row20);
+
+    mig0 := db_alter_table_add_field(db, "users", "role:text=member");
+    role0 := db_row_get(db, "users", 10, "role");
+    role1 := db_row_get(db, "users", 20, "role");
+
+    mig1 := db_alter_table_add_field(db, "users", "note:text?");
+    note0 := db_row_get(db, "users", 10, "note");
+
+    mig2 := db_alter_table_add_field(db, "users", "email_key:i64!?");
+    idx0 := db_index_get(db, "users", "email_key", 1001);
+    role_schema := db_table_fields(db, "users");
+
+    row30 := "";
+    row30 = row_append(row30, "name", "cara");
+    ins2 := db_insert_row(db, "users", 30, row30);
+
+    upd30 := "";
+    upd30 = row_append(upd30, "name", "cara");
+    upd30 = row_append(upd30, "role", "admin");
+    upd30 = row_append(upd30, "note", "hello");
+    upd30 = row_append(upd30, "email_key", "1002");
+    upd0 := db_update_row(db, "users", 30, upd30);
+    idx1 := db_index_get(db, "users", "email_key", 1002);
+    idx_dup := db_index_get(db, "users", "email_key", 1001);
+
+    dup_row := "";
+    dup_row = row_append(dup_row, "name", "drew");
+    dup_row = row_append(dup_row, "role", "member");
+    dup_row = row_append(dup_row, "note", "x");
+    dup_row = row_append(dup_row, "email_key", "1002");
+    ins_dup := db_insert_row(db, "users", 40, dup_row);
+
+    synced0 := db_sync(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    role2 := db_row_get(reopened, "users", 10, "role");
+    note1 := db_row_get(reopened, "users", 20, "note");
+    idx2 := db_index_get(reopened, "users", "email_key", 1002);
+    synced1 := db_sync(reopened);
+    closed1 := db_close(reopened);
+
+    ? (users_root < 0 or ins0 < 0 or ins1 < 0) {
+        ! "base=" + text_of(users_root) + ":" + text_of(ins0) + ":" + text_of(ins1);
+        ^ 2;
+    }
+    ? (mig0 != 2 or role0 != "member" or role1 != "member") {
+        ! "mig0=" + text_of(mig0) + ":" + role0 + ":" + role1;
+        ^ 3;
+    }
+    ? (mig1 != 2 or note0 != "null") {
+        ! "mig1=" + text_of(mig1) + ":" + note0;
+        ^ 4;
+    }
+    ? (mig2 != 2 or idx0 != -1 or find(role_schema, "email_key:i64!?") < 0) {
+        ! "mig2=" + text_of(mig2) + ":" + text_of(idx0) + ":" + role_schema;
+        ^ 5;
+    }
+    ? (ins2 < 0 or upd0 < 0 or idx1 != 30 or idx_dup != -1) {
+        ! "post=" + text_of(ins2) + ":" + text_of(upd0) + ":" + text_of(idx1) + ":" + text_of(idx_dup);
+        ^ 6;
+    }
+    ? (ins_dup != -4) {
+        ! "dup=" + text_of(ins_dup);
+        ^ 7;
+    }
+    ? (role2 != "member" or note1 != "null" or idx2 != 30) {
+        ! "reopen=" + role2 + ":" + note1 + ":" + text_of(idx2);
+        ^ 8;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 9;
+    }
+
+    ! "ashdb migrate smoke ok";
+    ^ 0;
+}

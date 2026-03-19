@@ -1,0 +1,51 @@
+& "../lib/app.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: grocery_generation_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := hearthlight_open(arg(1));
+
+    save_request := kiln_http_parse_request("POST /planner/meals HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nday_key=20260317&title=Pizza+Night&notes=Use+the+cast+iron&ingredients=Mozzarella%2CBasil%2CTomatoes");
+    save_dispatch := kiln_dispatch(hearthlight_routes(), save_request);
+    save_reply := hearthlight_route_reply(db, save_dispatch, save_request);
+    save_response := kiln_reply_response(save_reply);
+
+    generate_request := kiln_http_parse_request("POST /planner/meals/20260317/groceries HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n");
+    generate_dispatch := kiln_dispatch(hearthlight_routes(), generate_request);
+    generate_reply := hearthlight_route_reply(db, generate_dispatch, generate_request);
+    generate_response := kiln_reply_response(generate_reply);
+
+    mozzarella := db_scan_where_field_equals_rows_text(db, hearthlight_groceries_table(), "name", "Mozzarella", "|");
+    basil := db_scan_where_field_equals_rows_text(db, hearthlight_groceries_table(), "name", "Basil", "|");
+    tomatoes := db_scan_where_field_equals_rows_text(db, hearthlight_groceries_table(), "name", "Tomatoes", "|");
+    meal := db_get_result(db, hearthlight_meals_table(), 20260317);
+    validate := db_validate_report(db);
+    closed := db_close(db);
+
+    ? (find(save_response, "Saved Pizza Night to the weekly plan.") < 0) {
+        ! "save response mismatch";
+        ^ 2;
+    }
+    ? (find(generate_response, "HTTP/1.1 302") < 0 or find(generate_response, "grocery items from the meal plan.") < 0) {
+        ! "generate response mismatch";
+        ^ 3;
+    }
+    ? (row_get(meal, "ingredients") != "Mozzarella,Basil,Tomatoes") {
+        ! "meal ingredients mismatch=" + meal;
+        ^ 4;
+    }
+    ? (find(mozzarella, "section=Dairy;") < 0 or find(basil, "section=Produce;") < 0 or find(tomatoes, "section=Produce;") < 0) {
+        ! "grocery rows mismatch=" + mozzarella + ":" + basil + ":" + tomatoes;
+        ^ 5;
+    }
+    ? (validate != "ok" or not closed) {
+        ! "validate=" + validate;
+        ^ 6;
+    }
+
+    ! "hearthlight grocery generation smoke ok";
+    ^ 0;
+}

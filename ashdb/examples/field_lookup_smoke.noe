@@ -1,0 +1,73 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: field_lookup_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 256);
+    defined := db_define_table(db, "users", 96, "name:text,email_key:i64!,role:text");
+
+    alice := "";
+    alice = row_append(alice, "name", "alice");
+    alice = row_append(alice, "email_key", "1001");
+    alice = row_append(alice, "role", "cook");
+
+    bob := "";
+    bob = row_append(bob, "name", "bob");
+    bob = row_append(bob, "email_key", "1002");
+    bob = row_append(bob, "role", "shop");
+
+    cara := "";
+    cara = row_append(cara, "name", "cara");
+    cara = row_append(cara, "email_key", "1003");
+    cara = row_append(cara, "role", "cook");
+
+    inserted0 := db_insert_row(db, "users", 10, alice);
+    inserted1 := db_insert_row(db, "users", 20, bob);
+    inserted2 := db_insert_row(db, "users", 30, cara);
+
+    match0 := db_scan_where_field_equals(db, "users", "email_key", "1002", "|");
+    rowset0 := db_scan_where_field_equals_rows_text(db, "users", "email_key", "1003", "|");
+    cooks0 := db_scan_where_field_equals(db, "users", "role", "cook", "|");
+
+    closed0 := db_close(db);
+    reopened := db_open(arg(1), 256);
+    match1 := db_scan_where_field_equals(reopened, "users", "email_key", "1001", "|");
+    rowset1 := db_scan_where_field_equals_rows_text(reopened, "users", "email_key", "1002", "|");
+    cooks1 := db_scan_where_field_equals(reopened, "users", "role", "cook", "|");
+    closed1 := db_close(reopened);
+
+    ? (defined <= 0) {
+        ! "defined=" + text_of(defined);
+        ^ 2;
+    }
+    ? (inserted0 < 0 or inserted1 < 0 or inserted2 < 0) {
+        ! "inserted=" + text_of(inserted0) + ":" + text_of(inserted1) + ":" + text_of(inserted2);
+        ^ 3;
+    }
+    ? (row_get(match0, "name") != "bob" or row_get(match0, "role") != "shop") {
+        ! "match0=" + match0;
+        ^ 4;
+    }
+    ? (row_get(rowset0, "__key") != "30" or row_get(rowset0, "name") != "cara") {
+        ! "rowset0=" + rowset0;
+        ^ 5;
+    }
+    ? (cooks0 != "name=alice;email_key=1001;role=cook;|name=cara;email_key=1003;role=cook;") {
+        ! "cooks0=" + cooks0;
+        ^ 6;
+    }
+    ? (row_get(match1, "name") != "alice" or row_get(rowset1, "__key") != "20" or row_get(rowset1, "name") != "bob") {
+        ! "reopen=" + match1 + ":" + rowset1;
+        ^ 7;
+    }
+    ? (cooks1 != cooks0 or not closed0 or not closed1) {
+        ! "cooks1=" + cooks1;
+        ^ 8;
+    }
+
+    ! "ashdb field lookup smoke ok";
+    ^ 0;
+}

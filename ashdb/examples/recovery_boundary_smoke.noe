@@ -1,0 +1,56 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: recovery_boundary_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    created := db_create_table(db, "users", 24);
+    inserted := db_insert(db, "users", 10, "alice");
+
+    began0 := db_begin(db);
+    updated0 := db_update(db, "users", 10, "amber");
+    wrote_wal0 := db_write_wal_for_commit(db);
+    wal_before := db_recovery_state_text(db);
+
+    wal := file_open(db_wal_path(db));
+    tampered := file_write(wal, 0, db_wal_header(false, i64_of(row_get(wal_before, "wal_entries"))));
+    synced_wal := file_sync(wal);
+    closed_wal := file_close(wal);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    value0 := db_get(reopened, "users", 10);
+    state0 := db_recovery_state_text(reopened);
+    closed1 := db_close(reopened);
+
+    ? (created != 2 and created != -2) {
+        ! "created=" + text_of(created);
+        ^ 2;
+    }
+    ? (inserted < 0 or not began0 or updated0 < 0 or not wrote_wal0) {
+        ! "phase0=" + text_of(inserted) + ":" + text_of(updated0) + ":" + text_of(wrote_wal0);
+        ^ 3;
+    }
+    ? (row_get(wal_before, "journal_active") != "true" or row_get(wal_before, "wal_committed") != "true" or i64_of(row_get(wal_before, "wal_entries")) <= 0) {
+        ! "wal_before=" + wal_before;
+        ^ 4;
+    }
+    ? (tampered != db_wal_header_size() or not synced_wal or not closed_wal or not closed0) {
+        ! "tamper=" + text_of(tampered) + ":" + text_of(synced_wal) + ":" + text_of(closed_wal);
+        ^ 5;
+    }
+    ? (slice(value0, 0, 5) != "alice") {
+        ! "value0=" + value0;
+        ^ 6;
+    }
+    ? (row_get(state0, "journal_active") != "false" or row_get(state0, "wal_committed") != "false" or not closed1) {
+        ! "state0=" + state0;
+        ^ 7;
+    }
+
+    ! "ashdb recovery boundary smoke ok";
+    ^ 0;
+}

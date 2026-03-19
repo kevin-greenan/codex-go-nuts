@@ -1,0 +1,157 @@
+%Pager {
+    handle: file;
+    page_size: i64;
+}
+
+@repeat_unit(unit: text, times: i64) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx < times) {
+        out = out + unit;
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@pad_left_i64(value: i64, width: i64) -> text {
+    raw := text_of(value);
+    zeros := width - count(raw);
+    ? (zeros <= 0) {
+        ^ raw;
+    }
+    ^ repeat_unit("0", zeros) + raw;
+}
+
+@pad_right(text_value: text, width: i64, fill: text) -> text {
+    missing := width - count(text_value);
+    ? (missing <= 0) {
+        ^ text_value;
+    }
+    ^ text_value + repeat_unit(fill, missing);
+}
+
+@pager_blank_page(page_size: i64) -> text {
+    ^ repeat_unit(".", page_size);
+}
+
+@pager_header_magic() -> text {
+    ^ "ASHDB001";
+}
+
+@pager_page_kind(page: text) -> text {
+    ^ slice(page, 0, 1);
+}
+
+@pager_header_text(page_size: i64, page_count: i64, free_head: i64) -> text {
+    header := "H" + pager_header_magic() + pad_left_i64(page_size, 8) + pad_left_i64(page_count, 8) + pad_left_i64(free_head, 8);
+    ^ pad_right(header, page_size, ".");
+}
+
+@pager_header_page_count(header: text) -> i64 {
+    ^ i64_of(slice(header, 17, 8));
+}
+
+@pager_header_free_head(header: text) -> i64 {
+    ^ i64_of(slice(header, 25, 8));
+}
+
+@pager_data_page_text(page_size: i64, payload: text) -> text {
+    ^ pad_right("D" + payload, page_size, ".");
+}
+
+@pager_free_page_text(page_size: i64, next_free: i64) -> text {
+    ^ pad_right("F" + pad_left_i64(next_free, 8), page_size, ".");
+}
+
+@pager_free_page_next(page: text) -> i64 {
+    ^ i64_of(slice(page, 1, 8));
+}
+
+@pager_raw_read_page(pager: Pager, page_id: i64) -> text {
+    offset := pager_page_offset(pager, page_id);
+    ^ file_read(pager.handle, offset, pager.page_size);
+}
+
+@pager_raw_write_page(pager: Pager, page_id: i64, data: text) -> i64 {
+    offset := pager_page_offset(pager, page_id);
+    ^ file_write(pager.handle, offset, pad_right(data, pager.page_size, "."));
+}
+
+@pager_load_header(pager: Pager) -> text {
+    ^ pager_raw_read_page(pager, 0);
+}
+
+@pager_store_header(pager: Pager, page_count: i64, free_head: i64) -> i64 {
+    header := pager_header_text(pager.page_size, page_count, free_head);
+    ^ pager_raw_write_page(pager, 0, header);
+}
+
+@pager_open(path: text, page_size: i64) -> Pager {
+    handle := file_open(path);
+    pager := Pager { handle: handle, page_size: page_size };
+    size := file_size(handle);
+    ? (size == 0) {
+        initialized := pager_store_header(pager, 1, 0);
+        flushed := file_sync(handle);
+    }
+    ^ pager;
+}
+
+@pager_page_offset(pager: Pager, page_id: i64) -> i64 {
+    ^ page_id * pager.page_size;
+}
+
+@pager_file_size(pager: Pager) -> i64 {
+    ^ file_size(pager.handle);
+}
+
+@pager_total_pages(pager: Pager) -> i64 {
+    header := pager_load_header(pager);
+    ^ pager_header_page_count(header);
+}
+
+@pager_free_head(pager: Pager) -> i64 {
+    header := pager_load_header(pager);
+    ^ pager_header_free_head(header);
+}
+
+@pager_alloc_page(pager: Pager) -> i64 {
+    header := pager_load_header(pager);
+    page_id := pager_header_free_head(header);
+    total_pages := pager_header_page_count(header);
+    ? (page_id > 0) {
+        free_page := pager_raw_read_page(pager, page_id);
+        next_free := pager_free_page_next(free_page);
+        marked := pager_raw_write_page(pager, page_id, pager_data_page_text(pager.page_size, ""));
+        updated := pager_store_header(pager, total_pages, next_free);
+        ^ page_id;
+    }
+    page_id = total_pages;
+    allocated := pager_raw_write_page(pager, page_id, pager_data_page_text(pager.page_size, ""));
+    updated := pager_store_header(pager, page_id + 1, 0);
+    ^ page_id;
+}
+
+@pager_free_page(pager: Pager, page_id: i64) -> bool {
+    header := pager_load_header(pager);
+    free_head := pager_header_free_head(header);
+    marked := pager_raw_write_page(pager, page_id, pager_free_page_text(pager.page_size, free_head));
+    updated := pager_store_header(pager, pager_header_page_count(header), page_id);
+    ^ updated == pager.page_size;
+}
+
+@pager_read_page(pager: Pager, page_id: i64) -> text {
+    ^ pager_raw_read_page(pager, page_id);
+}
+
+@pager_write_page(pager: Pager, page_id: i64, data: text) -> i64 {
+    ^ pager_raw_write_page(pager, page_id, pager_data_page_text(pager.page_size, data));
+}
+
+@pager_sync(pager: Pager) -> bool {
+    ^ file_sync(pager.handle);
+}
+
+@pager_close(pager: Pager) -> bool {
+    ^ file_close(pager.handle);
+}

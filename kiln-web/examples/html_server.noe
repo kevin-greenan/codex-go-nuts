@@ -1,0 +1,57 @@
+& "../lib/server.noe";
+& "../lib/html.noe";
+
+@html_server_page(title: text, intro: text, links: list<text>) -> text {
+    hero := kiln_html_tag("section", kiln_html_attr("class", "hero"), kiln_html_tag("h1", "", kiln_html_text(title)) + kiln_html_tag("p", "", kiln_html_text(intro)));
+    nav := kiln_html_tag("nav", "", kiln_html_unordered_list(links));
+    ^ kiln_html_page(title, hero + nav);
+}
+
+@html_server_reply(dispatch: KilnDispatch) -> KilnReply {
+    home_links :: list<text> := [
+        kiln_html_link("/about", "About"),
+        kiln_html_link("/users/42", "User 42")
+    ];
+
+    ? (kiln_dispatch_is(dispatch, "home")) {
+        ^ kiln_reply_html(200, html_server_page("Kiln Home", "A tiny Noema-native HTML page.", home_links));
+    }
+    ? (kiln_dispatch_is(dispatch, "about")) {
+        ^ kiln_reply_html(200, html_server_page("About Kiln", "Routing and HTML rendering are both live.", [kiln_html_link("/", "Back home")]));
+    }
+    ? (kiln_dispatch_is(dispatch, "user-show")) {
+        user_id := kiln_dispatch_param(dispatch, "id");
+        body := kiln_html_page("User " + user_id, kiln_html_tag("main", "", kiln_html_tag("h1", "", kiln_html_text("User " + user_id)) + kiln_html_tag("p", "", kiln_html_text("Profile page for user " + user_id))));
+        ^ kiln_reply_html(200, body);
+    }
+    ? (dispatch.status == 405) {
+        ^ kiln_reply_html(405, kiln_html_page("Method Not Allowed", kiln_html_tag("p", "", kiln_html_text("That route does not accept this method."))));
+    }
+    ^ kiln_reply_html(404, kiln_html_page("Not Found", kiln_html_tag("p", "", kiln_html_text("No page matched that path."))));
+}
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: html_server <port>";
+        ^ 1;
+    }
+
+    routes :: list<KilnRoute> := [
+        kiln_route("GET", "/", "home"),
+        kiln_route("GET", "/about", "about"),
+        kiln_route("GET", "/users/:id", "user-show")
+    ];
+    app := kiln_app(routes, 4096);
+
+    port := i64_of(arg(1));
+    req := kiln_app_receive_once(app, port);
+    reply := html_server_reply(req.dispatch);
+    ? (kiln_app_request(req).version != "HTTP/1.1") {
+        ^ 2;
+    }
+    finished := kiln_app_finish_reply(req, reply);
+    ? (not finished) {
+        ^ 3;
+    }
+    ^ 0;
+}

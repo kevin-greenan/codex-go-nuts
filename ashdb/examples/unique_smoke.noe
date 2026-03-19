@@ -1,0 +1,82 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: unique_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    users_root := db_define_table(db, "users", 96, "name:text,email_key:i64!,role:text");
+
+    row10 := "";
+    row10 = row_append(row10, "name", "alice");
+    row10 = row_append(row10, "email_key", "1001");
+    row10 = row_append(row10, "role", "cook");
+
+    row20 := "";
+    row20 = row_append(row20, "name", "bob");
+    row20 = row_append(row20, "email_key", "1002");
+    row20 = row_append(row20, "role", "shop");
+
+    row20_dup := "";
+    row20_dup = row_append(row20_dup, "name", "cara");
+    row20_dup = row_append(row20_dup, "email_key", "1002");
+    row20_dup = row_append(row20_dup, "role", "clean");
+
+    row20_new := "";
+    row20_new = row_append(row20_new, "name", "bob");
+    row20_new = row_append(row20_new, "email_key", "1003");
+    row20_new = row_append(row20_new, "role", "plan");
+
+    ins0 := db_insert_row(db, "users", 10, row10);
+    ins1 := db_insert_row(db, "users", 20, row20);
+    dup0 := db_insert_row(db, "users", 30, row20_dup);
+    idx0 := db_index_get(db, "users", "email_key", 1001);
+    idx1 := db_index_get(db, "users", "email_key", 1002);
+    upd0 := db_update_row(db, "users", 20, row20_new);
+    idx2 := db_index_get(db, "users", "email_key", 1002);
+    idx3 := db_index_get(db, "users", "email_key", 1003);
+    del0 := db_delete_row(db, "users", 10);
+    idx4 := db_index_get(db, "users", "email_key", 1001);
+    synced0 := db_sync(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    users_root1 := db_table_root(reopened, "users");
+    idx5 := db_index_get(reopened, "users", "email_key", 1003);
+    row_again := db_get_by_index(reopened, "users", "email_key", 1003);
+    synced1 := db_sync(reopened);
+    closed1 := db_close(reopened);
+
+    ? (users_root < 0 or users_root1 != users_root) {
+        ! "root=" + text_of(users_root) + ":" + text_of(users_root1);
+        ^ 2;
+    }
+    ? (ins0 < 0 or ins1 < 0 or dup0 != -4) {
+        ! "ins=" + text_of(ins0) + ":" + text_of(ins1) + ":" + text_of(dup0);
+        ^ 3;
+    }
+    ? (idx0 != 10 or idx1 != 20) {
+        ! "idx01=" + text_of(idx0) + ":" + text_of(idx1);
+        ^ 4;
+    }
+    ? (upd0 < 0 or idx2 != -1 or idx3 != 20) {
+        ! "upd=" + text_of(upd0) + ":" + text_of(idx2) + ":" + text_of(idx3);
+        ^ 5;
+    }
+    ? (del0 < 0 or idx4 != -1) {
+        ! "del=" + text_of(del0) + ":" + text_of(idx4);
+        ^ 6;
+    }
+    ? (idx5 != 20 or row_get(row_again, "name") != "bob" or row_get(row_again, "role") != "plan") {
+        ! "again=" + text_of(idx5) + ":" + row_again;
+        ^ 7;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 8;
+    }
+
+    ! "ashdb unique smoke ok";
+    ^ 0;
+}

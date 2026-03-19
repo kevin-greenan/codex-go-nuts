@@ -1,0 +1,20 @@
+& "../lib/server.noe";
+
+@main() -> i64 {
+    reply := kiln_reply_text(200, "server smoke");
+    response := kiln_reply_response(reply);
+    ? (find(response, "HTTP/1.1 200 OK") < 0) {
+        ! "status mismatch";
+        ^ 1;
+    }
+    ? (find(response, "Content-Type: text/plain") < 0) {
+        ! "content-type mismatch";
+        ^ 2;
+    }
+    ? (find(response, "\r\n\r\nserver smoke") < 0) {
+        ! "body mismatch";
+        ^ 3;
+    }
+    ! "kiln server smoke ok";
+    ^ 0;
+}

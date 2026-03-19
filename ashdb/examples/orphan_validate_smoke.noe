@@ -1,0 +1,57 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: orphan_validate_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 256);
+    defined := db_define_table(db, "users", 80, "name:text");
+    row0 := "";
+    row0 = row_append(row0, "name", "alice");
+    inserted := db_insert_row(db, "users", 1, row0);
+
+    tx0 := db_begin(db);
+    orphan := pager_alloc_page(db.pager);
+    wrote := pager_write_page(db.pager, orphan, "orphan-page");
+    report0 := db_validate_report(db);
+    valid0 := db_validate(db);
+    reclaimed := db_reclaim_unreachable_pages(db);
+    report1 := db_validate_report(db);
+    valid1 := db_validate(db);
+    committed := db_commit(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 256);
+    report2 := db_validate_report(reopened);
+    valid2 := db_validate(reopened);
+    closed1 := db_close(reopened);
+
+    ? (defined <= 0 or inserted < 0) {
+        ! "setup=" + text_of(defined) + ":" + text_of(inserted);
+        ^ 2;
+    }
+    ? (not tx0 or orphan <= 1 or wrote != db.pager.page_size) {
+        ! "orphan=" + text_of(tx0) + ":" + text_of(orphan) + ":" + text_of(wrote);
+        ^ 3;
+    }
+    ? (find(report0, "unreachable pages: " + text_of(orphan)) < 0 or valid0) {
+        ! "report0=" + report0 + ":" + text_of(valid0);
+        ^ 4;
+    }
+    ? (reclaimed != 1 or report1 != "ok" or not valid1) {
+        ! "repair=" + text_of(reclaimed) + ":" + report1 + ":" + text_of(valid1);
+        ^ 5;
+    }
+    ? (not committed or not closed0) {
+        ^ 6;
+    }
+    ? (report2 != "ok" or not valid2 or not closed1) {
+        ! "reopen=" + report2 + ":" + text_of(valid2);
+        ^ 7;
+    }
+
+    ! "ashdb orphan validate smoke ok";
+    ^ 0;
+}

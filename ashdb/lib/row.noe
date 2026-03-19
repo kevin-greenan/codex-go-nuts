@@ -1,0 +1,127 @@
+@row_field_marker(name: text) -> text {
+    ^ name + "=";
+}
+
+@row_trim_padding(payload: text) -> text {
+    end0 := count(payload);
+    ~ (end0 > 0 and slice(payload, end0 - 1, 1) == ".") {
+        end0 = end0 - 1;
+    }
+    ^ slice(payload, 0, end0);
+}
+
+@row_encode_pair(name: text, value: text) -> text {
+    ^ name + "=" + value + ";";
+}
+
+@row_append(payload: text, name: text, value: text) -> text {
+    ^ row_trim_padding(payload) + row_encode_pair(name, value);
+}
+
+@row_find_field_start(payload: text, name: text) -> i64 {
+    ^ find(payload, row_field_marker(name));
+}
+
+@row_find_field_end(payload: text, start: i64) -> i64 {
+    rest := slice(payload, start, count(payload) - start);
+    end_local := find(rest, ";");
+    ? (end_local < 0) {
+        ^ -1;
+    }
+    ^ start + end_local;
+}
+
+@row_get(payload: text, name: text) -> text {
+    start := row_find_field_start(payload, name);
+    ? (start < 0) {
+        ^ "";
+    }
+    value_start := start + count(name) + 1;
+    end0 := row_find_field_end(payload, value_start);
+    ? (end0 < 0) {
+        ^ "";
+    }
+    ^ slice(payload, value_start, end0 - value_start);
+}
+
+@row_put(payload: text, name: text, value: text) -> text {
+    normalized := row_trim_padding(payload);
+    start := row_find_field_start(normalized, name);
+    ? (start < 0) {
+        ^ row_append(normalized, name, value);
+    }
+    value_start := start + count(name) + 1;
+    end0 := row_find_field_end(normalized, value_start);
+    ? (end0 < 0) {
+        ^ row_append(normalized, name, value);
+    }
+    prefix := slice(normalized, 0, start);
+    suffix := slice(normalized, end0 + 1, count(normalized) - (end0 + 1));
+    ^ prefix + row_encode_pair(name, value) + suffix;
+}
+
+@row_field_count(payload: text) -> i64 {
+    normalized := row_trim_padding(payload);
+    total := 0;
+    idx := 0;
+    ~ (idx < count(normalized)) {
+        ? (slice(normalized, idx, 1) == ";") {
+            total = total + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ total;
+}
+
+@row_field_entry_at(payload: text, field_index: i64) -> text {
+    normalized := row_trim_padding(payload);
+    remaining := normalized;
+    idx := 0;
+    ~ (idx < field_index) {
+        end0 := find(remaining, ";");
+        ? (end0 < 0) {
+            ^ "";
+        }
+        next_start := end0 + 1;
+        remaining = slice(remaining, next_start, count(remaining) - next_start);
+        idx = idx + 1;
+    }
+    end0 := find(remaining, ";");
+    ? (end0 < 0) {
+        ^ "";
+    }
+    ^ slice(remaining, 0, end0);
+}
+
+@row_field_name_at(payload: text, field_index: i64) -> text {
+    entry := row_field_entry_at(payload, field_index);
+    eq := find(entry, "=");
+    ? (eq < 0) {
+        ^ "";
+    }
+    ^ slice(entry, 0, eq);
+}
+
+@row_field_value_at(payload: text, field_index: i64) -> text {
+    entry := row_field_entry_at(payload, field_index);
+    eq := find(entry, "=");
+    ? (eq < 0) {
+        ^ "";
+    }
+    ^ slice(entry, eq + 1, count(entry) - (eq + 1));
+}
+
+@row_merge(base_payload: text, patch_payload: text) -> text {
+    out := row_trim_padding(base_payload);
+    count0 := row_field_count(patch_payload);
+    idx := 0;
+    ~ (idx < count0) {
+        field_name := row_field_name_at(patch_payload, idx);
+        field_value := row_field_value_at(patch_payload, idx);
+        ? (count(field_name) > 0) {
+            out = row_put(out, field_name, field_value);
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}

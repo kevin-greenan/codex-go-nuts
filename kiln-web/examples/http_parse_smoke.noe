@@ -1,0 +1,91 @@
+& "../lib/http.noe";
+
+@main() -> i64 {
+    raw := "POST /submit?ok=1&name=ada+lovelace&tag=logic&tag=math HTTP/1.1\r\nHost: localhost\r\nX-Tag: one\r\nX-Tag: two\r\nCookie: session=abc123; theme=light\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=ada+lovelace&role=math%20pioneer&tag=logic&tag=math";
+    request := kiln_http_parse_request(raw);
+    ? (request.method != "POST") {
+        ! "method mismatch";
+        ^ 1;
+    }
+    ? (request.path != "/submit?ok=1&name=ada+lovelace&tag=logic&tag=math") {
+        ! "path mismatch";
+        ^ 2;
+    }
+    ? (request.version != "HTTP/1.1") {
+        ! "version mismatch";
+        ^ 3;
+    }
+    ? (kiln_http_header_value(request.headers, "Host") != "localhost") {
+        ! "host mismatch";
+        ^ 4;
+    }
+    ? (kiln_http_header_value(request.headers, "Content-Type") != "application/x-www-form-urlencoded") {
+        ! "content-type mismatch";
+        ^ 5;
+    }
+    ? (kiln_http_header_values(request.headers, "X-Tag") != "one;two;") {
+        ! "repeated header mismatch";
+        ^ 15;
+    }
+    ? (kiln_http_cookie_value(request.headers, "session") != "abc123") {
+        ! "cookie session mismatch";
+        ^ 16;
+    }
+    ? (kiln_http_cookie_value(request.headers, "theme") != "light") {
+        ! "cookie theme mismatch";
+        ^ 17;
+    }
+    ? (request.body != "name=ada+lovelace&role=math%20pioneer&tag=logic&tag=math") {
+        ! "body mismatch";
+        ^ 6;
+    }
+    ? (kiln_http_path_only(request.path) != "/submit") {
+        ! "path-only mismatch";
+        ^ 10;
+    }
+    ? (kiln_http_query_value(request.path, "ok") != "1") {
+        ! "query ok mismatch";
+        ^ 11;
+    }
+    ? (kiln_http_query_value(request.path, "name") != "ada lovelace") {
+        ! "query name mismatch";
+        ^ 12;
+    }
+    ? (kiln_http_query_values(request.path, "tag") != "logic;math;") {
+        ! "query tags mismatch";
+        ^ 18;
+    }
+    ? (kiln_http_form_value(request, "name") != "ada lovelace") {
+        ! "form name mismatch";
+        ^ 13;
+    }
+    ? (kiln_http_form_value(request, "role") != "math pioneer") {
+        ! "form role mismatch";
+        ^ 14;
+    }
+    ? (kiln_http_form_values(request, "tag") != "logic;math;") {
+        ! "form tags mismatch";
+        ^ 19;
+    }
+    ? (kiln_http_body_text(request) != request.body) {
+        ! "body text mismatch";
+        ^ 20;
+    }
+
+    response := kiln_http_text(200, "ok");
+    ? (find(response, "HTTP/1.1 200 OK") < 0) {
+        ! "status mismatch";
+        ^ 7;
+    }
+    ? (find(response, "Content-Length: 2") < 0) {
+        ! "length mismatch";
+        ^ 8;
+    }
+    ? (find(response, "\r\n\r\nok") < 0) {
+        ! "body serialization mismatch";
+        ^ 9;
+    }
+
+    ! "kiln http parse smoke ok";
+    ^ 0;
+}

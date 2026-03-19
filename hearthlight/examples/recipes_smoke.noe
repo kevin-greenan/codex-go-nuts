@@ -1,0 +1,58 @@
+& "../lib/app.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: recipes_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := hearthlight_open(arg(1));
+
+    page_request := kiln_http_parse_request("GET /recipes HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    page_dispatch := kiln_dispatch(hearthlight_routes(), page_request);
+    page_reply := hearthlight_route_reply(db, page_dispatch, page_request);
+    page_response := kiln_reply_response(page_reply);
+
+    save_request := kiln_http_parse_request("POST /recipes HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=Bean+Toast&notes=Use+the+slow+beans&ingredients=Beans%2CBread%2COlive+Oil&tempo=quick");
+    save_dispatch := kiln_dispatch(hearthlight_routes(), save_request);
+    save_reply := hearthlight_route_reply(db, save_dispatch, save_request);
+    save_response := kiln_reply_response(save_reply);
+
+    apply_request := kiln_http_parse_request("POST /planner/recipes HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nrecipe_key=5&day_key=20260320");
+    apply_dispatch := kiln_dispatch(hearthlight_routes(), apply_request);
+    apply_reply := hearthlight_route_reply(db, apply_dispatch, apply_request);
+    apply_response := kiln_reply_response(apply_reply);
+
+    recipe_rows := db_scan_where_field_equals_rows_text(db, hearthlight_recipes_table(), "name", "Bean Toast", "|");
+    friday_meal := db_get(db, hearthlight_meals_table(), 20260320);
+    validate := db_validate_report(db);
+    closed := db_close(db);
+
+    ? (find(page_response, "HTTP/1.1 200 OK") < 0 or find(page_response, "Recipe Library") < 0 or find(page_response, "Chickpea Bowls") < 0) {
+        ! "recipes page mismatch";
+        ^ 2;
+    }
+    ? (find(save_response, "Saved Bean Toast to the recipe library.") < 0) {
+        ! "save response mismatch";
+        ^ 3;
+    }
+    ? (find(apply_response, "Added that recipe to the weekly plan.") < 0) {
+        ! "apply response mismatch";
+        ^ 4;
+    }
+    ? (find(recipe_rows, "tempo=quick;") < 0 or find(recipe_rows, "ingredients=Beans,Bread,Olive Oil;") < 0) {
+        ! "recipe rows mismatch=" + recipe_rows;
+        ^ 5;
+    }
+    ? (row_get(friday_meal, "title") != "Bean Toast" or row_get(friday_meal, "ingredients") != "Beans,Bread,Olive Oil") {
+        ! "planned meal mismatch=" + friday_meal;
+        ^ 6;
+    }
+    ? (validate != "ok" or not closed) {
+        ! "validate=" + validate;
+        ^ 7;
+    }
+
+    ! "hearthlight recipes smoke ok";
+    ^ 0;
+}
