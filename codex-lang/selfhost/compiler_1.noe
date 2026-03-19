@@ -1923,7 +1923,7 @@
     out = out + "    char *output_c = noema_text_to_cstr(output_path);\n";
     out = out + "    size_t command_len = strlen(source_c) + strlen(output_c) + 128;\n";
     out = out + "    char *command = (char *)noema_alloc(command_len);\n";
-    out = out + "    snprintf(command, command_len, \"cc -O3 -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-function %s -o %s\", source_c, output_c);\n";
+    out = out + "    snprintf(command, command_len, \"cc -O3 %s -o %s\", source_c, output_c);\n";
     out = out + "    return system(command);\n";
     out = out + "}\n\n";
     out = out + "static noema_socket noema_socket_open(noema_text host, noema_i64 port) {\n";
@@ -1988,9 +1988,264 @@
     ^ out;
 }
 
+@native_align16(bytes: i64) -> i64 {
+    rem := bytes - ((bytes / 16) * 16);
+    ? (rem == 0) {
+        ^ bytes;
+    }
+    ^ bytes + (16 - rem);
+}
+
+@native_slot_offset(slot: i64) -> i64 {
+    ^ -8 * (slot + 1);
+}
+
+@native_slot_of(locals: list<Binding>, name: text) -> i64 {
+    idx := 0;
+    ~ (idx < count(locals)) {
+        item := locals[idx];
+        ? (item.name == name) {
+            ^ idx;
+        }
+        idx = idx + 1;
+    }
+    ^ -1;
+}
+
+@native_count_slots(program: Program, items: list<i64>) -> i64 {
+    count_slots := 0;
+    idx := 0;
+    stmts := program.stmts;
+    ~ (idx < count(items)) {
+        stmt := stmts[items[idx]];
+        ? (stmt.tag == "let") {
+            count_slots = count_slots + 1;
+        }
+        idx = idx + 1;
+    }
+    ^ count_slots;
+}
+
+@native_small_imm(value: i64) -> bool {
+    abs := value;
+    ? (abs < 0) {
+        abs = 0 - abs;
+    }
+    ^ abs < 65536;
+}
+
+@native_supported_expr(program: Program, fn: Function, locals: list<Binding>, index: i64) -> bool {
+    exprs := program.exprs;
+    expr := exprs[index];
+    ? (expr.tag == "int") {
+        ^ native_small_imm(expr.value);
+    }
+    ? (expr.tag == "name") {
+        ^ native_slot_of(locals, expr.name) >= 0;
+    }
+    ? (expr.tag == "bin") {
+        ? (expr.op != "+" and expr.op != "-" and expr.op != "*") {
+            ^ false;
+        }
+        ^ native_supported_expr(program, fn, locals, expr.left) and native_supported_expr(program, fn, locals, expr.right);
+    }
+    ^ false;
+}
+
+@native_supported_stmt(program: Program, fn: Function, locals: list<Binding>, stmt: Stmt) -> bool {
+    ? (stmt.tag == "let") {
+        ^ native_supported_expr(program, fn, locals, stmt.expr);
+    }
+    ? (stmt.tag == "assign") {
+        ^ native_slot_of(locals, stmt.name) >= 0 and native_supported_expr(program, fn, locals, stmt.expr);
+    }
+    ? (stmt.tag == "emit") {
+        ^ infer_expr_type(program, fn, locals, stmt.expr) == "i64" and native_supported_expr(program, fn, locals, stmt.expr);
+    }
+    ? (stmt.tag == "ret") {
+        ^ infer_expr_type(program, fn, locals, stmt.expr) == "i64" and native_supported_expr(program, fn, locals, stmt.expr);
+    }
+    ^ false;
+}
+
+@native_expr(program: Program, fn: Function, locals: list<Binding>, index: i64) -> text {
+    exprs := program.exprs;
+    expr := exprs[index];
+    ? (expr.tag == "int") {
+        ? (expr.value >= 0) {
+            ^ "    mov x0, #" + text_of(expr.value) + "\n";
+        }
+        abs := 0 - expr.value;
+        ^ "    mov x0, #" + text_of(abs) + "\n    neg x0, x0\n";
+    }
+    ? (expr.tag == "name") {
+        slot := native_slot_of(locals, expr.name);
+        ^ "    ldr x0, [x29, #" + text_of(native_slot_offset(slot)) + "]\n";
+    }
+    ? (expr.tag == "bin") {
+        out := native_expr(program, fn, locals, expr.left);
+        out = out + "    sub sp, sp, #16\n";
+        out = out + "    str x0, [sp]\n";
+        out = out + native_expr(program, fn, locals, expr.right);
+        out = out + "    ldr x1, [sp]\n";
+        out = out + "    add sp, sp, #16\n";
+        ? (expr.op == "+") {
+            out = out + "    add x0, x1, x0\n";
+        }
+        | {
+            ? (expr.op == "-") {
+                out = out + "    sub x0, x1, x0\n";
+            }
+            | {
+                out = out + "    mul x0, x1, x0\n";
+            }
+        }
+        ^ out;
+    }
+    ^ "";
+}
+
+@native_block(program: Program, fn: Function, locals: list<Binding>, items: list<i64>, ret_label: text) -> text {
+    out := "";
+    idx := 0;
+    stmts := program.stmts;
+    ~ (idx < count(items)) {
+        stmt := stmts[items[idx]];
+        ? (stmt.tag == "let") {
+            slot := count(locals);
+            out = out + native_expr(program, fn, locals, stmt.expr);
+            out = out + "    str x0, [x29, #" + text_of(native_slot_offset(slot)) + "]\n";
+            locals = append(locals, binding(stmt.name, "i64"));
+        }
+        | {
+            ? (stmt.tag == "assign") {
+                slot := native_slot_of(locals, stmt.name);
+                out = out + native_expr(program, fn, locals, stmt.expr);
+                out = out + "    str x0, [x29, #" + text_of(native_slot_offset(slot)) + "]\n";
+            }
+            | {
+                ? (stmt.tag == "emit") {
+                    out = out + native_expr(program, fn, locals, stmt.expr);
+                    out = out + "    bl _noema_emit_i64_native\n";
+                }
+                | {
+                    ? (stmt.tag == "ret") {
+                        out = out + native_expr(program, fn, locals, stmt.expr);
+                        out = out + "    b " + ret_label + "\n";
+                    }
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@emit_native_arm64_program(program: Program) -> text {
+    ? (count(program.shapes) > 0) {
+        ^ "unsupported: native-arm64 direct currently does not support shapes";
+    }
+    funcs := program.funcs;
+    ? (count(funcs) != 1) {
+        ^ "unsupported: native-arm64 direct currently requires a single main function";
+    }
+    fn := funcs[0];
+    ? (fn.name != "main" or count(fn.params) != 0 or fn.return_ty != "i64") {
+        ^ "unsupported: native-arm64 direct currently supports only @main() -> i64";
+    }
+    locals := empty_bindings();
+    idx := 0;
+    stmts := program.stmts;
+    body := fn.body;
+    ok := true;
+    ~ (idx < count(body)) {
+        stmt := stmts[body[idx]];
+        ? (not native_supported_stmt(program, fn, locals, stmt)) {
+            ok = false;
+        }
+        locals = extend_locals(program, fn, locals, stmt);
+        idx = idx + 1;
+    }
+    ? (not ok) {
+        ^ "unsupported: native-arm64 direct only supports linear i64 statements";
+    }
+
+    slots := native_count_slots(program, fn.body);
+    frame := native_align16(slots * 8);
+    ret_label := "Lnoema_ret";
+    out := ".text\n";
+    out = out + ".align 2\n";
+    out = out + ".globl _main\n";
+    out = out + ".extern _write\n\n";
+    out = out + "_noema_emit_i64_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #80\n";
+    out = out + "    mov x9, x0\n";
+    out = out + "    mov x10, #0\n";
+    out = out + "    cmp x9, #0\n";
+    out = out + "    b.ge L_emit_abs\n";
+    out = out + "    mov x10, #1\n";
+    out = out + "    neg x9, x9\n";
+    out = out + "L_emit_abs:\n";
+    out = out + "    add x11, sp, #79\n";
+    out = out + "    mov w12, #10\n";
+    out = out + "    strb w12, [x11]\n";
+    out = out + "    mov x13, #1\n";
+    out = out + "    sub x11, x11, #1\n";
+    out = out + "    cmp x9, #0\n";
+    out = out + "    b.ne L_emit_loop\n";
+    out = out + "    mov w12, #48\n";
+    out = out + "    strb w12, [x11]\n";
+    out = out + "    sub x11, x11, #1\n";
+    out = out + "    add x13, x13, #1\n";
+    out = out + "    b L_emit_sign\n";
+    out = out + "L_emit_loop:\n";
+    out = out + "    mov x12, #10\n";
+    out = out + "    udiv x14, x9, x12\n";
+    out = out + "    msub x15, x14, x12, x9\n";
+    out = out + "    add x15, x15, #48\n";
+    out = out + "    strb w15, [x11]\n";
+    out = out + "    sub x11, x11, #1\n";
+    out = out + "    add x13, x13, #1\n";
+    out = out + "    mov x9, x14\n";
+    out = out + "    cmp x9, #0\n";
+    out = out + "    b.ne L_emit_loop\n";
+    out = out + "L_emit_sign:\n";
+    out = out + "    cmp x10, #0\n";
+    out = out + "    b.eq L_emit_write\n";
+    out = out + "    mov w12, #45\n";
+    out = out + "    strb w12, [x11]\n";
+    out = out + "    sub x11, x11, #1\n";
+    out = out + "    add x13, x13, #1\n";
+    out = out + "L_emit_write:\n";
+    out = out + "    add x1, x11, #1\n";
+    out = out + "    mov x0, #1\n";
+    out = out + "    mov x2, x13\n";
+    out = out + "    bl _write\n";
+    out = out + "    add sp, sp, #80\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_main:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    ? (frame > 0) {
+        out = out + "    sub sp, sp, #" + text_of(frame) + "\n";
+    }
+    out = out + native_block(program, fn, empty_bindings(), fn.body, ret_label);
+    out = out + "    mov x0, #0\n";
+    out = out + ret_label + ":\n";
+    ? (frame > 0) {
+        out = out + "    add sp, sp, #" + text_of(frame) + "\n";
+    }
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n";
+    ^ out;
+}
+
 @main() -> i64 {
     ? (arg_count() < 3) {
-        ! "usage: compiler_1 <input.noe> <output-binary>";
+        ! "usage: compiler_1 <input.noe> <output-binary> [backend]";
         ^ 1;
     }
 
@@ -2007,15 +2262,33 @@
         ^ 1;
     }
 
-    generated := emit_program(parsed.program);
-    c_path := arg(2) + ".generated.c";
-    wrote := write_text(c_path, generated);
+    backend := "c";
+    ? (arg_count() >= 4) {
+        backend = arg(3);
+    }
+
+    generated := "";
+    artifact_path := "";
+    ? (backend == "native-arm64") {
+        generated = emit_native_arm64_program(parsed.program);
+        ? (count(generated) >= 13 and slice(generated, 0, 13) == "unsupported: ") {
+            ! generated;
+            ^ 1;
+        }
+        artifact_path = arg(2) + ".generated.s";
+    }
+    | {
+        generated = emit_program(parsed.program);
+        artifact_path = arg(2) + ".generated.c";
+    }
+
+    wrote := write_text(artifact_path, generated);
     ? (not wrote) {
         ! "write failed";
         ^ 1;
     }
 
-    status := host_cc(c_path, arg(2));
+    status := host_cc(artifact_path, arg(2));
     ? (status != 0) {
         ! "host_cc failed: " + text_of(status);
         ^ 1;

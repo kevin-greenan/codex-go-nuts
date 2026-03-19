@@ -214,6 +214,26 @@ make -C codex-lang bootstrap-check
 
 Today `compiler_1` produces final binaries by generating a `.generated.c` file internally and invoking the host C compiler itself. So the bootstrap deliverable now exists as a binary-to-binary workflow, but the Noema-written compiler backend is still C-backed internally rather than a pure direct native emitter.
 
+There is now also a first direct-native path inside [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe):
+
+```sh
+cd codex-lang
+./bin/codexc selfhost/compiler_1.noe build/compiler_1
+./build/compiler_1 examples/hello.noe build/hello.direct native-arm64
+./build/hello.direct
+./build/compiler_1 examples/mini_source.noe build/mini_source.direct native-arm64
+./build/mini_source.direct
+```
+
+That direct backend currently targets `arm64-apple-darwin` and only supports a narrow scalar subset:
+
+- a single `@main() -> i64`
+- linear `let` / `assign` / `!` / `^`
+- local `i64` values
+- integer literals and `+` / `-` / `*`
+
+It is a real no-C direct path for those programs, but it is not yet wide enough to compile `compiler_1.noe` itself.
+
 ## Intent
 
 The long-term goal is still the same: everything else in this repository should eventually be written in this language stack.

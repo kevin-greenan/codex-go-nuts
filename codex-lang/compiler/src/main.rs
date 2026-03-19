@@ -395,7 +395,7 @@ fn preprocess_lines(source: &str) -> Vec<Line> {
 
     for (index, raw) in source.lines().enumerate() {
         let line_no = index + 1;
-        let no_comment = raw.split('#').next().unwrap_or("");
+        let no_comment = strip_line_comment(raw);
         if no_comment.trim().is_empty() {
             continue;
         }
@@ -408,6 +408,34 @@ fn preprocess_lines(source: &str) -> Vec<Line> {
     }
 
     result
+}
+
+fn strip_line_comment(raw: &str) -> &str {
+    let bytes = raw.as_bytes();
+    let mut index = 0usize;
+    let mut in_string = false;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            if byte == b'\\' {
+                index += 2;
+                continue;
+            }
+            if byte == b'"' {
+                in_string = false;
+            }
+        } else {
+            if byte == b'"' {
+                in_string = true;
+            } else if byte == b'#' {
+                return &raw[..index];
+            }
+        }
+        index += 1;
+    }
+
+    raw
 }
 
 fn parse_shape(lines: &[Line], index: &mut usize) -> Result<ShapeDecl, String> {
@@ -3040,7 +3068,7 @@ fn lower_to_c_with_options(
     out.push_str("    char *output_c = noema_text_to_cstr(output_path);\n");
     out.push_str("    size_t command_len = strlen(source_c) + strlen(output_c) + 128;\n");
     out.push_str("    char *command = (char *)noema_alloc(command_len);\n");
-    out.push_str("    snprintf(command, command_len, \"cc -O3 -std=c11 -Wall -Wextra -Wpedantic -Wno-unused-function %s -o %s\", source_c, output_c);\n");
+    out.push_str("    snprintf(command, command_len, \"cc -O3 %s -o %s\", source_c, output_c);\n");
     out.push_str("    return (int64_t)system(command);\n");
     out.push_str("}\n\n");
 

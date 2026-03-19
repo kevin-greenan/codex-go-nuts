@@ -1,6 +1,6 @@
 IMAGE := codex-lang-rust
 
-.PHONY: image compiler examples native-examples selfhost-example selfhost-check parity-check bootstrap-compiler bootstrap-check clean
+.PHONY: image compiler examples native-examples selfhost-example selfhost-check parity-check bootstrap-compiler bootstrap-check direct-check clean
 
 image:
 	docker build -t $(IMAGE) -f container/Dockerfile .
@@ -40,6 +40,13 @@ parity-check: selfhost-check native-examples
 bootstrap-check: bootstrap-compiler
 	./build/noema_compiler examples/frontend_demo.noe build/frontend_demo.bootstrap
 	./build/frontend_demo.bootstrap examples/hello.noe
+
+direct-check:
+	./bin/codexc selfhost/compiler_1.noe build/compiler_1
+	./build/compiler_1 examples/hello.noe build/hello.direct native-arm64
+	./build/hello.direct
+	./build/compiler_1 examples/mini_source.noe build/mini_source.direct native-arm64
+	./build/mini_source.direct || test $$? -eq 5
 
 native-example:
 	NOEMA_BACKEND=native-arm64 ./bin/codexc examples/hello.noe build/hello.native
