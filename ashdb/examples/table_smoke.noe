@@ -14,6 +14,8 @@
     put4 := table_put(table, 50, "echo");
     put5 := table_put(table, 60, "foxtrot");
     put6 := table_put(table, 20, "bravo2");
+    del0 := table_delete(table, 30);
+    del1 := table_delete(table, 99);
     root_kind := table_root_kind(table);
     get0 := table_get(table, 10);
     get1 := table_get(table, 20);
@@ -30,6 +32,7 @@
     root_kind1 := table_root_kind(reopened);
     again0 := table_get(reopened, 10);
     again1 := table_get(reopened, 20);
+    again2 := table_get(reopened, 30);
     again4 := table_get(reopened, 50);
     again5 := table_get(reopened, 60);
     scan1 := table_scan_text(reopened, "|");
@@ -40,52 +43,56 @@
         ! "puts=" + text_of(put0) + ":" + text_of(put1) + ":" + text_of(put2) + ":" + text_of(put3) + ":" + text_of(put4) + ":" + text_of(put5) + ":" + text_of(put6);
         ^ 2;
     }
+    ? (del0 < 0 or del1 != -1) {
+        ! "deletes=" + text_of(del0) + ":" + text_of(del1);
+        ^ 3;
+    }
     ? (root_kind != "I" or root_kind1 != "I") {
         ! "root=" + root_kind + ":" + root_kind1;
-        ^ 3;
+        ^ 4;
     }
     ? (slice(get0, 0, 5) != "alpha") {
         ! "get0=" + get0;
-        ^ 4;
+        ^ 5;
     }
     ? (slice(get1, 0, 6) != "bravo2") {
         ! "get1=" + get1;
-        ^ 5;
-    }
-    ? (slice(get2, 0, 7) != "charlie") {
-        ! "get2=" + get2;
         ^ 6;
+    }
+    ? (get2 != "") {
+        ! "get2=" + get2;
+        ^ 7;
     }
     ? (slice(get3, 0, 5) != "delta") {
         ! "get3=" + get3;
-        ^ 7;
+        ^ 8;
     }
     ? (slice(get4, 0, 4) != "echo") {
         ! "get4=" + get4;
-        ^ 8;
+        ^ 9;
     }
     ? (slice(get5, 0, 7) != "foxtrot") {
         ! "get5=" + get5;
-        ^ 9;
-    }
-    ? (scan0 != "alpha......|bravo2.....|charlie....|delta......|echo.......|foxtrot....") {
-        ! "scan0=" + scan0;
         ^ 10;
+    }
+    ? (scan0 != "alpha......|bravo2.....|delta......|echo.......|foxtrot....") {
+        ! "scan0=" + scan0;
+        ^ 11;
     }
     ? (missing != "") {
         ! "missing=" + missing;
-        ^ 11;
-    }
-    ? (slice(again0, 0, 5) != "alpha" or slice(again1, 0, 6) != "bravo2" or slice(again4, 0, 4) != "echo" or slice(again5, 0, 7) != "foxtrot") {
-        ! "again=" + again0 + ":" + again1 + ":" + again4 + ":" + again5;
         ^ 12;
     }
-    ? (scan1 != "alpha......|bravo2.....|charlie....|delta......|echo.......|foxtrot....") {
-        ! "scan1=" + scan1;
+    ? (slice(again0, 0, 5) != "alpha" or slice(again1, 0, 6) != "bravo2" or again2 != "" or slice(again4, 0, 4) != "echo" or slice(again5, 0, 7) != "foxtrot") {
+        ! "again=" + again0 + ":" + again1 + ":" + again2 + ":" + again4 + ":" + again5;
         ^ 13;
     }
-    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+    ? (scan1 != "alpha......|bravo2.....|delta......|echo.......|foxtrot....") {
+        ! "scan1=" + scan1;
         ^ 14;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 15;
     }
 
     ! "ashdb table smoke ok";

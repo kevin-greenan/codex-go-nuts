@@ -1,0 +1,84 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: db_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    users_root := db_create_table(db, "users", 20);
+    tasks_root := db_create_table(db, "tasks", 20);
+    dup_users := db_create_table(db, "users", 20);
+    put0 := db_put(db, "users", 10, "alice");
+    put1 := db_put(db, "users", 20, "bob");
+    put2 := db_put(db, "tasks", 1, "laundry");
+    put3 := db_put(db, "tasks", 2, "dishes");
+    del0 := db_delete(db, "tasks", 1);
+    del1 := db_delete(db, "tasks", 99);
+    get_user := db_get(db, "users", 20);
+    get_task := db_get(db, "tasks", 1);
+    scan_users := db_scan_text(db, "users", "|");
+    scan_tasks := db_scan_text(db, "tasks", "|");
+    synced0 := db_sync(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 128);
+    users_root1 := db_table_root(reopened, "users");
+    tasks_root1 := db_table_root(reopened, "tasks");
+    user_again := db_get(reopened, "users", 20);
+    task_again := db_get(reopened, "tasks", 2);
+    task_missing := db_get(reopened, "tasks", 1);
+    scan_users1 := db_scan_text(reopened, "users", "|");
+    scan_tasks1 := db_scan_text(reopened, "tasks", "|");
+    missing_root := db_table_root(reopened, "missing");
+    synced1 := db_sync(reopened);
+    closed1 := db_close(reopened);
+
+    ? (users_root != 2 or tasks_root != 3 or dup_users != -2) {
+        ! "roots=" + text_of(users_root) + ":" + text_of(tasks_root) + ":" + text_of(dup_users);
+        ^ 2;
+    }
+    ? (put0 < 0 or put1 < 0 or put2 < 0 or put3 < 0) {
+        ! "puts=" + text_of(put0) + ":" + text_of(put1) + ":" + text_of(put2) + ":" + text_of(put3);
+        ^ 3;
+    }
+    ? (del0 < 0 or del1 != -1) {
+        ! "deletes=" + text_of(del0) + ":" + text_of(del1);
+        ^ 4;
+    }
+    ? (slice(get_user, 0, 3) != "bob") {
+        ! "user=" + get_user;
+        ^ 5;
+    }
+    ? (get_task != "") {
+        ! "task=" + get_task;
+        ^ 6;
+    }
+    ? (scan_users != "alice......|bob........") {
+        ! "scan_users=" + scan_users;
+        ^ 7;
+    }
+    ? (scan_tasks != "dishes.....") {
+        ! "scan_tasks=" + scan_tasks;
+        ^ 8;
+    }
+    ? (users_root1 != 2 or tasks_root1 != 3 or missing_root != -1) {
+        ! "roots1=" + text_of(users_root1) + ":" + text_of(tasks_root1) + ":" + text_of(missing_root);
+        ^ 9;
+    }
+    ? (slice(user_again, 0, 3) != "bob" or slice(task_again, 0, 6) != "dishes" or task_missing != "") {
+        ! "again=" + user_again + ":" + task_again + ":" + task_missing;
+        ^ 10;
+    }
+    ? (scan_users1 != "alice......|bob........" or scan_tasks1 != "dishes.....") {
+        ! "scan1=" + scan_users1 + ":" + scan_tasks1;
+        ^ 11;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 12;
+    }
+
+    ! "ashdb db smoke ok";
+    ^ 0;
+}

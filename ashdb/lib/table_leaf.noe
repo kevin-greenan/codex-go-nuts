@@ -89,6 +89,13 @@
     ^ prefix + slot_text + moved;
 }
 
+@leaf_used_delete_slot(used_slots: text, slot_width: i64, slot_count: i64, slot_index: i64) -> text {
+    prefix := slice(used_slots, 0, slot_index * slot_width);
+    suffix_start := (slot_index + 1) * slot_width;
+    moved := slice(used_slots, suffix_start, (slot_count - slot_index - 1) * slot_width);
+    ^ prefix + moved;
+}
+
 @leaf_used_slots(entries: text, slot_width: i64, slot_count: i64) -> text {
     ^ slice(entries, 0, slot_count * slot_width);
 }
@@ -175,6 +182,26 @@
         ^ leaf_update_key(pager, page_id, key, payload);
     }
     ^ leaf_insert_key(pager, page_id, key, payload);
+}
+
+@leaf_delete_key(pager: Pager, page_id: i64, key: i64) -> i64 {
+    page := leaf_read_page(pager, page_id);
+    slot_count := leaf_slot_count(page);
+    slot_width := leaf_slot_width(page);
+    capacity := leaf_capacity(pager.page_size, slot_width);
+    entries := leaf_entries_region(page);
+    slot_index := leaf_find_key(pager, page_id, key);
+    ? (slot_index < 0) {
+        ^ -1;
+    }
+    used_slots := leaf_used_slots(entries, slot_width, slot_count);
+    updated_used := leaf_used_delete_slot(used_slots, slot_width, slot_count, slot_index);
+    updated_entries := leaf_build_entries(slot_width, capacity, updated_used, slot_count - 1);
+    wrote := pager_write_page(pager, page_id, leaf_page_text(pager.page_size, slot_width, slot_count - 1, updated_entries));
+    ? (wrote == pager.page_size) {
+        ^ slot_index;
+    }
+    ^ -1;
 }
 
 @leaf_first_key(pager: Pager, page_id: i64) -> i64 {

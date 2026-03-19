@@ -71,21 +71,26 @@ What is already working on `codex/ashdb-foundation`:
 8. simple page-kind markers
 9. AshDB also has a first leaf-page storage layer with:
 10. keyed rows
-11. row lookup by key
-12. smoke-test coverage through the direct self-hosted compiler
+11. sorted inserts
+12. duplicate-key update or reject behavior
+13. leaf splitting
+14. AshDB also has a first internal-node and table layer with:
+15. root promotion from leaf to internal page
+16. internal-node child routing
+17. named-table catalog metadata
+18. point lookup by key
+19. ordered scan across the current tree shape
+20. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
-1. sorted leaf insertion
-2. duplicate-key update or reject semantics
-3. leaf splitting
-4. internal branch pages
-5. root-page management for growing trees
-6. a real table abstraction
-7. schema/catalog metadata
-8. transactions and crash recovery
-9. secondary indexes
-10. any SQL surface
+1. deeper internal-tree growth beyond the current root-managed shape
+2. internal-node splitting and root promotion for larger trees
+3. richer row/schema metadata beyond fixed slot-width text payloads
+4. update and delete semantics at the database API layer
+5. transactions and crash recovery
+6. secondary indexes
+7. any SQL surface
 
 ## Architecture Overview
 
@@ -283,13 +288,13 @@ Exit criteria:
 Status:
 
 1. In progress.
-2. The current branch has unsorted keyed leaf storage and point lookup.
+2. The current branch has keyed leaf storage, internal-node routing, root promotion, table scans, and a small named-table catalog.
 3. The next concrete milestones are:
-4. sorted leaf insert
-5. duplicate-key semantics
-6. leaf split output
-7. first internal node page format
-8. root-page traversal
+4. internal-node splits
+5. multi-level tree growth
+6. richer table metadata
+7. delete/update paths
+8. cursor-style scans
 
 ### Phase 3: Transactions and Recovery
 
@@ -326,7 +331,8 @@ Exit criteria:
 Status:
 
 1. Not started.
-2. The API should begin as structured Noema calls, not SQL.
+2. The API now has a first structured shape through `table_*` and `db_*` calls.
+3. It should continue growing as structured Noema calls, not SQL.
 
 ## Testing Strategy
 
@@ -351,11 +357,11 @@ Completed:
 
 Next:
 
-1. sorted keyed leaf insertion
-2. duplicate-key handling
-3. leaf split mechanics
-4. internal node pages
-5. a first `table_*` API
+1. internal-node split mechanics
+2. multi-level root growth
+3. catalog-backed table metadata beyond root page and slot width
+4. delete/update operations
+5. secondary index storage
 
 ## Definition of Success
 

@@ -1,0 +1,213 @@
+& "table.noe";
+
+%DB {
+    pager: Pager;
+}
+
+@db_catalog_page() -> i64 {
+    ^ 1;
+}
+
+@db_catalog_count_width() -> i64 {
+    ^ 8;
+}
+
+@db_catalog_root_width() -> i64 {
+    ^ 8;
+}
+
+@db_catalog_slot_width_width() -> i64 {
+    ^ 8;
+}
+
+@db_catalog_name_width() -> i64 {
+    ^ 15;
+}
+
+@db_catalog_entry_size() -> i64 {
+    ^ 1 + db_catalog_root_width() + db_catalog_slot_width_width() + db_catalog_name_width();
+}
+
+@db_catalog_capacity(page_size: i64) -> i64 {
+    ^ (page_size - 1 - (1 + db_catalog_count_width())) / db_catalog_entry_size();
+}
+
+@db_catalog_normalize_name(name: text) -> text {
+    trimmed := name;
+    ? (count(trimmed) > db_catalog_name_width()) {
+        trimmed = slice(trimmed, 0, db_catalog_name_width());
+    }
+    ^ pad_right(trimmed, db_catalog_name_width(), ".");
+}
+
+@db_catalog_page_text(page_size: i64, count0: i64, entries: text) -> text {
+    body := "C" + pad_left_i64(count0, db_catalog_count_width()) + entries;
+    ^ pad_right(body, page_size - 1, ".");
+}
+
+@db_catalog_count(page: text) -> i64 {
+    ^ i64_of(slice(page, 2, db_catalog_count_width()));
+}
+
+@db_catalog_entries_region(page: text) -> text {
+    start := 1 + 1 + db_catalog_count_width();
+    ^ slice(page, start, count(page) - start);
+}
+
+@db_catalog_entry_text(root_page: i64, slot_width: i64, name: text) -> text {
+    ^ "1" + pad_left_i64(root_page, db_catalog_root_width()) + pad_left_i64(slot_width, db_catalog_slot_width_width()) + db_catalog_normalize_name(name);
+}
+
+@db_catalog_empty_entry() -> text {
+    ^ "0" + repeat_unit(".", db_catalog_entry_size() - 1);
+}
+
+@db_catalog_entry_at(entries: text, index: i64) -> text {
+    ^ slice(entries, index * db_catalog_entry_size(), db_catalog_entry_size());
+}
+
+@db_catalog_entry_is_used(entry: text) -> bool {
+    ^ slice(entry, 0, 1) == "1";
+}
+
+@db_catalog_entry_root(entry: text) -> i64 {
+    ^ i64_of(slice(entry, 1, db_catalog_root_width()));
+}
+
+@db_catalog_entry_slot_width(entry: text) -> i64 {
+    start := 1 + db_catalog_root_width();
+    ^ i64_of(slice(entry, start, db_catalog_slot_width_width()));
+}
+
+@db_catalog_entry_name(entry: text) -> text {
+    start := 1 + db_catalog_root_width() + db_catalog_slot_width_width();
+    ^ slice(entry, start, db_catalog_name_width());
+}
+
+@db_catalog_build_entries(capacity: i64, used_entries: text, count0: i64) -> text {
+    ^ used_entries + repeat_unit(db_catalog_empty_entry(), capacity - count0);
+}
+
+@db_catalog_init(db: DB) -> i64 {
+    capacity := db_catalog_capacity(db.pager.page_size);
+    entries := repeat_unit(db_catalog_empty_entry(), capacity);
+    ^ pager_write_page(db.pager, db_catalog_page(), db_catalog_page_text(db.pager.page_size, 0, entries));
+}
+
+@db_open(path: text, page_size: i64) -> DB {
+    pager := pager_open(path, page_size);
+    db := DB { pager: pager };
+    total_pages := pager_total_pages(pager);
+    ? (total_pages == 1) {
+        catalog_page := pager_alloc_page(pager);
+        initialized := db_catalog_init(db);
+    }
+    ^ db;
+}
+
+@db_catalog_lookup_index(db: DB, name: text) -> i64 {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    normalized := db_catalog_normalize_name(name);
+    index := 0;
+    ~ (index < count0) {
+        entry := db_catalog_entry_at(entries, index);
+        ? (db_catalog_entry_is_used(entry) and db_catalog_entry_name(entry) == normalized) {
+            ^ index;
+        }
+        index = index + 1;
+    }
+    ^ -1;
+}
+
+@db_table_root(db: DB, name: text) -> i64 {
+    page := pager_read_page(db.pager, db_catalog_page());
+    entries := db_catalog_entries_region(page);
+    index := db_catalog_lookup_index(db, name);
+    ? (index < 0) {
+        ^ -1;
+    }
+    entry := db_catalog_entry_at(entries, index);
+    ^ db_catalog_entry_root(entry);
+}
+
+@db_table_slot_width(db: DB, name: text) -> i64 {
+    page := pager_read_page(db.pager, db_catalog_page());
+    entries := db_catalog_entries_region(page);
+    index := db_catalog_lookup_index(db, name);
+    ? (index < 0) {
+        ^ -1;
+    }
+    entry := db_catalog_entry_at(entries, index);
+    ^ db_catalog_entry_slot_width(entry);
+}
+
+@db_create_table(db: DB, name: text, slot_width: i64) -> i64 {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    capacity := db_catalog_capacity(db.pager.page_size);
+    ? (db_catalog_lookup_index(db, name) >= 0) {
+        ^ -2;
+    }
+    ? (count0 >= capacity) {
+        ^ -1;
+    }
+    root_page := pager_alloc_page(db.pager);
+    initialized := leaf_init_page(db.pager, root_page, slot_width);
+    used_entries := slice(entries, 0, count0 * db_catalog_entry_size());
+    updated_used := used_entries + db_catalog_entry_text(root_page, slot_width, name);
+    updated_entries := db_catalog_build_entries(capacity, updated_used, count0 + 1);
+    wrote := pager_write_page(db.pager, db_catalog_page(), db_catalog_page_text(db.pager.page_size, count0 + 1, updated_entries));
+    ? (initialized == db.pager.page_size and wrote == db.pager.page_size) {
+        ^ root_page;
+    }
+    ^ -1;
+}
+
+@db_bind_table(db: DB, name: text) -> Table {
+    root_page := db_table_root(db, name);
+    slot_width := db_table_slot_width(db, name);
+    ^ table_bind(db.pager, root_page, slot_width);
+}
+
+@db_put(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ -1;
+    }
+    ^ table_put(table, key, payload);
+}
+
+@db_get(db: DB, table_name: text, key: i64) -> text {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ "";
+    }
+    ^ table_get(table, key);
+}
+
+@db_delete(db: DB, table_name: text, key: i64) -> i64 {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ -1;
+    }
+    ^ table_delete(table, key);
+}
+
+@db_scan_text(db: DB, table_name: text, separator: text) -> text {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ "";
+    }
+    ^ table_scan_text(table, separator);
+}
+
+@db_sync(db: DB) -> bool {
+    ^ pager_sync(db.pager);
+}
+
+@db_close(db: DB) -> bool {
+    ^ pager_close(db.pager);
+}

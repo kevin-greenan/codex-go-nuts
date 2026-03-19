@@ -148,6 +148,10 @@
     ^ 1;
 }
 
+@table_bind(pager: Pager, root_page: i64, slot_width: i64) -> Table {
+    ^ Table { pager: pager, root_page: root_page, slot_width: slot_width };
+}
+
 @table_open(path: text, page_size: i64, slot_width: i64) -> Table {
     pager := pager_open(path, page_size);
     total_pages := pager_total_pages(pager);
@@ -156,7 +160,7 @@
         allocated := pager_alloc_page(pager);
         initialized := leaf_init_page(pager, root_page, slot_width);
     }
-    ^ Table { pager: pager, root_page: root_page, slot_width: slot_width };
+    ^ table_bind(pager, root_page, slot_width);
 }
 
 @table_root_kind(table: Table) -> text {
@@ -226,6 +230,18 @@
         ^ leaf_read_by_key(table.pager, child_page, key);
     }
     ^ "";
+}
+
+@table_delete(table: Table, key: i64) -> i64 {
+    root_kind := table_root_kind(table);
+    ? (root_kind == "L") {
+        ^ leaf_delete_key(table.pager, table.root_page, key);
+    }
+    ? (root_kind == "I") {
+        child_page := table_internal_child_for_key(table, key);
+        ^ leaf_delete_key(table.pager, child_page, key);
+    }
+    ^ -1;
 }
 
 @table_scan_leaf_text(table: Table, page_id: i64, separator: text) -> text {
