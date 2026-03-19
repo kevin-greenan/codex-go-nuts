@@ -182,13 +182,13 @@ Current scope of that compiler:
 
 - tokenizes source text itself
 - builds a small AST for expressions and statements
-- parses a scalar `i64`-only subset
+- parses a scalar/runtime-backed subset with `i64`, `bool`, `text`, and `socket`
 - emits portable C
 
 Current accepted subset:
 
-- multiple `@name(...) -> i64 { ... }` functions
-- `i64` parameters
+- multiple `@name(...) -> type { ... }` functions for the currently supported bootstrap types
+- `i64`, `bool`, `text`, and `socket` values
 - `name := expr;`
 - `name = expr;`
 - `! expr;`

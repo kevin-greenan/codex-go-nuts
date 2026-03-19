@@ -1,0 +1,12 @@
+@main() -> i64 {
+    source := read_text(arg(1));
+    prefix := slice(source, 0, 5);
+    marker := "bytes=" + text_of(count(source));
+    ! marker;
+    ! prefix;
+    ok := write_text(arg(2), source + "selfhost");
+    ? (not ok) {
+        ^ 1;
+    }
+    ^ 0;
+}

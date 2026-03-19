@@ -21,9 +21,15 @@
     alt: list<i64>;
 }
 
+%Binding {
+    name: text;
+    ty: text;
+}
+
 %Function {
     name: text;
-    params: list<text>;
+    params: list<Binding>;
+    return_ty: text;
     body: list<i64>;
 }
 
@@ -60,7 +66,7 @@
 
 %ParamResult {
     state: State;
-    names: list<text>;
+    params: list<Binding>;
 }
 
 %Program {
@@ -116,8 +122,17 @@
     ^ xs;
 }
 
+@empty_bindings() -> list<Binding> {
+    xs :: list<Binding> := [];
+    ^ xs;
+}
+
 @token(kind: text, lex: text) -> Token {
     ^ Token { kind: kind, lex: lex };
+}
+
+@binding(name: text, ty: text) -> Binding {
+    ^ Binding { name: name, ty: ty };
 }
 
 @expr_int(value: i64) -> Expr {
@@ -125,9 +140,27 @@
     ^ Expr { tag: "int", value: value, name: "", op: "", left: -1, right: -1, args: args };
 }
 
+@expr_bool(value: bool) -> Expr {
+    args := empty_i64s();
+    ? (value) {
+        ^ Expr { tag: "bool", value: 1, name: "", op: "", left: -1, right: -1, args: args };
+    }
+    ^ Expr { tag: "bool", value: 0, name: "", op: "", left: -1, right: -1, args: args };
+}
+
+@expr_text(value: text) -> Expr {
+    args := empty_i64s();
+    ^ Expr { tag: "text", value: 0, name: value, op: "", left: -1, right: -1, args: args };
+}
+
 @expr_name(name: text) -> Expr {
     args := empty_i64s();
     ^ Expr { tag: "name", value: 0, name: name, op: "", left: -1, right: -1, args: args };
+}
+
+@expr_unary(op: text, inner: i64) -> Expr {
+    args := empty_i64s();
+    ^ Expr { tag: "unary", value: 0, name: "", op: op, left: inner, right: -1, args: args };
 }
 
 @expr_bin(op: text, left: i64, right: i64) -> Expr {
@@ -149,8 +182,8 @@
     ^ Stmt { tag: tag, name: "", expr: expr, body: body, alt: alt };
 }
 
-@func_decl(name: text, params: list<text>, body: list<i64>) -> Function {
-    ^ Function { name: name, params: params, body: body };
+@func_decl(name: text, params: list<Binding>, return_ty: text, body: list<i64>) -> Function {
+    ^ Function { name: name, params: params, return_ty: return_ty, body: body };
 }
 
 @ok_tokens(tokens: list<Token>) -> TokenizeResult {
@@ -237,6 +270,17 @@
     ^ fail_state(state, "expected name '" + value + "', got " + cur.kind + " '" + cur.lex + "'");
 }
 
+@parse_type_name(state: State) -> ParamResult {
+    cur := current_token(state);
+    ? (cur.kind != "name") {
+        bad := fail_state(state, "expected type name");
+        ^ ParamResult { state: bad, params: empty_bindings() };
+    }
+    params := empty_bindings();
+    params = append(params, binding("", cur.lex));
+    ^ ParamResult { state: advance_state(state), params: params };
+}
+
 @append_token(tokens: list<Token>, kind: text, lex: text) -> list<Token> {
     ^ append(tokens, token(kind, lex));
 }
@@ -252,6 +296,20 @@
             pos = pos + 1;
         }
         | {
+            ? (ch == "\"") {
+                start := pos + 1;
+                pos = pos + 1;
+                ~ (pos < count(src) and char_at(src, pos) != "\"") {
+                    pos = pos + 1;
+                }
+                ? (pos >= count(src)) {
+                    ^ fail_tokens(tokens, "unterminated string literal");
+                }
+                lex := slice(src, start, pos - start);
+                tokens = append_token(tokens, "string", lex);
+                pos = pos + 1;
+            }
+            | {
             ? (is_alpha(ch)) {
                 start := pos;
                 pos = pos + 1;
@@ -437,6 +495,7 @@
                 }
             }
         }
+        }
     }
 
     tokens = append_token(tokens, "eof", "");
@@ -478,7 +537,20 @@
         ^ append_expr(next, expr_int(i64_of(cur.lex)));
     }
 
+    ? (cur.kind == "string") {
+        next := advance_state(state);
+        ^ append_expr(next, expr_text(cur.lex));
+    }
+
     ? (cur.kind == "name") {
+        ? (cur.lex == "true") {
+            next := advance_state(state);
+            ^ append_expr(next, expr_bool(true));
+        }
+        ? (cur.lex == "false") {
+            next := advance_state(state);
+            ^ append_expr(next, expr_bool(false));
+        }
         next := advance_state(state);
         next_cur := current_token(next);
         ? (next_cur.kind == "lparen") {
@@ -501,15 +573,29 @@
     ^ ExprResult { state: bad, index: 0 };
 }
 
+@parse_unary(state: State) -> ExprResult {
+    cur := current_token(state);
+    ? (cur.kind == "minus") {
+        inner := parse_unary(advance_state(state));
+        zero := append_expr(inner.state, expr_int(0));
+        ^ append_expr(zero.state, expr_bin("-", zero.index, inner.index));
+    }
+    ? (cur.kind == "name" and cur.lex == "not") {
+        inner := parse_unary(advance_state(state));
+        ^ append_expr(inner.state, expr_unary("not", inner.index));
+    }
+    ^ parse_primary(state);
+}
+
 @parse_mul(state: State) -> ExprResult {
-    left := parse_primary(state);
+    left := parse_unary(state);
     loop_state := left.state;
     loop_token := current_token(loop_state);
 
     ~ (loop_state.ok and (loop_token.kind == "star" or loop_token.kind == "slash")) {
         op := loop_token.lex;
         after_op := advance_state(loop_state);
-        right := parse_primary(after_op);
+        right := parse_unary(after_op);
         left = append_expr(right.state, expr_bin(op, left.index, right.index));
         loop_state = left.state;
         loop_token = current_token(loop_state);
@@ -636,31 +722,36 @@
 }
 
 @parse_params(state: State) -> ParamResult {
-    params := empty_texts();
+    params := empty_bindings();
     cur := current_token(state);
     ? (cur.kind == "rparen") {
-        ^ ParamResult { state: state, names: params };
+        ^ ParamResult { state: state, params: params };
     }
     ~ (state.ok) {
         cur = current_token(state);
         ? (cur.kind != "name") {
             bad := fail_state(state, "expected parameter name");
-            ^ ParamResult { state: bad, names: params };
+            ^ ParamResult { state: bad, params: params };
         }
-        params = append(params, cur.lex);
+        name := cur.lex;
         state = advance_state(state);
         state = expect_kind(state, "colon");
-        state = expect_name_value(state, "i64");
+        type_res := parse_type_name(state);
+        state = type_res.state;
+        tys := type_res.params;
+        first_ty := tys[0];
+        ty := first_ty.ty;
+        params = append(params, binding(name, ty));
         cur = current_token(state);
         ? (cur.kind == "comma") {
             state = advance_state(state);
         }
         | {
-            ^ ParamResult { state: state, names: params };
+            ^ ParamResult { state: state, params: params };
         }
     }
 
-    ^ ParamResult { state: state, names: params };
+    ^ ParamResult { state: state, params: params };
 }
 
 @parse_function(state: State) -> State {
@@ -674,14 +765,18 @@
     state = expect_kind(state, "lparen");
     params_res := parse_params(state);
     state = params_res.state;
-    params := params_res.names;
+    params := params_res.params;
     state = expect_kind(state, "rparen");
     state = expect_kind(state, "arrow");
-    state = expect_name_value(state, "i64");
+    return_res := parse_type_name(state);
+    state = return_res.state;
+    return_items := return_res.params;
+    return_item := return_items[0];
+    return_ty := return_item.ty;
     state = expect_kind(state, "lbrace");
     body_res := parse_block(state);
     state = body_res.state;
-    func := func_decl(name_tok.lex, params, body_res.items);
+    func := func_decl(name_tok.lex, params, return_ty, body_res.items);
     ^ append_func(state, func);
 }
 
@@ -723,6 +818,33 @@
     ^ out;
 }
 
+@lookup_binding(bindings: list<Binding>, name: text) -> text {
+    idx := 0;
+    ~ (idx < count(bindings)) {
+        item := bindings[idx];
+        ? (item.name == name) {
+            ^ item.ty;
+        }
+        idx = idx + 1;
+    }
+    ^ "";
+}
+
+@find_function(program: Program, name: text) -> Function {
+    funcs := program.funcs;
+    idx := 0;
+    ~ (idx < count(funcs)) {
+        fn := funcs[idx];
+        ? (fn.name == name) {
+            ^ fn;
+        }
+        idx = idx + 1;
+    }
+    params := empty_bindings();
+    body := empty_i64s();
+    ^ Function { name: name, params: params, return_ty: "i64", body: body };
+}
+
 @c_name(name: text) -> text {
     ? (name == "main") {
         ^ "noema_main";
@@ -730,20 +852,180 @@
     ^ name;
 }
 
-@emit_args(program: Program, args: list<i64>) -> text {
+@c_type(ty: text) -> text {
+    ? (ty == "i64") {
+        ^ "noema_i64";
+    }
+    ? (ty == "bool") {
+        ^ "bool";
+    }
+    ? (ty == "text") {
+        ^ "noema_text";
+    }
+    ? (ty == "socket") {
+        ^ "noema_socket";
+    }
+    ^ "noema_i64";
+}
+
+@infer_expr_type(program: Program, fn: Function, locals: list<Binding>, index: i64) -> text {
+    exprs := program.exprs;
+    expr := exprs[index];
+
+    ? (expr.tag == "int") {
+        ^ "i64";
+    }
+    ? (expr.tag == "bool") {
+        ^ "bool";
+    }
+    ? (expr.tag == "text") {
+        ^ "text";
+    }
+    ? (expr.tag == "name") {
+        ty := lookup_binding(locals, expr.name);
+        ? (count(ty) > 0) {
+            ^ ty;
+        }
+        ty = lookup_binding(fn.params, expr.name);
+        ? (count(ty) > 0) {
+            ^ ty;
+        }
+        ^ "i64";
+    }
+    ? (expr.tag == "unary") {
+        ? (expr.op == "not") {
+            ^ "bool";
+        }
+        ^ infer_expr_type(program, fn, locals, expr.left);
+    }
+    ? (expr.tag == "bin") {
+        left_ty := infer_expr_type(program, fn, locals, expr.left);
+        right_ty := infer_expr_type(program, fn, locals, expr.right);
+        ? (expr.op == "+" and (left_ty == "text" or right_ty == "text")) {
+            ^ "text";
+        }
+        ? (expr.op == "==" or expr.op == "!=" or expr.op == "<" or expr.op == "<=" or expr.op == ">" or expr.op == ">=") {
+            ^ "bool";
+        }
+        ^ left_ty;
+    }
+    ? (expr.tag == "call") {
+        ? (expr.name == "arg_count") {
+            ^ "i64";
+        }
+        ? (expr.name == "arg") {
+            ^ "text";
+        }
+        ? (expr.name == "read_text") {
+            ^ "text";
+        }
+        ? (expr.name == "write_text") {
+            ^ "bool";
+        }
+        ? (expr.name == "count") {
+            ^ "i64";
+        }
+        ? (expr.name == "find") {
+            ^ "i64";
+        }
+        ? (expr.name == "slice") {
+            ^ "text";
+        }
+        ? (expr.name == "text_of") {
+            ^ "text";
+        }
+        ? (expr.name == "i64_of") {
+            ^ "i64";
+        }
+        ? (expr.name == "socket_open") {
+            ^ "socket";
+        }
+        ? (expr.name == "socket_send") {
+            ^ "i64";
+        }
+        ? (expr.name == "socket_recv") {
+            ^ "text";
+        }
+        ? (expr.name == "socket_recv_all") {
+            ^ "text";
+        }
+        ? (expr.name == "socket_close") {
+            ^ "bool";
+        }
+        called := find_function(program, expr.name);
+        ^ called.return_ty;
+    }
+    ^ "i64";
+}
+
+@emit_args(program: Program, fn: Function, locals: list<Binding>, args: list<i64>) -> text {
     out := "";
     idx := 0;
     ~ (idx < count(args)) {
         ? (idx > 0) {
             out = out + ", ";
         }
-        out = out + emit_expr(program, args[idx]);
+        out = out + emit_expr(program, fn, locals, args[idx]);
         idx = idx + 1;
     }
     ^ out;
 }
 
-@emit_expr(program: Program, index: i64) -> text {
+@emit_call(program: Program, fn: Function, locals: list<Binding>, name: text, args: list<i64>) -> text {
+    ? (name == "arg_count") {
+        ^ "noema_arg_count()";
+    }
+    ? (name == "arg") {
+        ^ "noema_arg(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "read_text") {
+        ^ "noema_read_text(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "write_text") {
+        ^ "noema_write_text(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "count") {
+        ^ "noema_text_count(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "find") {
+        ^ "noema_text_find(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "slice") {
+        ^ "noema_text_slice(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "i64_of") {
+        ^ "noema_i64_of(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "socket_open") {
+        ^ "noema_socket_open(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "socket_send") {
+        ^ "noema_socket_send(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "socket_recv") {
+        ^ "noema_socket_recv(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "socket_recv_all") {
+        ^ "noema_socket_recv_all(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "socket_close") {
+        ^ "noema_socket_close(" + emit_args(program, fn, locals, args) + ")";
+    }
+    ? (name == "text_of") {
+        arg_ty := infer_expr_type(program, fn, locals, args[0]);
+        arg_code := emit_expr(program, fn, locals, args[0]);
+        ? (arg_ty == "i64") {
+            ^ "noema_text_from_i64(" + arg_code + ")";
+        }
+        ? (arg_ty == "bool") {
+            ^ "noema_text_from_bool(" + arg_code + ")";
+        }
+        ^ arg_code;
+    }
+    ^ c_name(name) + "(" + emit_args(program, fn, locals, args) + ")";
+}
+
+@emit_expr(program: Program, fn: Function, locals: list<Binding>, index: i64) -> text {
     exprs := program.exprs;
     expr := exprs[index];
 
@@ -751,66 +1033,114 @@
         ^ text_of(expr.value);
     }
 
+    ? (expr.tag == "bool") {
+        ? (expr.value == 0) {
+            ^ "false";
+        }
+        ^ "true";
+    }
+
+    ? (expr.tag == "text") {
+        ^ "noema_text_literal(\"" + expr.name + "\", " + text_of(count(expr.name)) + ")";
+    }
+
     ? (expr.tag == "name") {
         ^ expr.name;
     }
 
+    ? (expr.tag == "unary") {
+        ? (expr.op == "not") {
+            ^ "(!" + emit_expr(program, fn, locals, expr.left) + ")";
+        }
+        ^ emit_expr(program, fn, locals, expr.left);
+    }
+
     ? (expr.tag == "call") {
-        ^ c_name(expr.name) + "(" + emit_args(program, expr.args) + ")";
+        ^ emit_call(program, fn, locals, expr.name, expr.args);
     }
 
     ? (expr.tag == "bin") {
-        ^ "(" + emit_expr(program, expr.left) + " " + expr.op + " " + emit_expr(program, expr.right) + ")";
+        left_ty := infer_expr_type(program, fn, locals, expr.left);
+        right_ty := infer_expr_type(program, fn, locals, expr.right);
+        left_code := emit_expr(program, fn, locals, expr.left);
+        right_code := emit_expr(program, fn, locals, expr.right);
+        ? (expr.op == "+" and (left_ty == "text" or right_ty == "text")) {
+            ^ "noema_text_concat(" + left_code + ", " + right_code + ")";
+        }
+        ? (expr.op == "==" and left_ty == "text" and right_ty == "text") {
+            ^ "noema_text_eq(" + left_code + ", " + right_code + ")";
+        }
+        ? (expr.op == "!=" and left_ty == "text" and right_ty == "text") {
+            ^ "(!noema_text_eq(" + left_code + ", " + right_code + "))";
+        }
+        ^ "(" + left_code + " " + expr.op + " " + right_code + ")";
     }
 
     ^ "0";
 }
 
-@emit_block(program: Program, items: list<i64>, level: i64) -> text {
+@extend_locals(program: Program, fn: Function, locals: list<Binding>, stmt: Stmt) -> list<Binding> {
+    ? (stmt.tag == "let") {
+        ty := infer_expr_type(program, fn, locals, stmt.expr);
+        ^ append(locals, binding(stmt.name, ty));
+    }
+    ^ locals;
+}
+
+@emit_block(program: Program, fn: Function, locals: list<Binding>, items: list<i64>, level: i64) -> text {
     out := "";
     idx := 0;
     stmts := program.stmts;
     ~ (idx < count(items)) {
         stmt := stmts[items[idx]];
-        out = out + emit_stmt(program, stmt, level);
+        out = out + emit_stmt(program, fn, locals, stmt, level);
+        locals = extend_locals(program, fn, locals, stmt);
         idx = idx + 1;
     }
     ^ out;
 }
 
-@emit_stmt(program: Program, stmt: Stmt, level: i64) -> text {
+@emit_stmt(program: Program, fn: Function, locals: list<Binding>, stmt: Stmt, level: i64) -> text {
     p := pad(level);
 
     ? (stmt.tag == "let") {
-        ^ p + "noema_i64 " + stmt.name + " = " + emit_expr(program, stmt.expr) + ";\n";
+        ty := infer_expr_type(program, fn, locals, stmt.expr);
+        ^ p + c_type(ty) + " " + stmt.name + " = " + emit_expr(program, fn, locals, stmt.expr) + ";\n";
     }
 
     ? (stmt.tag == "assign") {
-        ^ p + stmt.name + " = " + emit_expr(program, stmt.expr) + ";\n";
+        ^ p + stmt.name + " = " + emit_expr(program, fn, locals, stmt.expr) + ";\n";
     }
 
     ? (stmt.tag == "emit") {
-        ^ p + "printf(\"%lld\\n\", (long long)(" + emit_expr(program, stmt.expr) + "));\n";
+        ty := infer_expr_type(program, fn, locals, stmt.expr);
+        ? (ty == "text") {
+            ^ p + "noema_emit_text(" + emit_expr(program, fn, locals, stmt.expr) + ");\n";
+        }
+        ? (ty == "bool") {
+            ^ p + "noema_emit_bool(" + emit_expr(program, fn, locals, stmt.expr) + ");\n";
+        }
+        ^ p + "noema_emit_i64(" + emit_expr(program, fn, locals, stmt.expr) + ");\n";
     }
 
     ? (stmt.tag == "ret") {
-        ^ p + "return " + emit_expr(program, stmt.expr) + ";\n";
+        ^ p + "return " + emit_expr(program, fn, locals, stmt.expr) + ";\n";
     }
 
     ? (stmt.tag == "while") {
-        out := p + "while (" + emit_expr(program, stmt.expr) + ") {\n";
-        out = out + emit_block(program, stmt.body, level + 1);
+        out := p + "while (" + emit_expr(program, fn, locals, stmt.expr) + ") {\n";
+        out = out + emit_block(program, fn, locals, stmt.body, level + 1);
         out = out + p + "}\n";
         ^ out;
     }
 
     ? (stmt.tag == "if") {
-        out := p + "if (" + emit_expr(program, stmt.expr) + ") {\n";
-        out = out + emit_block(program, stmt.body, level + 1);
+        out := p + "if (" + emit_expr(program, fn, locals, stmt.expr) + ") {\n";
+        out = out + emit_block(program, fn, locals, stmt.body, level + 1);
         out = out + p + "}";
         ? (count(stmt.alt) > 0) {
             out = out + " else {\n";
-            out = out + emit_block(program, stmt.alt, level + 1);
+            out = out + emit_block(program, fn, locals, stmt.alt, level + 1);
             out = out + p + "}\n";
         }
         | {
@@ -822,7 +1152,7 @@
     ^ "";
 }
 
-@emit_params(params: list<text>) -> text {
+@emit_params(params: list<Binding>) -> text {
     ? (count(params) == 0) {
         ^ "void";
     }
@@ -832,7 +1162,8 @@
         ? (idx > 0) {
             out = out + ", ";
         }
-        out = out + "noema_i64 " + params[idx];
+        param := params[idx];
+        out = out + c_type(param.ty) + " " + param.name;
         idx = idx + 1;
     }
     ^ out;
@@ -844,7 +1175,7 @@
     funcs := program.funcs;
     ~ (idx < count(funcs)) {
         fn := funcs[idx];
-        out = out + "static noema_i64 " + c_name(fn.name) + "(" + emit_params(fn.params) + ");\n";
+        out = out + "static " + c_type(fn.return_ty) + " " + c_name(fn.name) + "(" + emit_params(fn.params) + ");\n";
         idx = idx + 1;
     }
     ^ out;
@@ -856,23 +1187,181 @@
     funcs := program.funcs;
     ~ (idx < count(funcs)) {
         fn := funcs[idx];
-        out = out + "static noema_i64 " + c_name(fn.name) + "(" + emit_params(fn.params) + ") {\n";
-        out = out + emit_block(program, fn.body, 1);
-        out = out + "    return 0;\n";
+        out = out + "static " + c_type(fn.return_ty) + " " + c_name(fn.name) + "(" + emit_params(fn.params) + ") {\n";
+        locals := empty_bindings();
+        out = out + emit_block(program, fn, locals, fn.body, 1);
+        ? (fn.return_ty == "text") {
+            out = out + "    return noema_text_literal(\"\", 0);\n";
+        }
+        | {
+            ? (fn.return_ty == "socket") {
+                out = out + "    return (noema_socket){0};\n";
+            }
+            | {
+                ? (fn.return_ty == "bool") {
+                    out = out + "    return 0;\n";
+                }
+                | {
+                    out = out + "    return 0;\n";
+                }
+            }
+        }
         out = out + "}\n\n";
         idx = idx + 1;
     }
     ^ out;
 }
 
+@emit_runtime() -> text {
+    out := "/* generated by selfhost mini_compiler */\n";
+    out = out + "%:include <stdbool.h>\n";
+    out = out + "%:include <stdint.h>\n";
+    out = out + "%:include <stdio.h>\n";
+    out = out + "%:include <stdlib.h>\n";
+    out = out + "%:include <string.h>\n";
+    out = out + "%:include <netdb.h>\n";
+    out = out + "%:include <sys/socket.h>\n";
+    out = out + "%:include <sys/types.h>\n";
+    out = out + "%:include <unistd.h>\n\n";
+    out = out + "typedef int64_t noema_i64;\n\n";
+    out = out + "typedef struct { noema_i64 len; const char *data; } noema_text;\n";
+    out = out + "typedef struct { int fd; } noema_socket;\n";
+    out = out + "static int noema_argc = 0;\n";
+    out = out + "static char **noema_argv = NULL;\n\n";
+    out = out + "static void *noema_alloc(size_t size) {\n";
+    out = out + "    void *ptr = malloc(size);\n";
+    out = out + "    if (!ptr) { fprintf(stderr, \"alloc failed\\n\"); exit(1); }\n";
+    out = out + "    return ptr;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_text_literal(const char *data, noema_i64 len) {\n";
+    out = out + "    noema_text text; text.len = len; text.data = data; return text;\n";
+    out = out + "}\n\n";
+    out = out + "static char *noema_text_to_cstr(noema_text text) {\n";
+    out = out + "    char *buffer = (char *)noema_alloc((size_t)text.len + 1);\n";
+    out = out + "    memcpy(buffer, text.data, (size_t)text.len);\n";
+    out = out + "    buffer[text.len] = '\\0';\n";
+    out = out + "    return buffer;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_i64 noema_text_count(noema_text text) { return text.len; }\n\n";
+    out = out + "static noema_i64 noema_text_find(noema_text haystack, noema_text needle) {\n";
+    out = out + "    noema_i64 index = 0;\n";
+    out = out + "    if (needle.len == 0) return 0;\n";
+    out = out + "    if (needle.len > haystack.len) return -1;\n";
+    out = out + "    while (index <= haystack.len - needle.len) {\n";
+    out = out + "        if (memcmp(haystack.data + index, needle.data, (size_t)needle.len) == 0) return index;\n";
+    out = out + "        index += 1;\n";
+    out = out + "    }\n";
+    out = out + "    return -1;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_text_slice(noema_text text, noema_i64 start, noema_i64 len) {\n";
+    out = out + "    return noema_text_literal(text.data + start, len);\n";
+    out = out + "}\n\n";
+    out = out + "static bool noema_text_eq(noema_text left, noema_text right) {\n";
+    out = out + "    if (left.len != right.len) return 0;\n";
+    out = out + "    return memcmp(left.data, right.data, (size_t)left.len) == 0;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_text_concat(noema_text left, noema_text right) {\n";
+    out = out + "    char *buffer = (char *)noema_alloc((size_t)(left.len + right.len + 1));\n";
+    out = out + "    memcpy(buffer, left.data, (size_t)left.len);\n";
+    out = out + "    memcpy(buffer + left.len, right.data, (size_t)right.len);\n";
+    out = out + "    buffer[left.len + right.len] = '\\0';\n";
+    out = out + "    return noema_text_literal(buffer, left.len + right.len);\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_text_from_i64(noema_i64 value) {\n";
+    out = out + "    char stack_buffer[64];\n";
+    out = out + "    int length = snprintf(stack_buffer, sizeof(stack_buffer), \"%lld\", value);\n";
+    out = out + "    char *buffer = (char *)noema_alloc((size_t)length + 1);\n";
+    out = out + "    memcpy(buffer, stack_buffer, (size_t)length + 1);\n";
+    out = out + "    return noema_text_literal(buffer, (noema_i64)length);\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_text_from_bool(bool value) {\n";
+    out = out + "    return value ? noema_text_literal(\"true\", 4) : noema_text_literal(\"false\", 5);\n";
+    out = out + "}\n\n";
+    out = out + "static noema_i64 noema_i64_of(noema_text text) {\n";
+    out = out + "    char *buffer = noema_text_to_cstr(text);\n";
+    out = out + "    return strtoll(buffer, (void *)0, 10);\n";
+    out = out + "}\n\n";
+    out = out + "static void noema_emit_i64(noema_i64 value) { printf(\"%lld\\n\", value); }\n";
+    out = out + "static void noema_emit_bool(bool value) { puts(value ? \"true\" : \"false\"); }\n";
+    out = out + "static void noema_emit_text(noema_text text) { fwrite(text.data, 1, (size_t)text.len, stdout); fputc('\\n', stdout); }\n\n";
+    out = out + "static noema_i64 noema_arg_count(void) { return (noema_i64)noema_argc; }\n";
+    out = out + "static noema_text noema_arg(noema_i64 index) { return noema_text_literal(noema_argv[index], (noema_i64)strlen(noema_argv[index])); }\n\n";
+    out = out + "static noema_text noema_read_text(noema_text path) {\n";
+    out = out + "    char *path_c = noema_text_to_cstr(path);\n";
+    out = out + "    FILE *file = fopen(path_c, \"rb\");\n";
+    out = out + "    if (!file) { fprintf(stderr, \"open failed %s\\n\", path_c); exit(1); }\n";
+    out = out + "    fseek(file, 0, 2);\n";
+    out = out + "    long size = ftell(file);\n";
+    out = out + "    rewind(file);\n";
+    out = out + "    char *buffer = (char *)noema_alloc((size_t)size + 1);\n";
+    out = out + "    fread(buffer, 1, (size_t)size, file);\n";
+    out = out + "    fclose(file);\n";
+    out = out + "    buffer[size] = '\\0';\n";
+    out = out + "    return noema_text_literal(buffer, (noema_i64)size);\n";
+    out = out + "}\n\n";
+    out = out + "static bool noema_write_text(noema_text path, noema_text text) {\n";
+    out = out + "    char *path_c = noema_text_to_cstr(path);\n";
+    out = out + "    FILE *file = fopen(path_c, \"wb\");\n";
+    out = out + "    if (!file) return 0;\n";
+    out = out + "    size_t written = fwrite(text.data, 1, (size_t)text.len, file);\n";
+    out = out + "    fclose(file);\n";
+    out = out + "    return written == (size_t)text.len;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_socket noema_socket_open(noema_text host, noema_i64 port) {\n";
+    out = out + "    char *host_c = noema_text_to_cstr(host);\n";
+    out = out + "    char port_buffer[32]; struct addrinfo hints; struct addrinfo *result = NULL; struct addrinfo *cursor = NULL; int fd = -1; noema_socket socket_value;\n";
+    out = out + "    memset(&hints, 0, sizeof(hints)); hints.ai_socktype = SOCK_STREAM; hints.ai_family = AF_UNSPEC;\n";
+    out = out + "    snprintf(port_buffer, sizeof(port_buffer), \"%lld\", (long long)port);\n";
+    out = out + "    if (getaddrinfo(host_c, port_buffer, &hints, &result) != 0) { fprintf(stderr, \"getaddrinfo failed\\n\"); exit(1); }\n";
+    out = out + "    for (cursor = result; cursor != NULL; cursor = cursor->ai_next) {\n";
+    out = out + "        fd = socket(cursor->ai_family, cursor->ai_socktype, cursor->ai_protocol);\n";
+    out = out + "        if (fd < 0) continue;\n";
+    out = out + "        if (connect(fd, cursor->ai_addr, cursor->ai_addrlen) == 0) break;\n";
+    out = out + "        close(fd); fd = -1;\n";
+    out = out + "    }\n";
+    out = out + "    freeaddrinfo(result);\n";
+    out = out + "    if (fd < 0) { fprintf(stderr, \"connect failed\\n\"); exit(1); }\n";
+    out = out + "    socket_value.fd = fd; return socket_value;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_i64 noema_socket_send(noema_socket socket_value, noema_text text) {\n";
+    out = out + "    noema_i64 total = 0;\n";
+    out = out + "    while (total < text.len) {\n";
+    out = out + "        ssize_t wrote = send(socket_value.fd, text.data + total, (size_t)(text.len - total), 0);\n";
+    out = out + "        if (wrote <= 0) { fprintf(stderr, \"socket send failed\\n\"); exit(1); }\n";
+    out = out + "        total += (noema_i64)wrote;\n";
+    out = out + "    }\n";
+    out = out + "    return total;\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_socket_recv(noema_socket socket_value, noema_i64 limit) {\n";
+    out = out + "    char *buffer = (char *)noema_alloc((size_t)limit + 1);\n";
+    out = out + "    ssize_t got = recv(socket_value.fd, buffer, (size_t)limit, 0);\n";
+    out = out + "    if (got < 0) { fprintf(stderr, \"socket recv failed\\n\"); exit(1); }\n";
+    out = out + "    buffer[got] = '\\0';\n";
+    out = out + "    return noema_text_literal(buffer, (noema_i64)got);\n";
+    out = out + "}\n\n";
+    out = out + "static noema_text noema_socket_recv_all(noema_socket socket_value) {\n";
+    out = out + "    noema_i64 cap = 4096; noema_i64 len = 0; char *buffer = (char *)noema_alloc((size_t)cap + 1);\n";
+    out = out + "    while (1) {\n";
+    out = out + "        ssize_t got = recv(socket_value.fd, buffer + len, (size_t)(cap - len), 0);\n";
+    out = out + "        if (got < 0) { fprintf(stderr, \"socket recv failed\\n\"); exit(1); }\n";
+    out = out + "        if (got == 0) break;\n";
+    out = out + "        len += (noema_i64)got;\n";
+    out = out + "        if (len == cap) { cap *= 2; buffer = (char *)realloc(buffer, (size_t)cap + 1); }\n";
+    out = out + "    }\n";
+    out = out + "    buffer[len] = '\\0'; return noema_text_literal(buffer, len);\n";
+    out = out + "}\n\n";
+    out = out + "static bool noema_socket_close(noema_socket socket_value) { return close(socket_value.fd) == 0; }\n\n";
+    ^ out;
+}
+
 @emit_program(program: Program) -> text {
-    out := "typedef long long noema_i64;\n";
-    out = out + "extern int printf(const char *, ...);\n";
-    out = out + "\n";
+    out := emit_runtime();
     out = out + emit_prototypes(program);
     out = out + "\n";
     out = out + emit_functions(program);
-    out = out + "int main(void) {\n";
+    out = out + "int main(int argc, char **argv) {\n";
+    out = out + "    noema_argc = argc;\n";
+    out = out + "    noema_argv = argv;\n";
     out = out + "    return (int)noema_main();\n";
     out = out + "}\n";
     ^ out;

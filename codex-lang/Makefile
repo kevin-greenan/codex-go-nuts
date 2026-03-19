@@ -29,6 +29,10 @@ selfhost-check:
 	./build/mini_compiler examples/series.noe build/series.selfhost.generated.c
 	cc -O3 build/series.selfhost.generated.c -o build/series.selfhost
 	./build/series.selfhost
+	./build/mini_compiler examples/selfhost_text.noe build/selfhost_text.generated.c
+	cc -O3 build/selfhost_text.generated.c -o build/selfhost_text.generated
+	./build/selfhost_text.generated examples/hello.noe build/selfhost_text.out
+	rg -n "selfhost" build/selfhost_text.out
 
 parity-check: selfhost-check native-examples
 
