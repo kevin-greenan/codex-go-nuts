@@ -100,7 +100,10 @@ What is already working on `codex/ashdb-foundation`:
 37. rowset-style query helpers that include primary keys in result rows
 38. backup and restore copy helpers for committed snapshots
 39. whole-database unique-index repair helper
-40. smoke-test coverage through the direct self-hosted compiler
+40. changed-page rollback journaling instead of journaling every page up front
+41. larger-tree stress coverage with rollback recovery checks
+42. structural corruption-detection coverage
+43. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 

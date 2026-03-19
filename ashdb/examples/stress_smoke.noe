@@ -1,0 +1,118 @@
+& "../lib/db.noe";
+
+@user_payload(name: text, age: i64, email_key: i64) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "age", text_of(age));
+    payload = row_append(payload, "email_key", text_of(email_key));
+    ^ payload;
+}
+
+@table_key_count(db: DB, table_name: text) -> i64 {
+    key := db_first_key(db, table_name);
+    total := 0;
+    ~ (key >= 0) {
+        total = total + 1;
+        key = db_next_key(db, table_name, key);
+    }
+    ^ total;
+}
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: stress_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 256);
+    defined := db_define_table(db, "users", 72, "name:text,age:i64,email_key:i64!");
+    inserted := 0;
+    key := 1;
+    ~ (key <= 200) {
+        wrote := db_insert_row(db, "users", key, user_payload("user" + text_of(key), 20 + key, 1000 + key));
+        ? (wrote < 0) {
+            ! "insert_failed=" + text_of(key) + ":" + text_of(wrote);
+            ^ 2;
+        }
+        inserted = inserted + 1;
+        key = key + 1;
+    }
+
+    validate0 := db_validate_report(db);
+    idx0 := db_index_get(db, "users", "email_key", 1150);
+
+    began := db_begin(db);
+    key = 50;
+    ~ (key <= 79) {
+        updated := db_update_row(db, "users", key, user_payload("temp" + text_of(key), 20 + key, 1000 + key));
+        ? (updated < 0) {
+            ! "update_failed=" + text_of(key) + ":" + text_of(updated);
+            ^ 3;
+        }
+        key = key + 1;
+    }
+    key = 201;
+    ~ (key <= 240) {
+        wrote := db_insert_row(db, "users", key, user_payload("burst" + text_of(key), 20 + key, 1000 + key));
+        ? (wrote < 0) {
+            ! "burst_failed=" + text_of(key) + ":" + text_of(wrote);
+            ^ 4;
+        }
+        key = key + 1;
+    }
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 256);
+    validate1 := db_validate_report(reopened);
+    row60 := db_get(reopened, "users", 60);
+    row220 := db_get(reopened, "users", 220);
+
+    key = 4;
+    deleted_count := 0;
+    ~ (key <= 200) {
+        deleted := db_delete_row(reopened, "users", key);
+        ? (deleted < 0) {
+            ! "delete_failed=" + text_of(key) + ":" + text_of(deleted);
+            ^ 5;
+        }
+        deleted_count = deleted_count + 1;
+        key = key + 4;
+    }
+
+    validate2 := db_validate_report(reopened);
+    total_after_delete := table_key_count(reopened, "users");
+    deleted_idx := db_index_get(reopened, "users", "email_key", 1004);
+    kept_idx := db_index_get(reopened, "users", "email_key", 1005);
+    closed1 := db_close(reopened);
+
+    ? (defined <= 0) {
+        ! "defined=" + text_of(defined);
+        ^ 6;
+    }
+    ? (inserted != 200 or validate0 != "ok" or idx0 != 150) {
+        ! "initial=" + text_of(inserted) + ":" + validate0 + ":" + text_of(idx0);
+        ^ 7;
+    }
+    ? (not began or not closed0) {
+        ^ 8;
+    }
+    ? (validate1 != "ok") {
+        ! "recovered_validate=" + validate1;
+        ^ 9;
+    }
+    ? (row_get(row60, "name") != "user60" or count(row220) != 0) {
+        ! "recovered_rows=" + row60 + ":" + row220;
+        ^ 10;
+    }
+    ? (deleted_count != 50 or validate2 != "ok") {
+        ! "delete_phase=" + text_of(deleted_count) + ":" + validate2;
+        ^ 11;
+    }
+    ? (total_after_delete != 150 or deleted_idx >= 0 or kept_idx != 5 or not closed1) {
+        ! "after_delete=" + text_of(total_after_delete) + ":" + text_of(deleted_idx) + ":" + text_of(kept_idx);
+        ^ 12;
+    }
+
+    ! "ashdb stress smoke ok";
+    ^ 0;
+}

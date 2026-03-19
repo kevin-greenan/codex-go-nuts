@@ -1,0 +1,48 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: corruption_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    defined := db_define_table(db, "users", 48, "name:text,email_key:i64!");
+    payload0 := "";
+    payload0 = row_append(payload0, "name", "alice");
+    payload0 = row_append(payload0, "email_key", "1001");
+    inserted0 := db_insert_row(db, "users", 10, payload0);
+    payload1 := "";
+    payload1 = row_append(payload1, "name", "bob");
+    payload1 = row_append(payload1, "email_key", "1002");
+    inserted1 := db_insert_row(db, "users", 20, payload1);
+    report0 := db_validate_report(db);
+
+    root_page := db_table_root(db, "users");
+    corrupted := pager_raw_write_page(db.pager, root_page, "D?" + repeat_unit(".", db.pager.page_size - 2));
+    report1 := db_validate_report(db);
+    closed := db_close(db);
+
+    ? (defined <= 0) {
+        ! "defined=" + text_of(defined);
+        ^ 2;
+    }
+    ? (inserted0 < 0 or inserted1 < 0 or report0 != "ok") {
+        ! "initial=" + text_of(inserted0) + ":" + text_of(inserted1) + ":" + report0;
+        ^ 3;
+    }
+    ? (corrupted != db.pager.page_size) {
+        ! "corrupted=" + text_of(corrupted);
+        ^ 4;
+    }
+    ? (report1 == "ok" or find(report1, "invalid") < 0) {
+        ! "report1=" + report1;
+        ^ 5;
+    }
+    ? (not closed) {
+        ^ 6;
+    }
+
+    ! "ashdb corruption smoke ok";
+    ^ 0;
+}
