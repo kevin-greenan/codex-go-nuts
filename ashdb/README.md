@@ -105,7 +105,8 @@ What is already working on `codex/ashdb-foundation`:
 42. structural corruption-detection coverage
 43. schema-aware index-assisted field equality lookups for unique `i64` fields
 44. commit ordering now flushes database pages before clearing the rollback journal
-45. smoke-test coverage through the direct self-hosted compiler
+45. stable cursor APIs for incremental table iteration
+46. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -133,9 +134,8 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 ### Query Surface
 
 1. richer predicate support beyond exact field equality
-2. stable cursor APIs for incremental iteration
-3. better result-shape APIs than joined text output
-4. explicit query/result conventions for failure cases
+2. better result-shape APIs than joined text output
+3. explicit query/result conventions for failure cases
 
 ### Integrity and Recovery Tooling
 

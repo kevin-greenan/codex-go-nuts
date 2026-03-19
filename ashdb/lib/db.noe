@@ -6,6 +6,11 @@
     path: text;
 }
 
+%DBCursor {
+    table_name: text;
+    key: i64;
+}
+
 @db_index_table_name(table_name: text, index_name: text) -> text {
     ^ "idx." + table_name + "." + index_name;
 }
@@ -551,6 +556,62 @@
         ^ -1;
     }
     ^ table_next_key_in_order(table, after_key);
+}
+
+@db_cursor_open(db: DB, table_name: text) -> DBCursor {
+    ^ DBCursor { table_name: table_name, key: db_first_key(db, table_name) };
+}
+
+@db_cursor_open_at_or_after(db: DB, table_name: text, min_key: i64) -> DBCursor {
+    key := db_first_key(db, table_name);
+    ~ (key >= 0 and key < min_key) {
+        key = db_next_key(db, table_name, key);
+    }
+    ^ DBCursor { table_name: table_name, key: key };
+}
+
+@db_cursor_valid(cursor: DBCursor) -> bool {
+    ^ cursor.key >= 0;
+}
+
+@db_cursor_key(cursor: DBCursor) -> i64 {
+    ^ cursor.key;
+}
+
+@db_cursor_row(db: DB, cursor: DBCursor) -> text {
+    ? (cursor.key < 0) {
+        ^ "";
+    }
+    ^ db_get(db, cursor.table_name, cursor.key);
+}
+
+@db_cursor_result_row(db: DB, cursor: DBCursor) -> text {
+    row0 := db_cursor_row(db, cursor);
+    ? (count(row0) == 0) {
+        ^ "";
+    }
+    ^ db_result_row(cursor.key, row0);
+}
+
+@db_cursor_next(db: DB, cursor: DBCursor) -> DBCursor {
+    ? (cursor.key < 0) {
+        ^ cursor;
+    }
+    ^ DBCursor { table_name: cursor.table_name, key: db_next_key(db, cursor.table_name, cursor.key) };
+}
+
+@db_cursor_seek_key(db: DB, cursor: DBCursor, min_key: i64) -> DBCursor {
+    key := min_key - 1;
+    ? (min_key <= 0) {
+        key = -1;
+    }
+    ? (key < 0) {
+        key = db_first_key(db, cursor.table_name);
+    }
+    ~ (key >= 0 and key < min_key) {
+        key = db_next_key(db, cursor.table_name, key);
+    }
+    ^ DBCursor { table_name: cursor.table_name, key: key };
 }
 
 @db_index_put(db: DB, table_name: text, index_name: text, secondary_key: i64, primary_key: i64) -> i64 {

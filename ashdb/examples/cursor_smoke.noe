@@ -30,21 +30,33 @@
     ins2 := db_insert_row(db, "users", 40, row40);
     ins3 := db_insert_row(db, "users", 55, row55);
 
-    first0 := db_first_key(db, "users");
-    next0 := db_next_key(db, "users", 10);
-    next1 := db_next_key(db, "users", 25);
-    next2 := db_next_key(db, "users", 40);
-    next3 := db_next_key(db, "users", 55);
-    missing0 := db_next_key(db, "users", 99);
-    row_at_40 := db_get(db, "users", 40);
+    cursor0 := db_cursor_open(db, "users");
+    keys0 := "";
+    rows0 := "";
+    idx := 0;
+    ~ (idx < 5) {
+        ? (count(keys0) > 0) {
+            keys0 = keys0 + ":";
+        }
+        keys0 = keys0 + text_of(db_cursor_key(cursor0));
+        row0 := db_cursor_result_row(db, cursor0);
+        ? (count(rows0) > 0) {
+            rows0 = rows0 + "|";
+        }
+        rows0 = rows0 + row0;
+        cursor0 = db_cursor_next(db, cursor0);
+        idx = idx + 1;
+    }
+    seek0 := db_cursor_key(db_cursor_open_at_or_after(db, "users", 26));
+    seek1 := db_cursor_key(db_cursor_seek_key(db, db_cursor_open(db, "users"), 40));
     synced0 := db_sync(db);
     closed0 := db_close(db);
 
     reopened := db_open(arg(1), 128);
     users_root1 := db_table_root(reopened, "users");
-    first1 := db_first_key(reopened, "users");
-    next4 := db_next_key(reopened, "users", 25);
-    next5 := db_next_key(reopened, "users", 40);
+    first1 := db_cursor_key(db_cursor_open(reopened, "users"));
+    seek2 := db_cursor_key(db_cursor_open_at_or_after(reopened, "users", 25));
+    next1 := db_cursor_key(db_cursor_next(reopened, db_cursor_open_at_or_after(reopened, "users", 25)));
     synced1 := db_sync(reopened);
     closed1 := db_close(reopened);
 
@@ -56,16 +68,16 @@
         ! "ins=" + text_of(ins0) + ":" + text_of(ins1) + ":" + text_of(ins2) + ":" + text_of(ins3);
         ^ 3;
     }
-    ? (first0 != 10 or next0 != 25 or next1 != 40 or next2 != 55 or next3 != -1 or missing0 != -1) {
-        ! "keys0=" + text_of(first0) + ":" + text_of(next0) + ":" + text_of(next1) + ":" + text_of(next2) + ":" + text_of(next3) + ":" + text_of(missing0);
+    ? (keys0 != "10:25:40:55:-1") {
+        ! "keys0=" + keys0;
         ^ 4;
     }
-    ? (row_get(row_at_40, "name") != "cara") {
-        ! "row40=" + row_at_40;
+    ? (find(rows0, "name=alice;role=cook;__key=10;") < 0 or find(rows0, "name=bob;role=shop;__key=25;") < 0 or find(rows0, "name=cara;role=clean;__key=40;") < 0 or find(rows0, "name=drew;role=plan;__key=55;") < 0) {
+        ! "rows0=" + rows0;
         ^ 5;
     }
-    ? (first1 != 10 or next4 != 40 or next5 != 55) {
-        ! "keys1=" + text_of(first1) + ":" + text_of(next4) + ":" + text_of(next5);
+    ? (seek0 != 40 or seek1 != 40 or first1 != 10 or seek2 != 25 or next1 != 40) {
+        ! "keys1=" + text_of(seek0) + ":" + text_of(seek1) + ":" + text_of(first1) + ":" + text_of(seek2) + ":" + text_of(next1);
         ^ 6;
     }
     ? (not synced0 or not closed0 or not synced1 or not closed1) {
