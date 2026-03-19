@@ -21,6 +21,7 @@
     get3 := table_get(table, 40);
     get4 := table_get(table, 50);
     get5 := table_get(table, 60);
+    scan0 := table_scan_text(table, "|");
     missing := table_get(table, 99);
     synced0 := table_sync(table);
     closed0 := table_close(table);
@@ -31,6 +32,7 @@
     again1 := table_get(reopened, 20);
     again4 := table_get(reopened, 50);
     again5 := table_get(reopened, 60);
+    scan1 := table_scan_text(reopened, "|");
     synced1 := table_sync(reopened);
     closed1 := table_close(reopened);
 
@@ -66,16 +68,24 @@
         ! "get5=" + get5;
         ^ 9;
     }
+    ? (scan0 != "alpha......|bravo2.....|charlie....|delta......|echo.......|foxtrot....") {
+        ! "scan0=" + scan0;
+        ^ 10;
+    }
     ? (missing != "") {
         ! "missing=" + missing;
-        ^ 10;
+        ^ 11;
     }
     ? (slice(again0, 0, 5) != "alpha" or slice(again1, 0, 6) != "bravo2" or slice(again4, 0, 4) != "echo" or slice(again5, 0, 7) != "foxtrot") {
         ! "again=" + again0 + ":" + again1 + ":" + again4 + ":" + again5;
-        ^ 11;
+        ^ 12;
+    }
+    ? (scan1 != "alpha......|bravo2.....|charlie....|delta......|echo.......|foxtrot....") {
+        ! "scan1=" + scan1;
+        ^ 13;
     }
     ? (not synced0 or not closed0 or not synced1 or not closed1) {
-        ^ 12;
+        ^ 14;
     }
 
     ! "ashdb table smoke ok";
