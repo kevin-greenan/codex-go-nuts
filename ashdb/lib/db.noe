@@ -646,6 +646,7 @@
     tail := slice(field_spec, colon + 1, count(field_spec) - (colon + 1));
     qmark := find(tail, "?");
     bang := find(tail, "!");
+    at := find(tail, "@");
     eq := find(tail, "=");
     end0 := count(tail);
     ? (qmark >= 0 and qmark < end0) {
@@ -653,6 +654,9 @@
     }
     ? (bang >= 0 and bang < end0) {
         end0 = bang;
+    }
+    ? (at >= 0 and at < end0) {
+        end0 = at;
     }
     ? (eq >= 0 and eq < end0) {
         end0 = eq;
@@ -683,6 +687,33 @@
         ^ "";
     }
     ^ slice(field_spec, eq + 1, count(field_spec) - (eq + 1));
+}
+
+@db_schema_field_ref_table(field_spec: text) -> text {
+    colon := find(field_spec, ":");
+    ? (colon < 0) {
+        ^ "";
+    }
+    tail := slice(field_spec, colon + 1, count(field_spec) - (colon + 1));
+    at := find(tail, "@");
+    ? (at < 0) {
+        ^ "";
+    }
+    after := slice(tail, at + 1, count(tail) - (at + 1));
+    qmark := find(after, "?");
+    bang := find(after, "!");
+    eq := find(after, "=");
+    end0 := count(after);
+    ? (qmark >= 0 and qmark < end0) {
+        end0 = qmark;
+    }
+    ? (bang >= 0 and bang < end0) {
+        end0 = bang;
+    }
+    ? (eq >= 0 and eq < end0) {
+        end0 = eq;
+    }
+    ^ slice(after, 0, end0);
 }
 
 @db_schema_field_is_unique(field_spec: text) -> bool {
@@ -717,6 +748,10 @@
             ^ false;
         }
         ? (db_schema_field_is_unique(field_spec) and type_name != "i64") {
+            ^ false;
+        }
+        ref_table := db_schema_field_ref_table(field_spec);
+        ? (count(ref_table) > 0 and type_name != "i64") {
             ^ false;
         }
         idx = idx + 1;
@@ -869,6 +904,30 @@
     ^ 0;
 }
 
+@db_foreign_keys_precheck(db: DB, payload: text, fields_spec: text) -> i64 {
+    count0 := db_schema_field_count(fields_spec);
+    idx := 0;
+    ~ (idx < count0) {
+        field_spec := db_schema_field_at(fields_spec, idx);
+        ref_table := db_schema_field_ref_table(field_spec);
+        ? (count(ref_table) > 0) {
+            field_name := db_schema_field_name(field_spec);
+            value_text := row_get(payload, field_name);
+            ? (value_text != "null") {
+                ? (not db_text_is_i64(value_text)) {
+                    ^ -6;
+                }
+                referenced := db_get(db, ref_table, i64_of(value_text));
+                ? (count(referenced) == 0) {
+                    ^ -7;
+                }
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ 0;
+}
+
 @db_unique_fields_insert_indexes(db: DB, table_name: text, primary_key: i64, payload: text, fields_spec: text) -> i64 {
     count0 := db_schema_field_count(fields_spec);
     inserted := 0;
@@ -942,6 +1001,10 @@
         ? (unique_ok < 0) {
             ^ unique_ok;
         }
+        refs_ok := db_foreign_keys_precheck(db, materialized, fields_spec);
+        ? (refs_ok < 0) {
+            ^ refs_ok;
+        }
     }
     inserted := db_insert(db, table_name, key, materialized);
     ? (inserted < 0) {
@@ -970,6 +1033,10 @@
         unique_ok := db_unique_fields_precheck(db, table_name, key, payload, fields_spec);
         ? (unique_ok < 0) {
             ^ unique_ok;
+        }
+        refs_ok := db_foreign_keys_precheck(db, payload, fields_spec);
+        ? (refs_ok < 0) {
+            ^ refs_ok;
         }
     }
     updated := db_update(db, table_name, key, payload);
@@ -1006,6 +1073,10 @@
         ? (unique_ok < 0) {
             ^ unique_ok;
         }
+        refs_ok := db_foreign_keys_precheck(db, materialized, fields_spec);
+        ? (refs_ok < 0) {
+            ^ refs_ok;
+        }
     }
     wrote := db_put(db, table_name, key, materialized);
     ? (wrote < 0) {
@@ -1027,11 +1098,44 @@
     ^ wrote;
 }
 
+@db_has_reference_to_key(db: DB, target_table_name: text, key: i64) -> bool {
+    page := pager_read_page(db.pager, db_catalog_page());
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    key_text := text_of(key);
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (db_catalog_entry_is_used(entry)) {
+            table_name := db_catalog_display_name(entry);
+            fields_spec := db_table_fields(db, table_name);
+            field_count := db_schema_field_count(fields_spec);
+            field_index := 0;
+            ~ (field_index < field_count) {
+                field_spec := db_schema_field_at(fields_spec, field_index);
+                ? (db_schema_field_ref_table(field_spec) == target_table_name) {
+                    field_name := db_schema_field_name(field_spec);
+                    matches := db_scan_where_field_equals(db, table_name, field_name, key_text, "|");
+                    ? (count(matches) > 0) {
+                        ^ true;
+                    }
+                }
+                field_index = field_index + 1;
+            }
+        }
+        idx = idx + 1;
+    }
+    ^ false;
+}
+
 @db_delete_row(db: DB, table_name: text, key: i64) -> i64 {
     fields_spec := db_table_fields(db, table_name);
     payload := db_get(db, table_name, key);
     ? (count(payload) == 0) {
         ^ -1;
+    }
+    ? (db_has_reference_to_key(db, table_name, key)) {
+        ^ -8;
     }
     deleted := db_delete(db, table_name, key);
     ? (deleted < 0) {
