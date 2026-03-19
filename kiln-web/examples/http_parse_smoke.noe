@@ -1,7 +1,7 @@
 & "../lib/http.noe";
 
 @main() -> i64 {
-    raw := "POST /submit?ok=1 HTTP/1.1\nHost: localhost\nContent-Type: text/plain\n\nhi";
+    raw := "POST /submit?ok=1 HTTP/1.1\r\nHost: localhost\r\nContent-Type: text/plain\r\n\r\nhi";
     request := kiln_http_parse_request(raw);
     ? (request.method != "POST") {
         ! "method mismatch";
@@ -37,7 +37,7 @@
         ! "length mismatch";
         ^ 8;
     }
-    ? (find(response, "\n\nok") < 0) {
+    ? (find(response, "\r\n\r\nok") < 0) {
         ! "body serialization mismatch";
         ^ 9;
     }

@@ -107,8 +107,12 @@
     ^ slice(src, pos, 1);
 }
 
+@carriage_return_text() -> text {
+    ^ text_of_bytes(bytes_xor(bytes_of_text("M"), bytes_of_text("@")));
+}
+
 @is_space(ch: text) -> bool {
-    ^ ch == " " or ch == "\n" or ch == "\t" or ch == "\r";
+    ^ ch == " " or ch == "\n" or ch == "\t" or ch == carriage_return_text();
 }
 
 @is_digit(ch: text) -> bool {
@@ -474,7 +478,7 @@
             }
             | {
                 ? (esc == "r") {
-                    out = out + "\r";
+                    out = out + carriage_return_text();
                 }
                 | {
                     ? (esc == "t") {
@@ -1537,7 +1541,7 @@
                     out = out + "\\n";
                 }
                 | {
-                    ? (ch == "\r") {
+                    ? (ch == carriage_return_text()) {
                         out = out + "\\r";
                     }
                     | {

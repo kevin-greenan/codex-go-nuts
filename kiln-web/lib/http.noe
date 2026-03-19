@@ -8,11 +8,18 @@
 }
 
 @kiln_http_line_sep() -> text {
-    ^ "\n";
+    ^ "\r\n";
 }
 
 @kiln_http_header_sep() -> text {
-    ^ "\n\n";
+    ^ "\r\n\r\n";
+}
+
+@kiln_http_trim_trailing_cr(value: text) -> text {
+    ? (count(value) > 0 and slice(value, count(value) - 1, 1) == "\r") {
+        ^ slice(value, 0, count(value) - 1);
+    }
+    ^ value;
 }
 
 @kiln_http_reason_phrase(status: i64) -> text {
@@ -37,7 +44,7 @@
     ? (line_end < 0) {
         ^ raw;
     }
-    ^ slice(raw, 0, line_end);
+    ^ kiln_http_trim_trailing_cr(slice(raw, 0, line_end));
 }
 
 @kiln_http_request_method(raw: text) -> text {
@@ -120,9 +127,9 @@
     tail := slice(headers, value_start, count(headers) - value_start);
     line_end := find(tail, kiln_http_line_sep());
     ? (line_end < 0) {
-        ^ tail;
+        ^ kiln_http_trim_trailing_cr(tail);
     }
-    ^ slice(tail, 0, line_end);
+    ^ kiln_http_trim_trailing_cr(slice(tail, 0, line_end));
 }
 
 @kiln_http_response(status: i64, content_type: text, body: text) -> text {

@@ -24,7 +24,7 @@
     ? (not closed_conn or not closed_listener) {
         ^ 3;
     }
-    ? (find(request.version, "HTTP/1.1") != 0) {
+    ? (request.version != "HTTP/1.1") {
         ^ 4;
     }
     ? (request.method == "" or count(request.path) == 0) {
