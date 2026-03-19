@@ -1552,6 +1552,54 @@
     ^ value == "true" or value == "false";
 }
 
+@db_trim_spaces(value: text) -> text {
+    start := 0;
+    end0 := count(value);
+    ~ (start < end0 and slice(value, start, 1) == " ") {
+        start = start + 1;
+    }
+    ~ (end0 > start and slice(value, end0 - 1, 1) == " ") {
+        end0 = end0 - 1;
+    }
+    ^ slice(value, start, end0 - start);
+}
+
+@db_coerce_i64_text(value: text) -> text {
+    trimmed := db_trim_spaces(value);
+    normalized := trimmed;
+    ? (slice(normalized, 0, 1) == "+") {
+        normalized = slice(normalized, 1, count(normalized) - 1);
+    }
+    ? (not db_text_is_i64(normalized)) {
+        ^ "";
+    }
+    ^ text_of(i64_of(normalized));
+}
+
+@db_coerce_bool_text(value: text) -> text {
+    trimmed := db_trim_spaces(value);
+    ? (trimmed == "true" or trimmed == "TRUE" or trimmed == "True" or trimmed == "1") {
+        ^ "true";
+    }
+    ? (trimmed == "false" or trimmed == "FALSE" or trimmed == "False" or trimmed == "0") {
+        ^ "false";
+    }
+    ^ "";
+}
+
+@db_coerce_value_for_type(value: text, type_name: text) -> text {
+    ? (type_name == "text") {
+        ^ value;
+    }
+    ? (type_name == "i64") {
+        ^ db_coerce_i64_text(value);
+    }
+    ? (type_name == "bool") {
+        ^ db_coerce_bool_text(value);
+    }
+    ^ "";
+}
+
 @db_value_matches_type(value: text, type_name: text) -> bool {
     ? (type_name == "text") {
         ^ true;
@@ -1563,6 +1611,17 @@
         ^ db_text_is_bool(value);
     }
     ^ false;
+}
+
+@db_coerce_value_for_field_spec(value: text, field_spec: text) -> text {
+    type_name := db_schema_field_type(field_spec);
+    nullable := db_schema_field_is_nullable(field_spec);
+    trimmed := db_trim_spaces(value);
+    ? (nullable and (trimmed == "null" or count(trimmed) == 0)) {
+        ^ "null";
+    }
+    coerced := db_coerce_value_for_type(value, type_name);
+    ^ coerced;
 }
 
 @db_value_matches_field_spec(value: text, field_spec: text) -> bool {
@@ -1590,7 +1649,8 @@
         ? (count(field_name) == 0 or count(value) == 0) {
             ^ false;
         }
-        ? (not db_value_matches_field_spec(value, field_spec)) {
+        coerced := db_coerce_value_for_field_spec(value, field_spec);
+        ? (count(coerced) == 0 or not db_value_matches_field_spec(coerced, field_spec)) {
             ^ false;
         }
         idx = idx + 1;
@@ -1598,12 +1658,15 @@
     ^ true;
 }
 
-@db_materialize_insert_row(payload: text, fields_spec: text) -> text {
+@db_materialize_row_to_schema(payload: text, fields_spec: text, fill_missing: bool) -> text {
     expected_count := db_schema_field_count(fields_spec);
     ? (expected_count == 0) {
         ^ payload;
     }
-    ? (row_field_count(payload) > expected_count) {
+    ? (fill_missing and row_field_count(payload) > expected_count) {
+        ^ "";
+    }
+    ? (not fill_missing and row_field_count(payload) != expected_count) {
         ^ "";
     }
     out := "";
@@ -1615,7 +1678,7 @@
         ? (count(field_name) == 0) {
             ^ "";
         }
-        ? (count(value) == 0) {
+        ? (count(value) == 0 and fill_missing) {
             default0 := db_schema_field_default(field_spec);
             ? (count(default0) > 0) {
                 value = default0;
@@ -1624,13 +1687,18 @@
                 value = "null";
             }
         }
-        ? (count(value) == 0 or not db_value_matches_field_spec(value, field_spec)) {
+        coerced := db_coerce_value_for_field_spec(value, field_spec);
+        ? (count(coerced) == 0 or not db_value_matches_field_spec(coerced, field_spec)) {
             ^ "";
         }
-        out = row_append(out, field_name, value);
+        out = row_append(out, field_name, coerced);
         idx = idx + 1;
     }
     ^ out;
+}
+
+@db_materialize_insert_row(payload: text, fields_spec: text) -> text {
+    ^ db_materialize_row_to_schema(payload, fields_spec, true);
 }
 
 @db_backfill_add_field_payload(payload: text, field_spec: text) -> text {
@@ -1641,7 +1709,11 @@
     }
     default0 := db_schema_field_default(field_spec);
     ? (count(default0) > 0) {
-        ^ row_put(payload, field_name, default0);
+        coerced := db_coerce_value_for_field_spec(default0, field_spec);
+        ? (count(coerced) == 0) {
+            ^ "";
+        }
+        ^ row_put(payload, field_name, coerced);
     }
     ? (db_schema_field_is_nullable(field_spec)) {
         ^ row_put(payload, field_name, "null");
@@ -1814,29 +1886,33 @@
 
 @db_update_row(db: DB, table_name: text, key: i64, payload: text) -> i64 {
     fields_spec := db_table_fields(db, table_name);
-    ? (count(fields_spec) > 0 and not db_row_matches_schema(payload, fields_spec)) {
-        ^ -2;
+    materialized := payload;
+    ? (count(fields_spec) > 0) {
+        materialized = db_materialize_row_to_schema(payload, fields_spec, false);
+        ? (count(materialized) == 0) {
+            ^ -2;
+        }
     }
     old_payload := db_get(db, table_name, key);
     ? (count(old_payload) == 0) {
         ^ -1;
     }
     ? (count(fields_spec) > 0) {
-        unique_ok := db_unique_fields_precheck(db, table_name, key, payload, fields_spec);
+        unique_ok := db_unique_fields_precheck(db, table_name, key, materialized, fields_spec);
         ? (unique_ok < 0) {
             ^ unique_ok;
         }
-        refs_ok := db_foreign_keys_precheck(db, payload, fields_spec);
+        refs_ok := db_foreign_keys_precheck(db, materialized, fields_spec);
         ? (refs_ok < 0) {
             ^ refs_ok;
         }
     }
-    updated := db_update(db, table_name, key, payload);
+    updated := db_update(db, table_name, key, materialized);
     ? (updated < 0) {
         ^ updated;
     }
     ? (count(fields_spec) > 0) {
-        synced := db_unique_fields_update_indexes(db, table_name, key, old_payload, payload, fields_spec);
+        synced := db_unique_fields_update_indexes(db, table_name, key, old_payload, materialized, fields_spec);
         ? (synced < 0) {
             ^ synced;
         }
@@ -1855,11 +1931,11 @@
                 ^ -2;
             }
         }
-        ? (count(old_payload) > 0 and not db_row_matches_schema(payload, fields_spec)) {
-            ^ -2;
-        }
         ? (count(old_payload) > 0) {
-            materialized = payload;
+            materialized = db_materialize_row_to_schema(payload, fields_spec, false);
+            ? (count(materialized) == 0) {
+                ^ -2;
+            }
         }
         unique_ok := db_unique_fields_precheck(db, table_name, key, materialized, fields_spec);
         ? (unique_ok < 0) {

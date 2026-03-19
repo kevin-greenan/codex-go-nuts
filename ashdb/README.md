@@ -111,7 +111,8 @@ What is already working on `codex/ashdb-foundation`:
 48. `i64` field-range predicate scans and rowset helpers
 49. large-data stress coverage with 1,200-row insert/delete/compact/reopen validation
 50. WAL-style commit recovery layered on top of rollback journaling
-51. smoke-test coverage through the direct self-hosted compiler
+51. scalar coercion and canonicalization for `i64` and `bool` schema fields
+52. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
@@ -131,8 +132,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Schema and Data Model
 
-1. richer scalar validation and coercion rules
-2. broader schema evolution support beyond additive field migration
+1. broader schema evolution support beyond additive field migration
 
 ### Query Surface
 
