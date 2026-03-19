@@ -1,0 +1,84 @@
+& "../lib/db.noe";
+
+@user_payload(name: text, email_key: i64, role: text) -> text {
+    payload := "";
+    payload = row_append(payload, "name", name);
+    payload = row_append(payload, "email_key", text_of(email_key));
+    payload = row_append(payload, "role", role);
+    ^ payload;
+}
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: repair_database_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 256);
+    root0 := db_define_table(db, "users", 96, "name:text,email_key:i64!,role:text");
+    ins0 := db_insert_row(db, "users", 10, user_payload("alice", 1001, "cook"));
+    ins1 := db_insert_row(db, "users", 20, user_payload("bob", 1002, "shop"));
+    ins2 := db_insert_row(db, "users", 30, user_payload("cara", 1003, "clean"));
+
+    broke_idx := db_index_delete(db, "users", "email_key", 1002);
+    tx0 := db_begin(db);
+    orphan := pager_alloc_page(db.pager);
+    wrote_orphan := pager_write_page(db.pager, orphan, "repair-orphan");
+    rolled_back := db_rollback(db);
+
+    tx1 := db_begin(db);
+    orphan2 := pager_alloc_page(db.pager);
+    wrote_orphan2 := pager_write_page(db.pager, orphan2, "repair-orphan-2");
+    committed := db_commit(db);
+
+    unreachable0 := db_unreachable_pages_text(db, "|");
+    report0 := db_validate_report(db);
+    repair := db_repair_database_report(db);
+    idx0 := db_index_get(db, "users", "email_key", 1002);
+    unreachable1 := db_unreachable_pages_text(db, "|");
+    report1 := db_validate_report(db);
+    synced0 := db_sync(db);
+    closed0 := db_close(db);
+
+    reopened := db_open(arg(1), 256);
+    idx1 := db_index_get(reopened, "users", "email_key", 1002);
+    row1 := db_get(reopened, "users", 20);
+    report2 := db_validate_report(reopened);
+    state2 := db_recovery_state_text(reopened);
+    closed1 := db_close(reopened);
+
+    ? (root0 <= 0 or ins0 < 0 or ins1 < 0 or ins2 < 0) {
+        ! "setup=" + text_of(root0) + ":" + text_of(ins0) + ":" + text_of(ins1) + ":" + text_of(ins2);
+        ^ 2;
+    }
+    ? (broke_idx < 0 or not tx0 or orphan <= 1 or wrote_orphan != db.pager.page_size or not rolled_back) {
+        ! "rollback_orphan=" + text_of(broke_idx) + ":" + text_of(tx0) + ":" + text_of(orphan) + ":" + text_of(wrote_orphan) + ":" + text_of(rolled_back);
+        ^ 3;
+    }
+    ? (not tx1 or orphan2 <= 1 or wrote_orphan2 != db.pager.page_size or not committed) {
+        ! "commit_orphan=" + text_of(tx1) + ":" + text_of(orphan2) + ":" + text_of(wrote_orphan2) + ":" + text_of(committed);
+        ^ 4;
+    }
+    ? (find(unreachable0, text_of(orphan2)) < 0 or find(report0, "unique index email_key is inconsistent") < 0) {
+        ! "broken=" + unreachable0 + ":" + report0;
+        ^ 5;
+    }
+    ? (row_get(repair, "ok") != "true") {
+        ! "repair=" + repair;
+        ^ 6;
+    }
+    ? (idx0 != 20 or count(unreachable1) != 0 or report1 != "ok") {
+        ! "after_repair=" + text_of(idx0) + ":" + unreachable1 + ":" + report1;
+        ^ 7;
+    }
+    ? (not synced0 or not closed0) {
+        ^ 8;
+    }
+    ? (idx1 != 20 or row_get(row1, "name") != "bob" or report2 != "ok" or row_get(state2, "lock_held") != "true" or not closed1) {
+        ! "reopen=" + text_of(idx1) + ":" + row1 + ":" + report2 + ":" + state2;
+        ^ 9;
+    }
+
+    ! "ashdb repair database smoke ok";
+    ^ 0;
+}

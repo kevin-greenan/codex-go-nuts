@@ -2791,6 +2791,41 @@
     ^ repaired;
 }
 
+@db_repair_database_report(db: DB) -> text {
+    ? (not db_can_write(db)) {
+        ^ db_result_error("lock not held");
+    }
+    unique_repaired := db_repair_unique_indexes(db);
+    ? (unique_repaired < 0) {
+        ^ db_result_error("unique repair failed");
+    }
+    reclaimed := db_reclaim_unreachable_pages(db);
+    ? (reclaimed < 0) {
+        ^ db_result_error("unreachable reclaim failed");
+    }
+    compacted := db_compact_database(db);
+    ? (compacted < 0) {
+        ^ db_result_error("compaction failed");
+    }
+    validation := db_validate_report(db);
+    ? (validation != "ok") {
+        ^ db_result_error(validation);
+    }
+    out := "";
+    out = row_append(out, "ok", "true");
+    out = row_append(out, "found", "true");
+    out = row_append(out, "unique_indexes_repaired", text_of(unique_repaired));
+    out = row_append(out, "reclaimed_pages", text_of(reclaimed));
+    out = row_append(out, "tables_compacted", text_of(compacted));
+    out = row_append(out, "validation", validation);
+    ^ out;
+}
+
+@db_repair_database(db: DB) -> bool {
+    report := db_repair_database_report(db);
+    ^ row_get(report, "ok") == "true";
+}
+
 @db_scan_where_page(db: DB, table: Table, page_id: i64, field_name: text, expected_value: text, separator: text) -> text {
     page_kind := table_page_kind(table, page_id);
     ? (page_kind == "L") {

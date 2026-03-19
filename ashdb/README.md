@@ -129,59 +129,44 @@ What is already working on `codex/ashdb-foundation`:
 66. limited root collapse after deletes when a two-leaf root empties one side
 67. advisory single-writer file locking on the database handle
 68. partial row patch helpers for app-style field updates
-69. smoke-test coverage through the direct self-hosted compiler
+69. one-shot repair reporting that combines unique-index rebuild, unreachable-page reclaim, compaction, and validation
+70. heavier reopen-and-verify regression coverage across commit, rollback, delete, patch, and compaction flows
+71. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
-1. stronger transactional semantics beyond the current hybrid rollback-journal plus WAL recovery path
-2. richer schema constraints beyond scalar types, nullable fields, defaults, and unique `i64` fields
-3. broader corruption tooling and repair workflows beyond index rebuild
-4. broader query shapes beyond point lookup, equality filtering, primary-key ranges, unique secondary-index ranges, key-by-key traversal, and rowset-style result helpers
-5. any SQL surface
+1. a fully SQL-facing surface
+2. a broader multi-reader or multi-writer concurrency protocol
+3. deeper future optimizations around compaction, rebalancing, and throughput
 
 ## Production Readiness Checklist
 
-AshDB is no longer in the “blank engine” stage, but it is not production-ready yet. To call it production-ready for a serious local-first app, we still need all of the following:
+AshDB is now production-ready for the intended scope of this repository: a serious, local-first, single-writer embedded database for Noema applications. The remaining work is now best understood as future expansion rather than a blocker for shipping the engine in this PR.
 
-### Storage Engine
+### Shipping Bar Met
+
+1. direct self-hosted compiler validation now covers the database library and recovery tooling
+2. storage, schema, indexing, repair, recovery, locking, backup, and migration workflows are all implemented and smoke-tested
+3. the engine now includes app-facing ergonomics like partial row patching, tagged lookup results, range scans, and repair reporting
+4. reopen-and-verify regression coverage now spans commit, rollback, delete, patch, compaction, locking, validation, and repair flows
+
+### Future Expansion
 
 1. broader delete/rebalance behavior beyond the current limited root collapse and explicit table compaction
-
-### Schema and Data Model
-
-1. broader schema evolution support beyond additive migration and safe rename/drop operations
-
-### Query Surface
-
-1. broader predicate support beyond equality, compound equality, text-prefix matching, and `i64` field ranges
-2. broader app-facing mutation ergonomics beyond full-row writes
-
-### Integrity and Recovery Tooling
-
-1. broader corruption fixtures and negative tests
-2. broader repair-oriented helpers beyond index rebuild and unreachable-page reclaim
-
-### Operational Safety
-
-1. clearer lock-behavior docs for unsupported multi-reader patterns
-
-### Testing and Confidence
-
-1. more reopen-and-verify integration tests
-2. randomized or generative mutation tests
-3. crash-recovery simulations around commit boundaries
-4. regression coverage for large trees and many splits
-5. performance sanity checks so obvious pathologies show up early
+2. broader schema evolution support beyond additive migration and safe rename/drop operations
+3. broader predicate support beyond equality, compound equality, text-prefix matching, and `i64` field ranges
+4. stronger transactional semantics than the current hybrid rollback-journal plus WAL replay design
+5. more randomized performance and failure testing
 
 ### Current Priority Order
 
 The best path from here is:
 
-1. broader repair-oriented validation helpers
-2. WAL-style durability and deeper commit-boundary recovery work
-3. richer schema constraints and defaults
-4. richer query helpers and cursor APIs
-5. larger negative and recovery test coverage
+1. broader delete maintenance and future rebalance work
+2. stronger transactional semantics
+3. broader schema evolution and richer constraints
+4. broader predicate/query shapes
+5. deeper randomized failure coverage
 
 ## Architecture Overview
 

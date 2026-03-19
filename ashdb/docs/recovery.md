@@ -106,6 +106,6 @@ AshDB now exposes `db_recovery_state_text(...)` for smoke tests and debugging. I
 ## Current Limitations
 
 1. This design assumes a single process writing the database.
-2. There is no file-locking protocol yet.
+2. Locking is advisory and single-writer oriented, not a full reader-writer protocol.
 3. WAL entries are whole-page images for the touched set, not logical records.
 4. The design is aimed at correctness and debuggability before throughput.
