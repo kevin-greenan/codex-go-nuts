@@ -55,6 +55,40 @@ This folder should grow into:
 4. `kiln-web/tests/` for request and response cases.
 5. `kiln-web/dev/` for local harnesses.
 
+## Current Status
+
+Kiln Web is now in strong MVP shape on `codex/kiln-web-foundation`.
+
+What is already working:
+
+1. inbound listener support is landed in both compiler paths
+2. a direct-compiled `hello` server runs locally and responds to HTTP requests
+3. the HTTP layer now covers request lines, headers, repeated headers, query params, cookies, urlencoded forms, repeated form values, and response serialization
+4. routing supports method/path matching, `404` versus `405`, and `:param` path segments
+5. reply helpers cover text, HTML, redirects, custom headers, cookies, flash-cookie conventions, CSS, and JavaScript
+6. the HTML layer covers escaping, tags, attributes, page shells, forms, and linked stylesheet helpers
+7. the app layer now covers one-shot server flow, route apps, static reply apps, and file-backed asset serving for local development
+8. direct-compiled localhost examples now cover text routes, HTML pages, forms, cookies, and CSS assets
+
+What still belongs to later expansion work:
+
+1. richer body formats beyond urlencoded forms
+2. more dynamic app conventions above the current app wrapper
+3. deeper long-running server ergonomics beyond the current one-shot helpers
+
+## Verification
+
+Kiln Web should be treated as direct-compiler-first.
+
+Recommended verification flow:
+
+1. run grouped direct suites with [tools/run_direct_smokes.sh](/Users/kevin/Documents/Projects/AI/codex-go-nuts/kiln-web/tools/run_direct_smokes.sh)
+2. start with the `core` suite while iterating on framework code
+3. run the `apps` suite before merging app-layer changes
+4. use the PR acceptance set in [examples/README.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/kiln-web/examples/README.md) before merge
+
+For a milestone-by-milestone inventory, use [docs/status.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/kiln-web/docs/status.md).
+
 ## Architecture Overview
 
 Kiln Web should be built in layers:

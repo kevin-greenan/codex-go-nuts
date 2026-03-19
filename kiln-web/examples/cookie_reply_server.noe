@@ -1,0 +1,23 @@
+& "../lib/server.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: cookie_reply_server <port>";
+        ^ 1;
+    }
+
+    port := i64_of(arg(1));
+    server := kiln_server_receive_once(port, 4096);
+    request := server.request;
+
+    reply := kiln_reply_with_cookie(kiln_reply_text(200, "cookie reply ok"), "session", "xyz789");
+    reply = kiln_reply_with_header(reply, "X-Trace", "trace-cookie");
+    ? (request.version != "HTTP/1.1") {
+        ^ 2;
+    }
+    finished := kiln_server_finish_reply(server, reply);
+    ? (not finished) {
+        ^ 3;
+    }
+    ^ 0;
+}

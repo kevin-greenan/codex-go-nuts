@@ -1,0 +1,407 @@
+%KilnHttpRequest {
+    method: text;
+    path: text;
+    version: text;
+    headers: text;
+    body: text;
+    raw: text;
+}
+
+@kiln_http_line_sep() -> text {
+    ^ "\r\n";
+}
+
+@kiln_http_header_sep() -> text {
+    ^ "\r\n\r\n";
+}
+
+@kiln_http_trim_trailing_cr(value: text) -> text {
+    ? (count(value) > 0 and slice(value, count(value) - 1, 1) == "\r") {
+        ^ slice(value, 0, count(value) - 1);
+    }
+    ^ value;
+}
+
+@kiln_http_reason_phrase(status: i64) -> text {
+    ? (status == 200) {
+        ^ "OK";
+    }
+    ? (status == 404) {
+        ^ "Not Found";
+    }
+    ? (status == 405) {
+        ^ "Method Not Allowed";
+    }
+    ^ "Internal Server Error";
+}
+
+@kiln_http_status_line(status: i64) -> text {
+    ^ "HTTP/1.1 " + text_of(status) + " " + kiln_http_reason_phrase(status);
+}
+
+@kiln_http_request_line(raw: text) -> text {
+    line_end := find(raw, kiln_http_line_sep());
+    ? (line_end < 0) {
+        ^ raw;
+    }
+    ^ kiln_http_trim_trailing_cr(slice(raw, 0, line_end));
+}
+
+@kiln_http_request_method(raw: text) -> text {
+    line := kiln_http_request_line(raw);
+    first_space := find(line, " ");
+    ? (first_space < 0) {
+        ^ "";
+    }
+    ^ slice(line, 0, first_space);
+}
+
+@kiln_http_request_path(raw: text) -> text {
+    line := kiln_http_request_line(raw);
+    first_space := find(line, " ");
+    ? (first_space < 0) {
+        ^ "";
+    }
+    rest := slice(line, first_space + 1, count(line) - (first_space + 1));
+    second_space := find(rest, " ");
+    ? (second_space < 0) {
+        ^ rest;
+    }
+    ^ slice(rest, 0, second_space);
+}
+
+@kiln_http_request_version(raw: text) -> text {
+    line := kiln_http_request_line(raw);
+    first_space := find(line, " ");
+    ? (first_space < 0) {
+        ^ "";
+    }
+    rest := slice(line, first_space + 1, count(line) - (first_space + 1));
+    second_space := find(rest, " ");
+    ? (second_space < 0) {
+        ^ "";
+    }
+    ^ slice(rest, second_space + 1, count(rest) - (second_space + 1));
+}
+
+@kiln_http_request_headers(raw: text) -> text {
+    line_end := find(raw, kiln_http_line_sep());
+    header_sep := find(raw, kiln_http_header_sep());
+    ? (line_end < 0 or header_sep < 0) {
+        ^ "";
+    }
+    start0 := line_end + count(kiln_http_line_sep());
+    ? (start0 > header_sep) {
+        ^ "";
+    }
+    ^ slice(raw, start0, header_sep - start0);
+}
+
+@kiln_http_request_body(raw: text) -> text {
+    header_sep := find(raw, kiln_http_header_sep());
+    ? (header_sep < 0) {
+        ^ "";
+    }
+    body_start := header_sep + count(kiln_http_header_sep());
+    ^ slice(raw, body_start, count(raw) - body_start);
+}
+
+@kiln_http_parse_request(raw: text) -> KilnHttpRequest {
+    ^ KilnHttpRequest {
+        method: kiln_http_request_method(raw),
+        path: kiln_http_request_path(raw),
+        version: kiln_http_request_version(raw),
+        headers: kiln_http_request_headers(raw),
+        body: kiln_http_request_body(raw),
+        raw: raw
+    };
+}
+
+@kiln_http_header_value(headers: text, name: text) -> text {
+    marker := name + ": ";
+    start0 := find(headers, marker);
+    ? (start0 < 0) {
+        ^ "";
+    }
+    value_start := start0 + count(marker);
+    tail := slice(headers, value_start, count(headers) - value_start);
+    line_end := find(tail, kiln_http_line_sep());
+    ? (line_end < 0) {
+        ^ kiln_http_trim_trailing_cr(tail);
+    }
+    ^ kiln_http_trim_trailing_cr(slice(tail, 0, line_end));
+}
+
+@kiln_http_header_line_at(headers: text, line_index: i64) -> text {
+    remaining := headers;
+    idx := 0;
+    ~ (idx < line_index) {
+        line_end := find(remaining, kiln_http_line_sep());
+        ? (line_end < 0) {
+            ^ "";
+        }
+        next_start := line_end + count(kiln_http_line_sep());
+        remaining = slice(remaining, next_start, count(remaining) - next_start);
+        idx = idx + 1;
+    }
+
+    line_end := find(remaining, kiln_http_line_sep());
+    ? (line_end < 0) {
+        ^ kiln_http_trim_trailing_cr(remaining);
+    }
+    ^ kiln_http_trim_trailing_cr(slice(remaining, 0, line_end));
+}
+
+@kiln_http_header_name(line: text) -> text {
+    colon := find(line, ":");
+    ? (colon < 0) {
+        ^ "";
+    }
+    ^ slice(line, 0, colon);
+}
+
+@kiln_http_header_line_value(line: text) -> text {
+    colon := find(line, ":");
+    ? (colon < 0) {
+        ^ "";
+    }
+    value_start := colon + 1;
+    value := slice(line, value_start, count(line) - value_start);
+    ? (count(value) > 0 and slice(value, 0, 1) == " ") {
+        ^ slice(value, 1, count(value) - 1);
+    }
+    ^ value;
+}
+
+@kiln_http_header_values(headers: text, name: text) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx <= count(headers)) {
+        line := kiln_http_header_line_at(headers, idx);
+        ? (count(line) == 0) {
+            ^ out;
+        }
+        ? (kiln_http_header_name(line) == name) {
+            out = out + kiln_http_header_line_value(line) + ";";
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@kiln_http_query_string(path: text) -> text {
+    query_at := find(path, "?");
+    ? (query_at < 0) {
+        ^ "";
+    }
+    ^ slice(path, query_at + 1, count(path) - (query_at + 1));
+}
+
+@kiln_http_path_only(path: text) -> text {
+    query_at := find(path, "?");
+    ? (query_at < 0) {
+        ^ path;
+    }
+    ^ slice(path, 0, query_at);
+}
+
+@kiln_http_pair_at(payload: text, pair_index: i64, separator: text) -> text {
+    remaining := payload;
+    idx := 0;
+    ~ (idx < pair_index) {
+        split_at := find(remaining, separator);
+        ? (split_at < 0) {
+            ^ "";
+        }
+        next_start := split_at + count(separator);
+        remaining = slice(remaining, next_start, count(remaining) - next_start);
+        idx = idx + 1;
+    }
+
+    split_at := find(remaining, separator);
+    ? (split_at < 0) {
+        ^ remaining;
+    }
+    ^ slice(remaining, 0, split_at);
+}
+
+@kiln_http_pair_name(pair: text) -> text {
+    eq := find(pair, "=");
+    ? (eq < 0) {
+        ^ pair;
+    }
+    ^ slice(pair, 0, eq);
+}
+
+@kiln_http_pair_value(pair: text) -> text {
+    eq := find(pair, "=");
+    ? (eq < 0) {
+        ^ "";
+    }
+    ^ slice(pair, eq + 1, count(pair) - (eq + 1));
+}
+
+@kiln_http_hex_digit_value(ch: text) -> i64 {
+    digits := "0123456789ABCDEF";
+    lower := "0123456789abcdef";
+    upper_at := find(digits, ch);
+    ? (upper_at >= 0) {
+        ^ upper_at;
+    }
+    ^ find(lower, ch);
+}
+
+@kiln_http_ascii_table() -> text {
+    ^ " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+}
+
+@kiln_http_char_from_code(code: i64) -> text {
+    ? (code >= 32 and code <= 126) {
+        ^ slice(kiln_http_ascii_table(), code - 32, 1);
+    }
+    ? (code == 10) {
+        ^ "\n";
+    }
+    ? (code == 13) {
+        ^ "\r";
+    }
+    ? (code == 9) {
+        ^ "\t";
+    }
+    ^ "";
+}
+
+@kiln_http_decode_component(value: text) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx < count(value)) {
+        ch := slice(value, idx, 1);
+        ? (ch == "+") {
+            out = out + " ";
+            idx = idx + 1;
+        }
+        | {
+            ? (ch == "%" and idx + 2 < count(value)) {
+                hi := kiln_http_hex_digit_value(slice(value, idx + 1, 1));
+                lo := kiln_http_hex_digit_value(slice(value, idx + 2, 1));
+                ? (hi >= 0 and lo >= 0) {
+                    out = out + kiln_http_char_from_code((hi * 16) + lo);
+                    idx = idx + 3;
+                }
+                | {
+                    out = out + ch;
+                    idx = idx + 1;
+                }
+            }
+            | {
+                out = out + ch;
+                idx = idx + 1;
+            }
+        }
+    }
+    ^ out;
+}
+
+@kiln_http_param_value(payload: text, separator: text, name: text) -> text {
+    idx := 0;
+    ~ (idx <= count(payload)) {
+        pair := kiln_http_pair_at(payload, idx, separator);
+        ? (count(pair) == 0) {
+            ^ "";
+        }
+        ? (kiln_http_decode_component(kiln_http_pair_name(pair)) == name) {
+            ^ kiln_http_decode_component(kiln_http_pair_value(pair));
+        }
+        idx = idx + 1;
+    }
+    ^ "";
+}
+
+@kiln_http_param_values(payload: text, separator: text, name: text) -> text {
+    out := "";
+    idx := 0;
+    ~ (idx <= count(payload)) {
+        pair := kiln_http_pair_at(payload, idx, separator);
+        ? (count(pair) == 0) {
+            ^ out;
+        }
+        ? (kiln_http_decode_component(kiln_http_pair_name(pair)) == name) {
+            out = out + kiln_http_decode_component(kiln_http_pair_value(pair)) + ";";
+        }
+        idx = idx + 1;
+    }
+    ^ out;
+}
+
+@kiln_http_cookie_value(headers: text, name: text) -> text {
+    cookies := kiln_http_header_values(headers, "Cookie");
+    idx := 0;
+    ~ (idx <= count(cookies)) {
+        cookie_line := kiln_http_pair_at(cookies, idx, ";");
+        ? (count(cookie_line) == 0) {
+            ^ "";
+        }
+        value := kiln_http_param_value(cookie_line, "; ", name);
+        ? (count(value) > 0) {
+            ^ value;
+        }
+        fallback_name := kiln_http_pair_name(cookie_line);
+        ? (kiln_http_decode_component(kiln_http_trim_leading_space(fallback_name)) == name) {
+            ^ kiln_http_decode_component(kiln_http_pair_value(cookie_line));
+        }
+        idx = idx + 1;
+    }
+    ^ "";
+}
+
+@kiln_http_trim_leading_space(value: text) -> text {
+    ? (count(value) > 0 and slice(value, 0, 1) == " ") {
+        ^ slice(value, 1, count(value) - 1);
+    }
+    ^ value;
+}
+
+@kiln_http_query_value(path: text, name: text) -> text {
+    ^ kiln_http_param_value(kiln_http_query_string(path), "&", name);
+}
+
+@kiln_http_query_values(path: text, name: text) -> text {
+    ^ kiln_http_param_values(kiln_http_query_string(path), "&", name);
+}
+
+@kiln_http_content_type(request: KilnHttpRequest) -> text {
+    ^ kiln_http_header_value(request.headers, "Content-Type");
+}
+
+@kiln_http_form_value(request: KilnHttpRequest, name: text) -> text {
+    content_type := kiln_http_content_type(request);
+    ? (find(content_type, "application/x-www-form-urlencoded") != 0) {
+        ^ "";
+    }
+    ^ kiln_http_param_value(request.body, "&", name);
+}
+
+@kiln_http_form_values(request: KilnHttpRequest, name: text) -> text {
+    content_type := kiln_http_content_type(request);
+    ? (find(content_type, "application/x-www-form-urlencoded") != 0) {
+        ^ "";
+    }
+    ^ kiln_http_param_values(request.body, "&", name);
+}
+
+@kiln_http_body_text(request: KilnHttpRequest) -> text {
+    ^ request.body;
+}
+
+@kiln_http_response(status: i64, content_type: text, body: text) -> text {
+    response := kiln_http_status_line(status) + kiln_http_line_sep();
+    response = response + "Content-Type: " + content_type + kiln_http_line_sep();
+    response = response + "Content-Length: " + text_of(count(body)) + kiln_http_line_sep();
+    response = response + "Connection: close" + kiln_http_line_sep();
+    response = response + kiln_http_line_sep();
+    ^ response + body;
+}
+
+@kiln_http_text(status: i64, body: text) -> text {
+    ^ kiln_http_response(status, "text/plain", body);
+}

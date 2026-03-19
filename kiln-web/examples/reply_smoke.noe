@@ -1,0 +1,59 @@
+& "../lib/router.noe";
+
+@main() -> i64 {
+    dispatch := KilnDispatch { ok: true, status: 200, route_name: "user-show", params: "id=42;slug=ada;" };
+    ? (not kiln_dispatch_is(dispatch, "user-show")) {
+        ! "dispatch route mismatch";
+        ^ 1;
+    }
+    ? (kiln_dispatch_param(dispatch, "id") != "42") {
+        ! "dispatch param mismatch";
+        ^ 2;
+    }
+
+    reply := kiln_reply_text(200, "hello");
+    response := kiln_reply_response(reply);
+    ? (find(response, "HTTP/1.1 200 OK") < 0) {
+        ! "reply status mismatch";
+        ^ 3;
+    }
+    ? (find(response, "Content-Type: text/plain") < 0) {
+        ! "reply content-type mismatch";
+        ^ 4;
+    }
+
+    redirect := kiln_reply_redirect("/next");
+    redirect_response := kiln_reply_response(redirect);
+    ? (find(redirect_response, "HTTP/1.1 302") < 0) {
+        ! "redirect status mismatch";
+        ^ 5;
+    }
+    ? (find(redirect_response, "Location: /next") < 0) {
+        ! "redirect location mismatch";
+        ^ 6;
+    }
+
+    cookie_reply := kiln_reply_with_cookie(kiln_reply_text(200, "cookie ok"), "session", "abc123");
+    cookie_response := kiln_reply_response(cookie_reply);
+    ? (find(cookie_response, "Set-Cookie: session=abc123; Path=/") < 0) {
+        ! "cookie header mismatch";
+        ^ 8;
+    }
+
+    header_reply := kiln_reply_with_header(kiln_reply_text(200, "header ok"), "X-Trace", "trace-1");
+    header_response := kiln_reply_response(header_reply);
+    ? (find(header_response, "X-Trace: trace-1") < 0) {
+        ! "custom header mismatch";
+        ^ 9;
+    }
+
+    fallback := kiln_dispatch_fallback_text(KilnDispatch { ok: false, status: 405, route_name: "", params: "" });
+    fallback_response := kiln_reply_response(fallback);
+    ? (find(fallback_response, "405 Method Not Allowed") < 0) {
+        ! "fallback mismatch";
+        ^ 7;
+    }
+
+    ! "kiln reply smoke ok";
+    ^ 0;
+}

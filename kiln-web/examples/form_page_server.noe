@@ -1,0 +1,30 @@
+& "../lib/server.noe";
+& "../lib/html.noe";
+
+@form_page_reply() -> KilnReply {
+    form := kiln_html_form("post", "/notes", kiln_html_field("Name", "name", kiln_html_input_text("name", "Ada Lovelace")) + kiln_html_field("Note", "note", kiln_html_textarea("note", "First programmer")) + kiln_html_button("Save Note"));
+    links :: list<text> := [
+        kiln_html_link("/about", "About"),
+        kiln_html_link("/users/42", "User 42")
+    ];
+    body := form + kiln_html_unordered_list(links);
+    ^ kiln_reply_html(200, kiln_html_page_shell("Kiln Forms", "Composable form helpers are live.", body));
+}
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: form_page_server <port>";
+        ^ 1;
+    }
+
+    port := i64_of(arg(1));
+    server := kiln_server_receive_once(port, 4096);
+    ? (server.request.version != "HTTP/1.1") {
+        ^ 2;
+    }
+    finished := kiln_server_finish_reply(server, form_page_reply());
+    ? (not finished) {
+        ^ 3;
+    }
+    ^ 0;
+}

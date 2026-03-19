@@ -1,0 +1,31 @@
+& "../lib/app.noe";
+& "../lib/html.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: static_site_server <port>";
+        ^ 1;
+    }
+
+    routes :: list<KilnRoute> := [
+        kiln_route("GET", "/", "home"),
+        kiln_route("GET", "/about", "about")
+    ];
+    replies :: list<KilnAppRouteReply> := [
+        kiln_app_route_reply("home", kiln_reply_html(200, kiln_html_page_shell("Kiln Static", "Static pages through KilnStaticApp.", kiln_html_paragraph("Welcome home.") + kiln_html_link("/about", "About")))),
+        kiln_app_route_reply("about", kiln_reply_html(200, kiln_html_page_shell("About Kiln", "This page is served through the static app layer.", kiln_html_paragraph("Static route reply mapping is working.") + kiln_html_link("/", "Back home"))))
+    ];
+    site := kiln_static_app(routes, replies, 4096);
+
+    port := i64_of(arg(1));
+    req := kiln_static_app_receive_once(site, port);
+    ? (kiln_app_request(req).version != "HTTP/1.1") {
+        ^ 2;
+    }
+    reply := kiln_static_app_reply(site, req.dispatch);
+    finished := kiln_static_app_finish_reply(req, reply);
+    ? (not finished) {
+        ^ 3;
+    }
+    ^ 0;
+}

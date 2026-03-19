@@ -107,8 +107,12 @@
     ^ slice(src, pos, 1);
 }
 
+@carriage_return_text() -> text {
+    ^ text_of_bytes(bytes_xor(bytes_of_text("M"), bytes_of_text("@")));
+}
+
 @is_space(ch: text) -> bool {
-    ^ ch == " " or ch == "\n" or ch == "\t" or ch == "\r";
+    ^ ch == " " or ch == "\n" or ch == "\t" or ch == carriage_return_text();
 }
 
 @is_digit(ch: text) -> bool {
@@ -474,7 +478,7 @@
             }
             | {
                 ? (esc == "r") {
-                    out = out + "\r";
+                    out = out + carriage_return_text();
                 }
                 | {
                     ? (esc == "t") {
@@ -1438,6 +1442,15 @@
         ? (expr.name == "i64_of") {
             ^ "i64";
         }
+        ? (expr.name == "listener_open") {
+            ^ "listener";
+        }
+        ? (expr.name == "listener_accept") {
+            ^ "socket";
+        }
+        ? (expr.name == "listener_close") {
+            ^ "bool";
+        }
         ? (expr.name == "socket_open") {
             ^ "socket";
         }
@@ -1528,7 +1541,7 @@
                     out = out + "\\n";
                 }
                 | {
-                    ? (ch == "\r") {
+                    ? (ch == carriage_return_text()) {
                         out = out + "\\r";
                     }
                     | {
@@ -1916,6 +1929,68 @@
             arg0 := args[0];
             arg0_ok := native_supported_expr(program, fn, locals, arg0);
             ^ arg0_ok;
+        }
+        ? (expr.name == "listener_open") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
+        }
+        ? (expr.name == "listener_accept") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
+        }
+        ? (expr.name == "listener_close") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
+        }
+        ? (expr.name == "socket_open") {
+            args := expr.args;
+            ? (count(args) != 2) {
+                ^ false;
+            }
+            arg0_ok := native_supported_expr(program, fn, locals, args[0]);
+            arg1_ok := native_supported_expr(program, fn, locals, args[1]);
+            ^ arg0_ok and arg1_ok;
+        }
+        ? (expr.name == "socket_send") {
+            args := expr.args;
+            ? (count(args) != 2) {
+                ^ false;
+            }
+            arg0_ok := native_supported_expr(program, fn, locals, args[0]);
+            arg1_ok := native_supported_expr(program, fn, locals, args[1]);
+            ^ arg0_ok and arg1_ok;
+        }
+        ? (expr.name == "socket_recv") {
+            args := expr.args;
+            ? (count(args) != 2) {
+                ^ false;
+            }
+            arg0_ok := native_supported_expr(program, fn, locals, args[0]);
+            arg1_ok := native_supported_expr(program, fn, locals, args[1]);
+            ^ arg0_ok and arg1_ok;
+        }
+        ? (expr.name == "socket_recv_all") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
+        }
+        ? (expr.name == "socket_close") {
+            args := expr.args;
+            ? (count(args) != 1) {
+                ^ false;
+            }
+            ^ native_supported_expr(program, fn, locals, args[0]);
         }
         ? (expr.name == "host_cc") {
             args := expr.args;
@@ -2350,6 +2425,64 @@
             out = out + "    bl _noema_i64_of_native\n";
             ^ out;
         }
+        ? (expr.name == "listener_open") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_listener_open_native\n";
+            ^ out;
+        }
+        ? (expr.name == "listener_accept") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_listener_accept_native\n";
+            ^ out;
+        }
+        ? (expr.name == "listener_close") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_listener_close_native\n";
+            ^ out;
+        }
+        ? (expr.name == "socket_open") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, args[1]);
+            out = out + "    mov x1, x0\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_socket_open_native\n";
+            ^ out;
+        }
+        ? (expr.name == "socket_send") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, args[1]);
+            out = out + "    mov x1, x0\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_socket_send_native\n";
+            ^ out;
+        }
+        ? (expr.name == "socket_recv") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    sub sp, sp, #16\n";
+            out = out + "    str x0, [sp]\n";
+            out = out + native_expr(program, fn, locals, args[1]);
+            out = out + "    mov x1, x0\n";
+            out = out + "    ldr x0, [sp]\n";
+            out = out + "    add sp, sp, #16\n";
+            out = out + "    bl _noema_socket_recv_native\n";
+            ^ out;
+        }
+        ? (expr.name == "socket_recv_all") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_socket_recv_all_native\n";
+            ^ out;
+        }
+        ? (expr.name == "socket_close") {
+            out := native_expr(program, fn, locals, args[0]);
+            out = out + "    bl _noema_socket_close_native\n";
+            ^ out;
+        }
         ? (expr.name == "host_cc") {
             out := native_expr(program, fn, locals, args[0]);
             out = out + "    sub sp, sp, #16\n";
@@ -2616,7 +2749,15 @@
     out = out + ".extern _close\n";
     out = out + ".extern _chmod\n";
     out = out + ".extern _fsync\n";
+    out = out + ".extern _flock\n";
     out = out + ".extern _lseek\n";
+    out = out + ".extern _socket\n";
+    out = out + ".extern _setsockopt\n";
+    out = out + ".extern _bind\n";
+    out = out + ".extern _listen\n";
+    out = out + ".extern _accept\n";
+    out = out + ".extern _send\n";
+    out = out + ".extern _recv\n";
     out = out + ".extern _snprintf\n";
     out = out + ".extern _strtoll\n";
     out = out + ".extern _system\n\n";
@@ -2937,6 +3078,143 @@
     out = out + "    ldr x0, [x0]\n";
     out = out + "    mov x1, #8\n";
     out = out + "    bl _flock\n";
+    out = out + "    cmp x0, #0\n";
+    out = out + "    cset x0, eq\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_listener_open_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #64\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    mov x0, #2\n";
+    out = out + "    mov x1, #1\n";
+    out = out + "    mov x2, #0\n";
+    out = out + "    bl _socket\n";
+    out = out + "    str x0, [sp, #8]\n";
+    out = out + "    mov x9, #1\n";
+    out = out + "    str w9, [sp, #48]\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    mov x1, #65535\n";
+    out = out + "    mov x2, #4\n";
+    out = out + "    add x3, sp, #48\n";
+    out = out + "    mov x4, #4\n";
+    out = out + "    bl _setsockopt\n";
+    out = out + "    add x9, sp, #16\n";
+    out = out + "    mov w10, #16\n";
+    out = out + "    strb w10, [x9]\n";
+    out = out + "    mov w10, #2\n";
+    out = out + "    strb w10, [x9, #1]\n";
+    out = out + "    ldr x10, [sp]\n";
+    out = out + "    and x11, x10, #255\n";
+    out = out + "    lsl x11, x11, #8\n";
+    out = out + "    lsr x12, x10, #8\n";
+    out = out + "    and x12, x12, #255\n";
+    out = out + "    orr x11, x11, x12\n";
+    out = out + "    strh w11, [x9, #2]\n";
+    out = out + "    mov w10, #127\n";
+    out = out + "    lsl w10, w10, #24\n";
+    out = out + "    add w10, w10, #1\n";
+    out = out + "    rev w10, w10\n";
+    out = out + "    str w10, [x9, #4]\n";
+    out = out + "    mov x10, #0\n";
+    out = out + "    str x10, [x9, #8]\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    add x1, sp, #16\n";
+    out = out + "    mov x2, #16\n";
+    out = out + "    bl _bind\n";
+    out = out + "    cmp x0, #0\n";
+    out = out + "    b.ne L_listener_open_fail\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    mov x1, #16\n";
+    out = out + "    bl _listen\n";
+    out = out + "    cmp x0, #0\n";
+    out = out + "    b.ne L_listener_open_fail\n";
+    out = out + "    mov x0, #8\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    ldr x9, [sp, #8]\n";
+    out = out + "    str x9, [x0]\n";
+    out = out + "    add sp, sp, #64\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n";
+    out = out + "L_listener_open_fail:\n";
+    out = out + "    ldr x0, [sp, #8]\n";
+    out = out + "    bl _close\n";
+    out = out + "    mov x0, #0\n";
+    out = out + "    add sp, sp, #64\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_listener_accept_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #16\n";
+    out = out + "    ldr x0, [x0]\n";
+    out = out + "    mov x1, #0\n";
+    out = out + "    mov x2, #0\n";
+    out = out + "    bl _accept\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    mov x0, #8\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    ldr x9, [sp]\n";
+    out = out + "    str x9, [x0]\n";
+    out = out + "    add sp, sp, #16\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_listener_close_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    ldr x0, [x0]\n";
+    out = out + "    bl _close\n";
+    out = out + "    cmp x0, #0\n";
+    out = out + "    cset x0, eq\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_socket_send_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #16\n";
+    out = out + "    str x1, [sp]\n";
+    out = out + "    ldr x0, [x0]\n";
+    out = out + "    ldr x9, [sp]\n";
+    out = out + "    ldr x1, [x9, #8]\n";
+    out = out + "    ldr x2, [x9]\n";
+    out = out + "    mov x3, #0\n";
+    out = out + "    bl _send\n";
+    out = out + "    add sp, sp, #16\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_socket_recv_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    sub sp, sp, #32\n";
+    out = out + "    str x0, [sp]\n";
+    out = out + "    str x1, [sp, #8]\n";
+    out = out + "    add x0, x1, #1\n";
+    out = out + "    bl _malloc\n";
+    out = out + "    str x0, [sp, #16]\n";
+    out = out + "    ldr x9, [sp]\n";
+    out = out + "    ldr x0, [x9]\n";
+    out = out + "    ldr x1, [sp, #16]\n";
+    out = out + "    ldr x2, [sp, #8]\n";
+    out = out + "    mov x3, #0\n";
+    out = out + "    bl _recv\n";
+    out = out + "    mov x10, x0\n";
+    out = out + "    ldr x9, [sp, #16]\n";
+    out = out + "    strb wzr, [x9, x10]\n";
+    out = out + "    mov x0, x9\n";
+    out = out + "    mov x1, x10\n";
+    out = out + "    bl _noema_text_from_parts_native\n";
+    out = out + "    add sp, sp, #32\n";
+    out = out + "    ldp x29, x30, [sp], #16\n";
+    out = out + "    ret\n\n";
+    out = out + "_noema_socket_recv_all_native:\n";
+    out = out + "    mov x1, #4096\n";
+    out = out + "    b _noema_socket_recv_native\n\n";
+    out = out + "_noema_socket_close_native:\n";
+    out = out + "    stp x29, x30, [sp, #-16]!\n";
+    out = out + "    mov x29, sp\n";
+    out = out + "    ldr x0, [x0]\n";
+    out = out + "    bl _close\n";
     out = out + "    cmp x0, #0\n";
     out = out + "    cset x0, eq\n";
     out = out + "    ldp x29, x30, [sp], #16\n";

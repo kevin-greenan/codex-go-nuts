@@ -1,0 +1,34 @@
+& "../lib/http.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: hello_server <port>";
+        ^ 1;
+    }
+
+    port := i64_of(arg(1));
+    listener := listener_open(port);
+    conn := listener_accept(listener);
+    raw := socket_recv(conn, 2048);
+    request := kiln_http_parse_request(raw);
+    response := kiln_http_text(404, "not found");
+    ? (request.method == "GET" and request.path == "/") {
+        response = kiln_http_text(200, "hello from kiln");
+    }
+    wrote := socket_send(conn, response);
+    closed_conn := socket_close(conn);
+    closed_listener := listener_close(listener);
+    ? (wrote <= 0) {
+        ^ 2;
+    }
+    ? (not closed_conn or not closed_listener) {
+        ^ 3;
+    }
+    ? (request.version != "HTTP/1.1") {
+        ^ 4;
+    }
+    ? (request.method == "" or count(request.path) == 0) {
+        ^ 5;
+    }
+    ^ 0;
+}

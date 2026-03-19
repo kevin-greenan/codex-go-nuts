@@ -1,0 +1,35 @@
+& "../lib/app.noe";
+& "../lib/html.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: asset_site_server <port>";
+        ^ 1;
+    }
+
+    routes :: list<KilnRoute> := [
+        kiln_route("GET", "/", "home"),
+        kiln_route("GET", "/assets/site.css", "site-css")
+    ];
+
+    home_page := kiln_html_page_with_head("Kiln Assets", kiln_html_stylesheet("/assets/site.css"), kiln_html_section(kiln_html_attr("class", "hero"), kiln_html_heading1("Kiln Assets") + kiln_html_paragraph("Static asset replies are live.")) + kiln_html_tag("main", "", kiln_html_paragraph("This page links to a CSS asset served by Kiln.")));
+    replies :: list<KilnAppRouteReply> := [
+        kiln_app_route_reply("home", kiln_reply_html(200, home_page))
+    ];
+    assets :: list<KilnAppRouteAsset> := [
+        kiln_app_route_asset("site-css", "kiln-web/examples/assets/site.css", kiln_asset_content_type("site.css"))
+    ];
+
+    site := kiln_static_asset_app(routes, replies, assets, 4096);
+    port := i64_of(arg(1));
+    req := kiln_static_asset_app_receive_once(site, port);
+    ? (kiln_app_request(req).version != "HTTP/1.1") {
+        ^ 2;
+    }
+    reply := kiln_static_asset_app_reply(site, req.dispatch);
+    finished := kiln_static_asset_app_finish_reply(req, reply);
+    ? (not finished) {
+        ^ 3;
+    }
+    ^ 0;
+}

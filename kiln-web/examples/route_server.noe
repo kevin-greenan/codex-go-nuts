@@ -1,0 +1,40 @@
+& "../lib/server.noe";
+
+@route_server_reply(dispatch: KilnDispatch) -> KilnReply {
+    ? (kiln_dispatch_is(dispatch, "home")) {
+        ^ kiln_reply_text(200, "kiln home");
+    }
+    ? (kiln_dispatch_is(dispatch, "about")) {
+        ^ kiln_reply_text(200, "kiln about");
+    }
+    ? (kiln_dispatch_is(dispatch, "user-show")) {
+        ^ kiln_reply_text(200, "user " + kiln_dispatch_param(dispatch, "id"));
+    }
+    ^ kiln_dispatch_fallback_text(dispatch);
+}
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: route_server <port>";
+        ^ 1;
+    }
+
+    routes :: list<KilnRoute> := [
+        kiln_route("GET", "/", "home"),
+        kiln_route("GET", "/about", "about"),
+        kiln_route("GET", "/users/:id", "user-show")
+    ];
+    app := kiln_app(routes, 2048);
+
+    port := i64_of(arg(1));
+    req := kiln_app_receive_once(app, port);
+    reply := route_server_reply(req.dispatch);
+    ? (kiln_app_request(req).version != "HTTP/1.1") {
+        ^ 2;
+    }
+    finished := kiln_app_finish_reply(req, reply);
+    ? (not finished) {
+        ^ 3;
+    }
+    ^ 0;
+}

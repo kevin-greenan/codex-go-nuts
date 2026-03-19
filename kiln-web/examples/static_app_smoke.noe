@@ -1,0 +1,34 @@
+& "../lib/app.noe";
+
+@main() -> i64 {
+    routes :: list<KilnRoute> := [
+        kiln_route("GET", "/", "home"),
+        kiln_route("GET", "/about", "about")
+    ];
+    replies :: list<KilnAppRouteReply> := [
+        kiln_app_route_reply("home", kiln_reply_text(200, "home page")),
+        kiln_app_route_reply("about", kiln_reply_text(200, "about page"))
+    ];
+    site := kiln_static_app(routes, replies, 2048);
+
+    home_request := kiln_http_parse_request("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    home_dispatch := kiln_dispatch(site.app.routes, home_request);
+    home_reply := kiln_static_app_reply(site, home_dispatch);
+    home_response := kiln_reply_response(home_reply);
+    ? (find(home_response, "home page") < 0) {
+        ! "home reply mismatch";
+        ^ 1;
+    }
+
+    missing_request := kiln_http_parse_request("GET /missing HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    missing_dispatch := kiln_dispatch(site.app.routes, missing_request);
+    missing_reply := kiln_static_app_reply(site, missing_dispatch);
+    missing_response := kiln_reply_response(missing_reply);
+    ? (find(missing_response, "404 Not Found") < 0) {
+        ! "fallback mismatch";
+        ^ 2;
+    }
+
+    ! "kiln static app smoke ok";
+    ^ 0;
+}
