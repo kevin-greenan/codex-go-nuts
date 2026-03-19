@@ -51,6 +51,13 @@ direct-check:
 	./build/series.direct
 	./build/compiler_1 examples/aggregate_probe.noe build/aggregate_probe.direct native-arm64
 	./build/aggregate_probe.direct
+	./build/compiler_1 examples/selfhost_text.noe build/selfhost_text.direct native-arm64
+	rm -f build/selfhost_text_output.txt
+	./build/selfhost_text.direct examples/hello.noe build/selfhost_text_output.txt
+	test -s build/selfhost_text_output.txt
+	./build/compiler_1 selfhost/compiler_1.noe build/noema_compiler.direct native-arm64
+	./build/noema_compiler.direct examples/hello.noe build/hello.from_direct_compiler native-arm64
+	./build/hello.from_direct_compiler
 
 native-example:
 	NOEMA_BACKEND=native-arm64 ./bin/codexc examples/hello.noe build/hello.native

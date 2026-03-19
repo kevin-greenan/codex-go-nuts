@@ -236,8 +236,15 @@ That direct backend currently targets `arm64-apple-darwin` and only supports a n
 - calls, comparisons, `not`, `and`, `or`
 - integer `+` / `-` / `*` / `/`
 - heap-backed `%` records, field access, list literals, `append`, `count(list)`, and indexing for native 64-bit values
+- native `text` handles, text literals, text `+` / `==` / `!=`, `count(text)`, `find`, `slice`, `text_of`, `i64_of`, `arg`, `arg_count`, `read_text`, `write_text`, and direct-host `host_cc`
 
-It is now wide enough for scalar and aggregate handle-based programs like [series.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/series.noe) and [aggregate_probe.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/aggregate_probe.noe) to compile and run without any generated C in the self-hosted path, but it is still not wide enough to compile [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) itself because the text/runtime-heavy compiler surface is still outside the direct subset.
+It is now wide enough for scalar programs, aggregate handle-based programs, compiler-style text/file workloads, and a direct build of [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) itself without any generated C in the self-hosted path.
+
+The current direct proof chain now includes:
+
+- direct-native builds of [hello.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/hello.noe), [mini_source.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/mini_source.noe), [series.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/series.noe), [aggregate_probe.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/aggregate_probe.noe), and [selfhost_text.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/selfhost_text.noe)
+- a direct-native build of [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe) into `noema_compiler.direct`
+- `noema_compiler.direct` then compiling [hello.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/hello.noe) into another direct-native binary that runs successfully
 
 ## Intent
 
