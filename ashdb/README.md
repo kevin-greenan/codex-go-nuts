@@ -110,11 +110,12 @@ What is already working on `codex/ashdb-foundation`:
 47. tagged result-record conventions for lookup and cursor APIs
 48. `i64` field-range predicate scans and rowset helpers
 49. large-data stress coverage with 1,200-row insert/delete/compact/reopen validation
-50. smoke-test coverage through the direct self-hosted compiler
+50. WAL-style commit recovery layered on top of rollback journaling
+51. smoke-test coverage through the direct self-hosted compiler
 
 What is not done yet:
 
-1. stronger transactional semantics beyond changed-page rollback journaling
+1. stronger transactional semantics beyond the current hybrid rollback-journal plus WAL recovery path
 2. richer schema constraints beyond scalar types, nullable fields, defaults, and unique `i64` fields
 3. broader corruption tooling and repair workflows beyond index rebuild
 4. broader query shapes beyond point lookup, equality filtering, primary-key ranges, unique secondary-index ranges, key-by-key traversal, and rowset-style result helpers
@@ -126,8 +127,7 @@ AshDB is no longer in the “blank engine” stage, but it is not production-rea
 
 ### Storage Engine
 
-1. WAL-style durability beyond changed-page rollback journaling
-2. better delete/rebalance behavior beyond explicit table compaction
+1. better delete/rebalance behavior beyond explicit table compaction
 
 ### Schema and Data Model
 

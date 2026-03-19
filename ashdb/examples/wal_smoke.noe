@@ -1,0 +1,62 @@
+& "../lib/db.noe";
+
+@main() -> i64 {
+    ? (arg_count() < 2) {
+        ! "usage: wal_smoke <db-path>";
+        ^ 1;
+    }
+
+    db := db_open(arg(1), 128);
+    created := db_create_table(db, "users", 24);
+    inserted := db_insert(db, "users", 10, "alice");
+
+    began0 := db_begin(db);
+    updated0 := db_update(db, "users", 10, "ava");
+    wrote_wal0 := db_write_wal_for_commit(db);
+    wal0 := db_wal_is_committed(db);
+    journal0 := db_journal_is_active(db);
+    closed0 := db_close(db);
+
+    reopened0 := db_open(arg(1), 128);
+    recovered0 := db_get(reopened0, "users", 10);
+    wal1 := db_wal_is_committed(reopened0);
+    journal1 := db_journal_is_active(reopened0);
+
+    began1 := db_begin(reopened0);
+    updated1 := db_update(reopened0, "users", 10, "amber");
+    rolled1 := db_rollback(reopened0);
+    after_rollback := db_get(reopened0, "users", 10);
+    closed1 := db_close(reopened0);
+
+    reopened1 := db_open(arg(1), 128);
+    final0 := db_get(reopened1, "users", 10);
+    closed2 := db_close(reopened1);
+
+    ? (created != 2 and created != -2) {
+        ! "created=" + text_of(created);
+        ^ 2;
+    }
+    ? (inserted < 0 or not began0 or updated0 < 0 or not wrote_wal0) {
+        ! "phase0=" + text_of(inserted) + ":" + text_of(updated0) + ":" + text_of(wrote_wal0);
+        ^ 3;
+    }
+    ? (not wal0 or not journal0 or not closed0) {
+        ! "boundary0=" + text_of(wal0) + ":" + text_of(journal0);
+        ^ 4;
+    }
+    ? (slice(recovered0, 0, 3) != "ava" or wal1 or journal1) {
+        ! "recovered0=" + recovered0 + ":" + text_of(wal1) + ":" + text_of(journal1);
+        ^ 5;
+    }
+    ? (not began1 or updated1 < 0 or not rolled1 or slice(after_rollback, 0, 3) != "ava" or not closed1) {
+        ! "rollback1=" + after_rollback;
+        ^ 6;
+    }
+    ? (slice(final0, 0, 3) != "ava" or not closed2) {
+        ! "final0=" + final0;
+        ^ 7;
+    }
+
+    ! "ashdb wal smoke ok";
+    ^ 0;
+}

@@ -19,6 +19,10 @@
     ^ db.path + ".journal";
 }
 
+@db_wal_path(db: DB) -> text {
+    ^ db.path + ".wal";
+}
+
 @db_journal_size_width() -> i64 {
     ^ 8;
 }
@@ -76,6 +80,128 @@
     ^ slice(entry_text, db_journal_size_width(), page_size);
 }
 
+@db_wal_header_size() -> i64 {
+    ^ 1 + db_journal_size_width();
+}
+
+@db_wal_header(committed: bool, entry_count: i64) -> text {
+    flag := ".";
+    ? (committed) {
+        flag = "C";
+    }
+    ^ flag + pad_left_i64(entry_count, db_journal_size_width());
+}
+
+@db_wal_committed(header: text) -> bool {
+    ? (count(header) < db_wal_header_size()) {
+        ^ false;
+    }
+    ^ slice(header, 0, 1) == "C";
+}
+
+@db_wal_entry_count(header: text) -> i64 {
+    ? (count(header) < db_wal_header_size()) {
+        ^ 0;
+    }
+    ^ i64_of(slice(header, 1, db_journal_size_width()));
+}
+
+@db_wal_entry_size(page_size: i64) -> i64 {
+    ^ db_journal_entry_size(page_size);
+}
+
+@db_wal_entry_offset(page_size: i64, entry_index: i64) -> i64 {
+    ^ db_wal_header_size() + (entry_index * db_wal_entry_size(page_size));
+}
+
+@db_wal_clear(db: DB) -> bool {
+    wal := file_open(db_wal_path(db));
+    wrote := file_write(wal, 0, db_wal_header(false, 0));
+    synced := file_sync(wal);
+    closed := file_close(wal);
+    ^ wrote == db_wal_header_size() and synced and closed;
+}
+
+@db_wal_is_committed(db: DB) -> bool {
+    wal := file_open(db_wal_path(db));
+    header := file_read(wal, 0, db_wal_header_size());
+    closed := file_close(wal);
+    ^ db_wal_committed(header);
+}
+
+@db_apply_wal_pages(db: DB, wal: file, entry_count: i64) -> bool {
+    idx := 0;
+    ~ (idx < entry_count) {
+        entry_offset := db_wal_entry_offset(db.pager.page_size, idx);
+        entry_text := file_read(wal, entry_offset, db_wal_entry_size(db.pager.page_size));
+        page_id := db_journal_entry_page_id(entry_text);
+        page_text := db_journal_entry_page_text(entry_text, db.pager.page_size);
+        applied := pager_raw_write_page(db.pager, page_id, page_text);
+        ? (applied != db.pager.page_size) {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@db_write_wal_for_commit(db: DB) -> bool {
+    journal := file_open(db_journal_path(db));
+    header := file_read(journal, 0, db_journal_header_size());
+    ? (not db_journal_active(header)) {
+        closed_journal := file_close(journal);
+        ^ false;
+    }
+    entry_count := db_journal_entry_count(header);
+    wal := file_open(db_wal_path(db));
+    wrote_header0 := file_write(wal, 0, db_wal_header(false, entry_count));
+    idx := 0;
+    wrote_count := 0;
+    ~ (idx < entry_count) {
+        journal_offset := db_journal_entry_offset(db.pager.page_size, idx);
+        journal_entry := file_read(journal, journal_offset, db_journal_entry_size(db.pager.page_size));
+        page_id := db_journal_entry_page_id(journal_entry);
+        page_text := pager_raw_read_page(db.pager, page_id);
+        wal_offset := db_wal_entry_offset(db.pager.page_size, idx);
+        wrote_entry := file_write(wal, wal_offset, db_journal_entry_text(page_id, page_text));
+        ? (wrote_entry != db_wal_entry_size(db.pager.page_size)) {
+            closed_wal := file_close(wal);
+            closed_journal := file_close(journal);
+            ^ false;
+        }
+        wrote_count = wrote_count + 1;
+        idx = idx + 1;
+    }
+    synced_entries := file_sync(wal);
+    wrote_header1 := file_write(wal, 0, db_wal_header(true, entry_count));
+    synced_commit := file_sync(wal);
+    closed_wal := file_close(wal);
+    closed_journal := file_close(journal);
+    ^ wrote_header0 == db_wal_header_size() and wrote_count == entry_count and synced_entries and wrote_header1 == db_wal_header_size() and synced_commit and closed_wal and closed_journal;
+}
+
+@db_recover_wal_if_needed(db: DB) -> bool {
+    wal := file_open(db_wal_path(db));
+    wal_size := file_size(wal);
+    ? (wal_size < db_wal_header_size()) {
+        closed := file_close(wal);
+        ^ true;
+    }
+    header := file_read(wal, 0, db_wal_header_size());
+    ? (not db_wal_committed(header)) {
+        closed := file_close(wal);
+        cleared := db_wal_clear(db);
+        ^ closed and cleared;
+    }
+    entry_count := db_wal_entry_count(header);
+    applied := db_apply_wal_pages(db, wal, entry_count);
+    synced_db := file_sync(db.pager.handle);
+    closed := file_close(wal);
+    cleared_wal := db_wal_clear(db);
+    cleared_journal := db_journal_clear(db);
+    ^ applied and synced_db and closed and cleared_wal and cleared_journal;
+}
+
 @db_journal_clear(db: DB) -> bool {
     journal := file_open(db_journal_path(db));
     wrote := file_write(journal, 0, db_journal_header(false, 0, 0));
@@ -108,6 +234,10 @@
 }
 
 @db_recover_if_needed(db: DB) -> bool {
+    wal_ok := db_recover_wal_if_needed(db);
+    ? (not wal_ok) {
+        ^ false;
+    }
     journal := file_open(db_journal_path(db));
     journal_size := file_size(journal);
     ? (journal_size < db_journal_header_size()) {
@@ -2167,6 +2297,11 @@
         closed := file_close(journal);
         ^ false;
     }
+    cleared_wal := db_wal_clear(db);
+    ? (not cleared_wal) {
+        closed := file_close(journal);
+        ^ false;
+    }
     total_pages := pager_total_pages(db.pager);
     wrote_header := file_write(journal, 0, db_journal_header(true, total_pages, 0));
     synced := file_sync(journal);
@@ -2175,11 +2310,19 @@
 }
 
 @db_commit(db: DB) -> bool {
+    wrote_wal := db_write_wal_for_commit(db);
+    ? (not wrote_wal) {
+        ^ false;
+    }
     synced := db_sync(db);
     ? (not synced) {
         ^ false;
     }
-    ^ db_journal_clear(db);
+    cleared_journal := db_journal_clear(db);
+    ? (not cleared_journal) {
+        ^ false;
+    }
+    ^ db_wal_clear(db);
 }
 
 @db_rollback(db: DB) -> bool {
