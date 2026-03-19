@@ -231,12 +231,26 @@ What is already working:
 4. the dashboard shows tonight's meal, household members, grocery items, and open chores
 5. the first app actions support adding a grocery item and marking a chore complete
 6. the first local asset path is wired for Hearthlight-specific styling
+7. a long-running dashboard daemon entrypoint now exists for local browser testing and containerization
 
 The current goal is a real vertical slice, not a full product:
 
 1. one seeded household
 2. one dashboard route
 3. a couple of live write actions
+4. direct-compiler smoke coverage proving the app stack works end to end
+
+## Local Development
+
+The fastest local workflow is now:
+
+1. `make -C hearthlight smoke`
+2. `make -C hearthlight daemon`
+3. `make -C hearthlight run PORT=9124 DB=/tmp/hearthlight.db`
+
+Then browse to:
+
+1. `http://127.0.0.1:9124/`
 4. direct-compiler smoke coverage proving the app stack works end to end
 
 ## Definition of Success
