@@ -486,6 +486,84 @@
     ^ table_scan_page_text(table, table.root_page, separator);
 }
 
+@table_validate_leaf_page(table: Table, page_id: i64) -> bool {
+    page := leaf_read_page(table.pager, page_id);
+    slot_count := leaf_slot_count(page);
+    slot_width := leaf_slot_width(page);
+    entries := leaf_entries_region(page);
+    idx := 0;
+    prev_key := 0;
+    have_prev := false;
+    ~ (idx < slot_count) {
+        slot := leaf_slot_text_at(entries, slot_width, idx);
+        ? (not leaf_slot_is_used(slot)) {
+            ^ false;
+        }
+        key := leaf_slot_key(slot);
+        ? (have_prev and key <= prev_key) {
+            ^ false;
+        }
+        prev_key = key;
+        have_prev = true;
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@table_validate_internal_page(table: Table, page_id: i64) -> bool {
+    page := pager_read_page(table.pager, page_id);
+    key_count := table_internal_key_count(page);
+    total_pages := pager_total_pages(table.pager);
+    left_child := table_internal_left_child(page);
+    ? (left_child <= 0 or left_child >= total_pages) {
+        ^ false;
+    }
+    used_cells := table_internal_used_cells(page);
+    idx := 0;
+    prev_key := 0;
+    have_prev := false;
+    ? (not table_validate_page(table, left_child)) {
+        ^ false;
+    }
+    ~ (idx < key_count) {
+        cell := table_internal_cell_at(used_cells, idx);
+        key := table_internal_cell_key(cell);
+        child := table_internal_cell_child(cell);
+        ? (have_prev and key <= prev_key) {
+            ^ false;
+        }
+        ? (child <= 0 or child >= total_pages) {
+            ^ false;
+        }
+        ? (not table_validate_page(table, child)) {
+            ^ false;
+        }
+        prev_key = key;
+        have_prev = true;
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
+@table_validate_page(table: Table, page_id: i64) -> bool {
+    kind := table_page_kind(table, page_id);
+    ? (kind == "L") {
+        ^ table_validate_leaf_page(table, page_id);
+    }
+    ? (kind == "I") {
+        ^ table_validate_internal_page(table, page_id);
+    }
+    ^ false;
+}
+
+@table_validate(table: Table) -> bool {
+    total_pages := pager_total_pages(table.pager);
+    ? (table.root_page <= 0 or table.root_page >= total_pages) {
+        ^ false;
+    }
+    ^ table_validate_page(table, table.root_page);
+}
+
 @table_sync(table: Table) -> bool {
     ^ pager_sync(table.pager);
 }

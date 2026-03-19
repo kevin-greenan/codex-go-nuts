@@ -375,6 +375,34 @@
     ^ 0;
 }
 
+@db_validate(db: DB) -> bool {
+    page := pager_read_page(db.pager, db_catalog_page());
+    ? (slice(page, 1, 1) != "C") {
+        ^ false;
+    }
+    count0 := db_catalog_count(page);
+    entries := db_catalog_entries_region(page);
+    total_pages := pager_total_pages(db.pager);
+    idx := 0;
+    ~ (idx < count0) {
+        entry := db_catalog_entry_at(entries, idx);
+        ? (not db_catalog_entry_is_used(entry)) {
+            ^ false;
+        }
+        root_page := db_catalog_entry_root(entry);
+        slot_width := db_catalog_entry_slot_width(entry);
+        ? (root_page <= 0 or root_page >= total_pages or slot_width <= 0) {
+            ^ false;
+        }
+        table := table_bind(db.pager, root_page, slot_width);
+        ? (not table_validate(table)) {
+            ^ false;
+        }
+        idx = idx + 1;
+    }
+    ^ true;
+}
+
 @db_sync(db: DB) -> bool {
     ^ pager_sync(db.pager);
 }
