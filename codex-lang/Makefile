@@ -33,6 +33,9 @@ selfhost-check:
 	cc -O3 build/selfhost_text.generated.c -o build/selfhost_text.generated
 	./build/selfhost_text.generated examples/hello.noe build/selfhost_text.out
 	rg -n "selfhost" build/selfhost_text.out
+	./build/mini_compiler examples/frontend_demo.noe build/frontend_demo.selfhost.generated.c
+	cc -O3 build/frontend_demo.selfhost.generated.c -o build/frontend_demo.selfhost
+	./build/frontend_demo.selfhost examples/hello.noe
 
 parity-check: selfhost-check native-examples
 

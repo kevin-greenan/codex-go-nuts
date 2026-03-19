@@ -190,6 +190,11 @@ Current accepted subset:
 - multiple `@name(...) -> type { ... }` functions for the currently supported bootstrap types
 - `i64`, `bool`, `text`, and `socket` values
 - `name := expr;`
+- `name :: type := expr;`
+- `%Shape { field: type; ... }`
+- struct literals like `Shape { field: value }`
+- field access like `value.field`
+- list literals and indexing like `[item]` and `items[0]`
 - `name = expr;`
 - `! expr;`
 - `^ expr;`

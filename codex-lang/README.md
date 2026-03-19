@@ -179,14 +179,16 @@ Current self-hosted subset:
 - `i64`, `bool`, `text`, and `socket` values in the current bootstrap surface
 - typed function parameters and returns for the currently supported scalar/runtime-backed types
 - `:=` bindings and `=` assignment
+- typed `::` bindings
 - `!` and `^`
 - `?` / `|` and `~`
 - function calls
 - integer arithmetic and scalar comparisons
 - text literals, `+`, `==`, `!=`, and `not`
 - runtime-backed builtins such as `arg`, `arg_count`, `read_text`, `write_text`, `count`, `find`, `slice`, `text_of`, `i64_of`, and the low-level socket builtins
+- `%` declarations, struct literals, field access, list literals, and indexing
 
-That subset is now large enough for the Noema-written compiler to compile [series.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/series.noe), [selfhost_text.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/selfhost_text.noe), and [socket_probe.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/socket_probe.noe) end to end.
+That subset is now large enough for the Noema-written compiler to compile [series.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/series.noe), [selfhost_text.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/selfhost_text.noe), [socket_probe.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/socket_probe.noe), and [frontend_demo.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples/frontend_demo.noe) end to end.
 
 ## Intent
 
