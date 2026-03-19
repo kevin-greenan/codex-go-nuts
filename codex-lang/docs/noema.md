@@ -5,9 +5,9 @@
 Current compiler shape:
 
 - Rust stage-1 bootstrap compiler
-- canonical self-hosted source at [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe)
+- canonical self-hosted source at [compiler.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler.noe)
 - direct-native backend target: `native-arm64` on `arm64-apple-darwin`
-- direct bootstrap check with a stage-2 rebuild of `compiler_1.noe`
+- direct bootstrap check with a stage-2 rebuild of `compiler.noe`
 
 ## Syntax
 
@@ -145,21 +145,21 @@ The current production path is the direct-native backend:
 
 The bootstrap flow is:
 
-1. use the Rust stage-1 compiler to build `compiler_1`
-2. use `compiler_1` to build `noema_compiler.direct`
-3. use `noema_compiler.direct` to rebuild `compiler_1.noe`
+1. use the Rust stage-1 compiler to build `compiler`
+2. use `compiler` to build `noema_compiler.direct`
+3. use `noema_compiler.direct` to rebuild `compiler.noe`
 
 `make -C codex-lang test-direct-examples` compiles every retained example with the direct compiler, and `make -C codex-lang direct-bootstrap-check` verifies the stage-2 rebuild path.
 
 ## Self-Hosting Track
 
-`Noema` now has a canonical bootstrap compiler written in `Noema` at [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe).
+`Noema` now has a canonical bootstrap compiler written in `Noema` at [compiler.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler.noe).
 
 The working path is:
 
-1. `./bin/codexc selfhost/compiler_1.noe build/compiler_1`
-2. `./build/compiler_1 selfhost/compiler_1.noe build/noema_compiler.direct native-arm64`
-3. `./build/noema_compiler.direct selfhost/compiler_1.noe build/noema_compiler.stage2 native-arm64`
+1. `./bin/codexc selfhost/compiler.noe build/compiler`
+2. `./build/compiler selfhost/compiler.noe build/noema_compiler.direct native-arm64`
+3. `./build/noema_compiler.direct selfhost/compiler.noe build/noema_compiler.stage2 native-arm64`
 
 The direct-built compiler can compile every retained example, and the generated stage-1 and stage-2 compiler assembly matches exactly in the bootstrap check.
 

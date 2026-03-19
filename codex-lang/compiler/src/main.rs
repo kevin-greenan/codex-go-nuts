@@ -305,6 +305,12 @@ fn run() -> Result<(), String> {
             let generated_source = lower_to_c(&program, &semantic)?;
             fs::write(&generated_output, generated_source)
                 .map_err(|err| format!("failed to write {}: {err}", generated_output.display()))?;
+            if !generated_output.exists() {
+                return Err(format!(
+                    "compiler did not produce expected output {}",
+                    generated_output.display()
+                ));
+            }
         }
         Backend::NativeArm64 => {
             let artifacts = lower_to_native_arm64_hybrid(&program, &semantic)?;
@@ -314,6 +320,18 @@ fn run() -> Result<(), String> {
                 PathBuf::from(format!("{}.support.c", generated_output.display()));
             fs::write(&support_output, artifacts.support_c)
                 .map_err(|err| format!("failed to write {}: {err}", support_output.display()))?;
+            if !generated_output.exists() {
+                return Err(format!(
+                    "compiler did not produce expected output {}",
+                    generated_output.display()
+                ));
+            }
+            if !support_output.exists() {
+                return Err(format!(
+                    "compiler did not produce expected output {}",
+                    support_output.display()
+                ));
+            }
         }
     }
 

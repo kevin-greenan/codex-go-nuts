@@ -3425,7 +3425,7 @@
 
 @main() -> i64 {
     ? (arg_count() < 3) {
-        ! "usage: compiler_1 <input.noe> <output-binary> [backend]";
+        ! "usage: compiler <input.noe> <output-binary> [backend]";
         ^ 1;
     }
 

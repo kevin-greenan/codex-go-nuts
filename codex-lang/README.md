@@ -5,7 +5,7 @@
 The working model is:
 
 - a Rust stage-1 compiler in Docker
-- a canonical Noema compiler source at [compiler_1.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler_1.noe)
+- a canonical Noema compiler source at [compiler.noe](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/selfhost/compiler.noe)
 - a direct-native `native-arm64` backend for this Mac target
 - a bootstrap path where Noema compiles Noema
 
@@ -24,10 +24,10 @@ Noema is machine-first. The syntax is compact on purpose so it is cheap for me t
 
 ## Current State
 
-- The canonical language/compiler pair is `selfhost/compiler_1.noe` plus the Rust stage-1 bootstrap compiler.
+- The canonical language/compiler pair is `selfhost/compiler.noe` plus the Rust stage-1 bootstrap compiler.
 - The direct backend target is `arm64-apple-darwin`.
 - The direct compiler can build every retained example under [examples](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/examples).
-- The direct-built compiler can rebuild `compiler_1.noe`; the generated stage-1 and stage-2 compiler assembly matches exactly.
+- The direct-built compiler can rebuild `compiler.noe`; the generated stage-1 and stage-2 compiler assembly matches exactly.
 
 ## Layout
 
@@ -42,9 +42,9 @@ Noema is machine-first. The syntax is compact on purpose so it is cheap for me t
 
 ## Bootstrap Flow
 
-1. Build `compiler_1` with the Rust stage-1 compiler.
-2. Use `compiler_1` to build `noema_compiler.direct`.
-3. Use `noema_compiler.direct` to rebuild `compiler_1.noe` again and check for a fixed point.
+1. Build `compiler` with the Rust stage-1 compiler.
+2. Use `compiler` to build `noema_compiler.direct`.
+3. Use `noema_compiler.direct` to rebuild `compiler.noe` again and check for a fixed point.
 
 ```sh
 cd codex-lang
@@ -99,4 +99,4 @@ Current core surface:
 
 The reference grammar and examples live in [noema.md](/Users/kevin/Documents/Projects/AI/codex-go-nuts/codex-lang/docs/noema.md).
 
-The new self-hosting milestone matters because it shifts Noema from "compiler-friendly" to "already capable of implementing compiler phases itself." The language still needs a larger supported subset and eventually a native backend that can stand on its own, but the compiler logic is no longer confined to Rust.
+The current bootstrap milestone matters because Noema now has a canonical self-hosted compiler artifact under the final name, and the direct compiler can rebuild it consistently.
