@@ -10,8 +10,11 @@
     users_root := db_create_table(db, "users", 20);
     tasks_root := db_create_table(db, "tasks", 20);
     dup_users := db_create_table(db, "users", 20);
-    put0 := db_put(db, "users", 10, "alice");
-    put1 := db_put(db, "users", 20, "bob");
+    put0 := db_insert(db, "users", 10, "alice");
+    put1 := db_insert(db, "users", 20, "bob");
+    dup_put := db_insert(db, "users", 20, "bob2");
+    upd0 := db_update(db, "users", 20, "bobby");
+    upd1 := db_update(db, "users", 99, "ghost");
     put2 := db_put(db, "tasks", 1, "laundry");
     put3 := db_put(db, "tasks", 2, "dishes");
     del0 := db_delete(db, "tasks", 1);
@@ -43,40 +46,44 @@
         ! "puts=" + text_of(put0) + ":" + text_of(put1) + ":" + text_of(put2) + ":" + text_of(put3);
         ^ 3;
     }
-    ? (del0 < 0 or del1 != -1) {
-        ! "deletes=" + text_of(del0) + ":" + text_of(del1);
+    ? (dup_put != -2 or upd0 < 0 or upd1 != -1) {
+        ! "mut=" + text_of(dup_put) + ":" + text_of(upd0) + ":" + text_of(upd1);
         ^ 4;
     }
-    ? (slice(get_user, 0, 3) != "bob") {
-        ! "user=" + get_user;
+    ? (del0 < 0 or del1 != -1) {
+        ! "deletes=" + text_of(del0) + ":" + text_of(del1);
         ^ 5;
+    }
+    ? (slice(get_user, 0, 5) != "bobby") {
+        ! "user=" + get_user;
+        ^ 6;
     }
     ? (get_task != "") {
         ! "task=" + get_task;
-        ^ 6;
-    }
-    ? (scan_users != "alice......|bob........") {
-        ! "scan_users=" + scan_users;
         ^ 7;
+    }
+    ? (scan_users != "alice......|bobby......") {
+        ! "scan_users=" + scan_users;
+        ^ 8;
     }
     ? (scan_tasks != "dishes.....") {
         ! "scan_tasks=" + scan_tasks;
-        ^ 8;
+        ^ 9;
     }
     ? (users_root1 != 2 or tasks_root1 != 3 or missing_root != -1) {
         ! "roots1=" + text_of(users_root1) + ":" + text_of(tasks_root1) + ":" + text_of(missing_root);
-        ^ 9;
-    }
-    ? (slice(user_again, 0, 3) != "bob" or slice(task_again, 0, 6) != "dishes" or task_missing != "") {
-        ! "again=" + user_again + ":" + task_again + ":" + task_missing;
         ^ 10;
     }
-    ? (scan_users1 != "alice......|bob........" or scan_tasks1 != "dishes.....") {
-        ! "scan1=" + scan_users1 + ":" + scan_tasks1;
+    ? (slice(user_again, 0, 5) != "bobby" or slice(task_again, 0, 6) != "dishes" or task_missing != "") {
+        ! "again=" + user_again + ":" + task_again + ":" + task_missing;
         ^ 11;
     }
-    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+    ? (scan_users1 != "alice......|bobby......" or scan_tasks1 != "dishes.....") {
+        ! "scan1=" + scan_users1 + ":" + scan_tasks1;
         ^ 12;
+    }
+    ? (not synced0 or not closed0 or not synced1 or not closed1) {
+        ^ 13;
     }
 
     ! "ashdb db smoke ok";

@@ -81,8 +81,8 @@
     ^ prefix + cell_text + moved;
 }
 
-@table_internal_find_insert_index(table: Table, key: i64) -> i64 {
-    page := pager_read_page(table.pager, table.root_page);
+@table_internal_find_insert_index_in_page(table: Table, page_id: i64, key: i64) -> i64 {
+    page := pager_read_page(table.pager, page_id);
     key_count := table_internal_key_count(page);
     used_cells := table_internal_used_cells(page);
     cell_index := 0;
@@ -96,19 +96,27 @@
     ^ key_count;
 }
 
-@table_internal_init_root(table: Table, left_child: i64) -> i64 {
-    capacity := table_internal_capacity(table.pager.page_size);
-    cells := table_internal_build_cells(capacity, "", 0);
-    ^ pager_write_page(table.pager, table.root_page, table_internal_page_text(table.pager.page_size, 0, left_child, cells));
+@table_internal_find_insert_index(table: Table, key: i64) -> i64 {
+    ^ table_internal_find_insert_index_in_page(table, table.root_page, key);
 }
 
-@table_internal_insert_separator(table: Table, key: i64, right_child: i64) -> i64 {
-    page := pager_read_page(table.pager, table.root_page);
+@table_internal_init_page(table: Table, page_id: i64, left_child: i64) -> i64 {
+    capacity := table_internal_capacity(table.pager.page_size);
+    cells := table_internal_build_cells(capacity, "", 0);
+    ^ pager_write_page(table.pager, page_id, table_internal_page_text(table.pager.page_size, 0, left_child, cells));
+}
+
+@table_internal_init_root(table: Table, left_child: i64) -> i64 {
+    ^ table_internal_init_page(table, table.root_page, left_child);
+}
+
+@table_internal_insert_separator_in_page(table: Table, page_id: i64, key: i64, right_child: i64) -> i64 {
+    page := pager_read_page(table.pager, page_id);
     key_count := table_internal_key_count(page);
     capacity := table_internal_capacity(table.pager.page_size);
     left_child := table_internal_left_child(page);
     used_cells := table_internal_used_cells(page);
-    insert_index := table_internal_find_insert_index(table, key);
+    insert_index := table_internal_find_insert_index_in_page(table, page_id, key);
     ? (insert_index < key_count) {
         existing := table_internal_cell_at(used_cells, insert_index);
         ? (table_internal_cell_key(existing) == key) {
@@ -120,15 +128,19 @@
     }
     updated_used := table_internal_insert_used(used_cells, key_count, insert_index, table_internal_cell_text(key, right_child));
     updated_cells := table_internal_build_cells(capacity, updated_used, key_count + 1);
-    wrote := pager_write_page(table.pager, table.root_page, table_internal_page_text(table.pager.page_size, key_count + 1, left_child, updated_cells));
+    wrote := pager_write_page(table.pager, page_id, table_internal_page_text(table.pager.page_size, key_count + 1, left_child, updated_cells));
     ? (wrote == table.pager.page_size) {
         ^ insert_index;
     }
     ^ -1;
 }
 
-@table_internal_child_for_key(table: Table, key: i64) -> i64 {
-    page := pager_read_page(table.pager, table.root_page);
+@table_internal_insert_separator(table: Table, key: i64, right_child: i64) -> i64 {
+    ^ table_internal_insert_separator_in_page(table, table.root_page, key, right_child);
+}
+
+@table_internal_child_for_key_in_page(table: Table, page_id: i64, key: i64) -> i64 {
+    page := pager_read_page(table.pager, page_id);
     key_count := table_internal_key_count(page);
     child := table_internal_left_child(page);
     used_cells := table_internal_used_cells(page);
@@ -142,6 +154,90 @@
         cell_index = cell_index + 1;
     }
     ^ child;
+}
+
+@table_internal_child_for_key(table: Table, key: i64) -> i64 {
+    ^ table_internal_child_for_key_in_page(table, table.root_page, key);
+}
+
+@table_internal_result_ok() -> text {
+    ^ "ok";
+}
+
+@table_internal_result_err(code: i64) -> text {
+    ^ "err:" + text_of(code);
+}
+
+@table_internal_result_split(separator_key: i64, right_page: i64) -> text {
+    ^ "split:" + text_of(separator_key) + ":" + text_of(right_page);
+}
+
+@table_internal_result_is_split(result: text) -> bool {
+    ^ count(result) >= 6 and slice(result, 0, 6) == "split:";
+}
+
+@table_internal_result_separator(result: text) -> i64 {
+    first_colon := find(result, ":");
+    rest := slice(result, first_colon + 1, count(result) - (first_colon + 1));
+    second_colon := find(rest, ":");
+    ^ i64_of(slice(rest, 0, second_colon));
+}
+
+@table_internal_result_right_page(result: text) -> i64 {
+    first_colon := find(result, ":");
+    rest := slice(result, first_colon + 1, count(result) - (first_colon + 1));
+    second_colon := find(rest, ":");
+    right_text := slice(rest, second_colon + 1, count(rest) - (second_colon + 1));
+    ^ i64_of(right_text);
+}
+
+@table_internal_used_delete_cell(used_cells: text, key_count: i64, cell_index: i64) -> text {
+    prefix := slice(used_cells, 0, cell_index * table_internal_cell_width());
+    suffix_start := (cell_index + 1) * table_internal_cell_width();
+    moved := slice(used_cells, suffix_start, (key_count - cell_index - 1) * table_internal_cell_width());
+    ^ prefix + moved;
+}
+
+@table_internal_split_insert_separator_in_page(table: Table, page_id: i64, key: i64, right_child: i64) -> text {
+    page := pager_read_page(table.pager, page_id);
+    key_count := table_internal_key_count(page);
+    capacity := table_internal_capacity(table.pager.page_size);
+    left_child := table_internal_left_child(page);
+    used_cells := table_internal_used_cells(page);
+    insert_index := table_internal_find_insert_index_in_page(table, page_id, key);
+    ? (insert_index < key_count) {
+        existing := table_internal_cell_at(used_cells, insert_index);
+        ? (table_internal_cell_key(existing) == key) {
+            ^ table_internal_result_err(-2);
+        }
+    }
+    ? (key_count < capacity) {
+        ^ table_internal_result_err(-1);
+    }
+    combined_used := table_internal_insert_used(used_cells, key_count, insert_index, table_internal_cell_text(key, right_child));
+    total_keys := key_count + 1;
+    middle_index := total_keys / 2;
+    separator_cell := table_internal_cell_at(combined_used, middle_index);
+    separator_key := table_internal_cell_key(separator_cell);
+    right_left_child := table_internal_cell_child(separator_cell);
+    left_used := slice(combined_used, 0, middle_index * table_internal_cell_width());
+    right_used_start := (middle_index + 1) * table_internal_cell_width();
+    right_used_count := total_keys - middle_index - 1;
+    right_used := slice(combined_used, right_used_start, right_used_count * table_internal_cell_width());
+    right_page := pager_alloc_page(table.pager);
+    left_cells := table_internal_build_cells(capacity, left_used, middle_index);
+    right_cells := table_internal_build_cells(capacity, right_used, right_used_count);
+    left_write := pager_write_page(table.pager, page_id, table_internal_page_text(table.pager.page_size, middle_index, left_child, left_cells));
+    right_write := pager_write_page(table.pager, right_page, table_internal_page_text(table.pager.page_size, right_used_count, right_left_child, right_cells));
+    ? (left_write == table.pager.page_size and right_write == table.pager.page_size) {
+        ^ table_internal_result_split(separator_key, right_page);
+    }
+    ^ table_internal_result_err(-3);
+}
+
+@table_page_kind(table: Table, page_id: i64) -> text {
+    page := pager_read_page(table.pager, page_id);
+    ^ slice(page, 1, 1);
 }
 
 @table_root_page() -> i64 {
@@ -164,84 +260,181 @@
 }
 
 @table_root_kind(table: Table) -> text {
-    page := pager_read_page(table.pager, table.root_page);
-    ^ slice(page, 1, 1);
+    ^ table_page_kind(table, table.root_page);
 }
 
-@table_promote_root_leaf(table: Table, key: i64, payload: text) -> i64 {
-    split_right := leaf_split_insert_key(table.pager, table.root_page, key, payload);
-    ? (split_right < 0) {
-        ^ split_right;
-    }
+@table_promote_root_split(table: Table, separator_key: i64, right_page: i64) -> i64 {
     left_page := pager_alloc_page(table.pager);
     left_text := pager_read_page(table.pager, table.root_page);
     left_copy := pager_raw_write_page(table.pager, left_page, left_text);
     root_init := table_internal_init_root(table, left_page);
-    separator_key := leaf_first_key(table.pager, split_right);
-    inserted := table_internal_insert_separator(table, separator_key, split_right);
+    inserted := table_internal_insert_separator(table, separator_key, right_page);
     ? (left_copy == table.pager.page_size and root_init == table.pager.page_size and inserted >= 0) {
         ^ 0;
     }
     ^ -3;
 }
 
-@table_put(table: Table, key: i64, payload: text) -> i64 {
-    root_kind := table_root_kind(table);
-    ? (root_kind == "L") {
-        wrote := leaf_put_key(table.pager, table.root_page, key, payload);
+@table_insert_page(table: Table, page_id: i64, key: i64, payload: text) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        wrote := leaf_insert_key(table.pager, page_id, key, payload);
         ? (wrote >= 0) {
-            ^ wrote;
+            ^ table_internal_result_ok();
         }
         ? (wrote == -1) {
-            ^ table_promote_root_leaf(table, key, payload);
-        }
-        ^ wrote;
-    }
-    ? (root_kind == "I") {
-        child_page := table_internal_child_for_key(table, key);
-        wrote := leaf_put_key(table.pager, child_page, key, payload);
-        ? (wrote >= 0) {
-            ^ wrote;
-        }
-        ? (wrote == -1) {
-            split_right := leaf_split_insert_key(table.pager, child_page, key, payload);
-            ? (split_right < 0) {
-                ^ split_right;
+            split_right := leaf_split_insert_key(table.pager, page_id, key, payload);
+            ? (split_right >= 0) {
+                separator_key := leaf_first_key(table.pager, split_right);
+                ^ table_internal_result_split(separator_key, split_right);
             }
-            separator_key := leaf_first_key(table.pager, split_right);
-            inserted := table_internal_insert_separator(table, separator_key, split_right);
+        }
+        ^ table_internal_result_err(wrote);
+    }
+    ? (page_kind == "I") {
+        child_page := table_internal_child_for_key_in_page(table, page_id, key);
+        child_result := table_insert_page(table, child_page, key, payload);
+        ? (child_result == "ok") {
+            ^ child_result;
+        }
+        ? (table_internal_result_is_split(child_result)) {
+            separator_key := table_internal_result_separator(child_result);
+            split_right := table_internal_result_right_page(child_result);
+            inserted := table_internal_insert_separator_in_page(table, page_id, separator_key, split_right);
             ? (inserted >= 0) {
-                ^ inserted;
+                ^ table_internal_result_ok();
             }
-            ^ -4;
+            ? (inserted == -1) {
+                ^ table_internal_split_insert_separator_in_page(table, page_id, separator_key, split_right);
+            }
+            ^ table_internal_result_err(inserted);
         }
-        ^ wrote;
+        ^ child_result;
     }
-    ^ -5;
+    ^ table_internal_result_err(-5);
 }
 
-@table_get(table: Table, key: i64) -> text {
-    root_kind := table_root_kind(table);
-    ? (root_kind == "L") {
-        ^ leaf_read_by_key(table.pager, table.root_page, key);
+@table_insert(table: Table, key: i64, payload: text) -> i64 {
+    result := table_insert_page(table, table.root_page, key, payload);
+    ? (result == "ok") {
+        ^ 0;
     }
-    ? (root_kind == "I") {
-        child_page := table_internal_child_for_key(table, key);
-        ^ leaf_read_by_key(table.pager, child_page, key);
+    ? (table_internal_result_is_split(result)) {
+        separator_key := table_internal_result_separator(result);
+        right_page := table_internal_result_right_page(result);
+        ^ table_promote_root_split(table, separator_key, right_page);
+    }
+    first_colon := find(result, ":");
+    ? (first_colon >= 0) {
+        code_text := slice(result, first_colon + 1, count(result) - (first_colon + 1));
+        ^ i64_of(code_text);
+    }
+    ^ -9;
+}
+
+@table_update_page(table: Table, page_id: i64, key: i64, payload: text) -> i64 {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ leaf_update_key(table.pager, page_id, key, payload);
+    }
+    ? (page_kind == "I") {
+        child_page := table_internal_child_for_key_in_page(table, page_id, key);
+        ^ table_update_page(table, child_page, key, payload);
+    }
+    ^ -1;
+}
+
+@table_update(table: Table, key: i64, payload: text) -> i64 {
+    ^ table_update_page(table, table.root_page, key, payload);
+}
+
+@table_put_page(table: Table, page_id: i64, key: i64, payload: text) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        wrote := leaf_put_key(table.pager, page_id, key, payload);
+        ? (wrote >= 0) {
+            ^ table_internal_result_ok();
+        }
+        ? (wrote == -1) {
+            split_right := leaf_split_insert_key(table.pager, page_id, key, payload);
+            ? (split_right >= 0) {
+                separator_key := leaf_first_key(table.pager, split_right);
+                ^ table_internal_result_split(separator_key, split_right);
+            }
+        }
+        ^ table_internal_result_err(wrote);
+    }
+    ? (page_kind == "I") {
+        child_page := table_internal_child_for_key_in_page(table, page_id, key);
+        child_result := table_put_page(table, child_page, key, payload);
+        ? (child_result == "ok") {
+            ^ child_result;
+        }
+        ? (table_internal_result_is_split(child_result)) {
+            separator_key := table_internal_result_separator(child_result);
+            split_right := table_internal_result_right_page(child_result);
+            inserted := table_internal_insert_separator_in_page(table, page_id, separator_key, split_right);
+            ? (inserted >= 0) {
+                ^ table_internal_result_ok();
+            }
+            ? (inserted == -1) {
+                ^ table_internal_split_insert_separator_in_page(table, page_id, separator_key, split_right);
+            }
+            ^ table_internal_result_err(inserted);
+        }
+        ^ child_result;
+    }
+    ^ table_internal_result_err(-5);
+}
+
+@table_put(table: Table, key: i64, payload: text) -> i64 {
+    result := table_put_page(table, table.root_page, key, payload);
+    ? (result == "ok") {
+        ^ 0;
+    }
+    ? (table_internal_result_is_split(result)) {
+        separator_key := table_internal_result_separator(result);
+        right_page := table_internal_result_right_page(result);
+        ^ table_promote_root_split(table, separator_key, right_page);
+    }
+    first_colon := find(result, ":");
+    ? (first_colon >= 0) {
+        code_text := slice(result, first_colon + 1, count(result) - (first_colon + 1));
+        ^ i64_of(code_text);
+    }
+    ^ -9;
+}
+
+@table_get_page(table: Table, page_id: i64, key: i64) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ leaf_read_by_key(table.pager, page_id, key);
+    }
+    ? (page_kind == "I") {
+        child_page := table_internal_child_for_key_in_page(table, page_id, key);
+        ^ table_get_page(table, child_page, key);
     }
     ^ "";
 }
 
-@table_delete(table: Table, key: i64) -> i64 {
-    root_kind := table_root_kind(table);
-    ? (root_kind == "L") {
-        ^ leaf_delete_key(table.pager, table.root_page, key);
+@table_get(table: Table, key: i64) -> text {
+    ^ table_get_page(table, table.root_page, key);
+}
+
+@table_delete_page(table: Table, page_id: i64, key: i64) -> i64 {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ leaf_delete_key(table.pager, page_id, key);
     }
-    ? (root_kind == "I") {
-        child_page := table_internal_child_for_key(table, key);
-        ^ leaf_delete_key(table.pager, child_page, key);
+    ? (page_kind == "I") {
+        child_page := table_internal_child_for_key_in_page(table, page_id, key);
+        ^ table_delete_page(table, child_page, key);
     }
     ^ -1;
+}
+
+@table_delete(table: Table, key: i64) -> i64 {
+    ^ table_delete_page(table, table.root_page, key);
 }
 
 @table_scan_leaf_text(table: Table, page_id: i64, separator: text) -> text {
@@ -262,20 +455,20 @@
     ^ out;
 }
 
-@table_scan_text(table: Table, separator: text) -> text {
-    root_kind := table_root_kind(table);
-    ? (root_kind == "L") {
-        ^ table_scan_leaf_text(table, table.root_page, separator);
+@table_scan_page_text(table: Table, page_id: i64, separator: text) -> text {
+    page_kind := table_page_kind(table, page_id);
+    ? (page_kind == "L") {
+        ^ table_scan_leaf_text(table, page_id, separator);
     }
-    ? (root_kind == "I") {
-        page := pager_read_page(table.pager, table.root_page);
+    ? (page_kind == "I") {
+        page := pager_read_page(table.pager, page_id);
         key_count := table_internal_key_count(page);
         used_cells := table_internal_used_cells(page);
-        out := table_scan_leaf_text(table, table_internal_left_child(page), separator);
+        out := table_scan_page_text(table, table_internal_left_child(page), separator);
         cell_index := 0;
         ~ (cell_index < key_count) {
             cell := table_internal_cell_at(used_cells, cell_index);
-            child_text := table_scan_leaf_text(table, table_internal_cell_child(cell), separator);
+            child_text := table_scan_page_text(table, table_internal_cell_child(cell), separator);
             ? (count(child_text) > 0) {
                 ? (count(out) > 0) {
                     out = out + separator;
@@ -287,6 +480,10 @@
         ^ out;
     }
     ^ "";
+}
+
+@table_scan_text(table: Table, separator: text) -> text {
+    ^ table_scan_page_text(table, table.root_page, separator);
 }
 
 @table_sync(table: Table) -> bool {

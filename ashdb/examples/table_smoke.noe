@@ -6,7 +6,7 @@
         ^ 1;
     }
 
-    table := table_open(arg(1), 96, 20);
+    table := table_open(arg(1), 64, 20);
     put0 := table_put(table, 10, "alpha");
     put1 := table_put(table, 20, "bravo");
     put2 := table_put(table, 30, "charlie");
@@ -28,7 +28,7 @@
     synced0 := table_sync(table);
     closed0 := table_close(table);
 
-    reopened := table_open(arg(1), 96, 20);
+    reopened := table_open(arg(1), 64, 20);
     root_kind1 := table_root_kind(reopened);
     again0 := table_get(reopened, 10);
     again1 := table_get(reopened, 20);

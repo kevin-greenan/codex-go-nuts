@@ -180,6 +180,22 @@
     ^ table_put(table, key, payload);
 }
 
+@db_insert(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ -1;
+    }
+    ^ table_insert(table, key, payload);
+}
+
+@db_update(db: DB, table_name: text, key: i64, payload: text) -> i64 {
+    table := db_bind_table(db, table_name);
+    ? (table.root_page < 0 or table.slot_width < 0) {
+        ^ -1;
+    }
+    ^ table_update(table, key, payload);
+}
+
 @db_get(db: DB, table_name: text, key: i64) -> text {
     table := db_bind_table(db, table_name);
     ? (table.root_page < 0 or table.slot_width < 0) {
